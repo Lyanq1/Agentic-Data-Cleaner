@@ -12,8 +12,12 @@ def get_engine():
     global _engine
     if _engine is None:
         settings = get_settings()
+        url = settings.postgres_url
+        if url.startswith("postgresql://"):
+            url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        
         _engine = create_async_engine(
-            settings.postgres_url,
+            url,
             pool_size=settings.postgres_pool_size,
             max_overflow=settings.postgres_max_overflow,
             echo=settings.debug,
