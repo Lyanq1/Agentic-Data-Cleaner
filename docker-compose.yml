@@ -1,0 +1,66 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: agentic-data-cleaner-postgres
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: agentic_data_cleaner_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - agentic_data_cleaner_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d agentic_data_cleaner_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 8
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    container_name: agentic-data-cleaner-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  api:
+    profiles: ["full"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: agentic-data-cleaner-api
+    ports:
+      - "8000:8000"
+    environment:
+      POSTGRES_URL: postgresql://user:password@postgres:5432/agentic_data_cleaner_db
+      REDIS_URL: redis://redis:6379/0
+      UPLOAD_DIR: /app/data/uploads
+      OUTPUT_DIR: /app/data/outputs
+      API_HOST: 0.0.0.0
+      API_PORT: "8000"
+      # Biến còn lại lấy từ file `.env` ở thư mục project (Compose tự đọc cho interpolation).
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      DEFAULT_LLM_PROVIDER: ${DEFAULT_LLM_PROVIDER:-openai}
+      DEFAULT_LLM_MODEL: ${DEFAULT_LLM_MODEL:-gpt-4o}
+      LANGCHAIN_TRACING_V2: ${LANGCHAIN_TRACING_V2:-false}
+      LANGCHAIN_API_KEY: ${LANGCHAIN_API_KEY:-}
+      LANGCHAIN_PROJECT: ${LANGCHAIN_PROJECT:-agentic-data-cleaner}
+    volumes:
+      - agentic-data-cleaner-uploads:/app/data/uploads
+      - agentic-data-cleaner-outputs:/app/data/outputs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  agentic_data_cleaner_pgdata:
+  agentic-data-cleaner-uploads:
+  agentic-data-cleaner-outputs:
