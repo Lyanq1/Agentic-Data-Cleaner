@@ -11,9 +11,10 @@ from app.tools.data.normalize_columns import normalize_columns
 from app.tools.storage.save_to_postgres import save_to_postgres
 from app.tools.storage.save_to_file import save_to_file
 from app.tools.external.http_client import call_external_api
+from app.tools.data.eda import perform_eda
 
 # ── Per-agent tool sets ──
-PROFILER_TOOLS = [read_file, profile_dataframe]
+PROFILER_TOOLS = [read_file, profile_dataframe, perform_eda]
 CLEANER_TOOLS = [read_file, clean_nulls, remove_duplicates, normalize_columns]
 VALIDATOR_TOOLS = [read_file]
 TRANSFORMER_TOOLS = [read_file, normalize_columns, call_external_api]
