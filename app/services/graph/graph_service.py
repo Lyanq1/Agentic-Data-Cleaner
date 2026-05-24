@@ -2,7 +2,7 @@
 from typing import AsyncGenerator
 from app.graphs.builder import build_graph
 from app.graphs.checkpointer import get_checkpointer
-from app.graphs.state import AgentState
+from app.graphs.states.graph_state import AgentState
 from app.core.config import get_settings
 from app.core.logging import get_logger
 
@@ -10,7 +10,7 @@ logger = get_logger(__name__)
 
 
 class GraphService:
-    """Bridge between the FastAPI layer and the LangGraph graph."""
+    """Bridge between the FastAPI layer and LangGraph graph."""
 
     def _make_config(self, thread_id: str) -> dict:
         """Build the LangGraph run config for a given job/thread."""

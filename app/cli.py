@@ -35,7 +35,7 @@ def run_job(
     """Trigger a data cleaning job from the CLI (without API server)."""
     import asyncio
     import json
-    from app.services.graph_service import GraphService
+    from app.services.graph.graph_service import GraphService
 
     async def _run():
         import uuid

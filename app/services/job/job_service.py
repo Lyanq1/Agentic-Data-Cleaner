@@ -2,7 +2,8 @@
 import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.models.db.job import Job, JobStatus
+from app.models.db.job import Job
+from app.core.constants import JobStatus
 from app.models.schemas.job import JobCreate
 from app.core.logging import get_logger
 

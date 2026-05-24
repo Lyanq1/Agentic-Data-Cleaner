@@ -1,7 +1,7 @@
 """Pydantic schemas for Job API endpoints."""
 from datetime import datetime
 from pydantic import BaseModel, Field
-from app.models.db.job import JobStatus
+from app.core.constants import JobStatus
 
 
 class JobCreate(BaseModel):

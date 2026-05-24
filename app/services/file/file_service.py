@@ -2,10 +2,10 @@
 from pathlib import Path
 from app.core.config import get_settings
 from app.core.logging import get_logger
+from app.core.constants import InputFormat
 
 logger = get_logger(__name__)
-ALLOWED_EXTENSIONS = {".csv", ".xlsx", ".xls", ".parquet"}
-
+ALLOWED_EXTENSIONS = {".csv", ".xlsx", ".xls"}
 
 class FileService:
     """Handles file uploads and path management."""

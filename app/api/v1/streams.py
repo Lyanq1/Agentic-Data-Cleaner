@@ -3,9 +3,9 @@ import json
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from app.api.dependencies import get_graph_service, get_job_service
-from app.models.db.job import JobStatus
-from app.services.graph_service import GraphService
-from app.services.job_service import JobService
+from app.core.constants import JobStatus
+from app.services.graph.graph_service import GraphService
+from app.services.job.job_service import JobService
 
 router = APIRouter()
 

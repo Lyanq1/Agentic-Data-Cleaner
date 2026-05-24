@@ -5,7 +5,7 @@ DO NOT register this template agent (it is not in AgentRegistry by default).
 from app.agents.base import BaseAgent
 from app.core.llm_factory import create_llm
 from app.core.logging import get_logger
-from app.graphs.state import AgentState
+from app.graphs.states.graph_state import AgentState
 from app.models.schemas.agent import AgentOutput
 
 logger = get_logger(__name__)

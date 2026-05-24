@@ -6,7 +6,7 @@ Each node function:
 3. Returns a state delta dict (partial update)
 """
 from langgraph.types import interrupt
-from app.graphs.state import AgentState
+from app.graphs.states.graph_state import AgentState
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)

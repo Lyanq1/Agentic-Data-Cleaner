@@ -7,7 +7,7 @@ Usage:
 """
 from langgraph.graph import END, StateGraph
 from langgraph.checkpoint.base import BaseCheckpointSaver
-from app.graphs.state import AgentState
+from app.graphs.states.graph_state import AgentState
 from app.graphs.edges import supervisor_router
 from app.graphs.nodes import (
     supervisor_node,

@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 from app.models.schemas.agent import AgentInput, AgentOutput
 
 if TYPE_CHECKING:
-    from app.graphs.state import AgentState
+    from app.graphs.states.graph_state import AgentState
 
 
 class BaseAgent(ABC):

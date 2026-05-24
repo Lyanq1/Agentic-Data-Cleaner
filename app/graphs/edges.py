@@ -4,7 +4,7 @@ Each function receives the current AgentState and returns the name
 of the next node to execute (or END to finish the graph).
 """
 from langgraph.graph import END
-from app.graphs.state import AgentState
+from app.graphs.states.graph_state import AgentState
 
 # Sentinel value used when the graph should terminate
 FINISH = END

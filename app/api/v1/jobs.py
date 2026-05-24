@@ -2,11 +2,11 @@
 import asyncio
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from app.api.dependencies import get_file_service, get_graph_service, get_job_service
-from app.models.db.job import JobStatus
+from app.core.constants import JobStatus
 from app.models.schemas.job import JobCreate, JobListResponse, JobResponse
-from app.services.file_service import FileService
-from app.services.graph_service import GraphService
-from app.services.job_service import JobService
+from app.services.file.file_service import FileService
+from app.services.graph.graph_service import GraphService
+from app.services.job.job_service import JobService
 from app.core.logging import get_logger
 
 router = APIRouter()

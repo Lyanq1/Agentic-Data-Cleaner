@@ -3,17 +3,7 @@ import uuid
 from sqlalchemy import JSON, String, Text, Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column
 from app.models.db.base import Base, TimestampMixin
-import enum
-
-
-class JobStatus(str, enum.Enum):
-    PENDING = "pending"
-    RUNNING = "running"
-    WAITING_FOR_HUMAN = "waiting_for_human"  # HITL pause
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-
+from app.core.constants import JobStatus
 
 class Job(Base, TimestampMixin):
     """Represents a single agent pipeline run."""
