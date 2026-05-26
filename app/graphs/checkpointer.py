@@ -1,31 +1,56 @@
-"""LangGraph Postgres checkpointer setup for state persistence.
+"""LangGraph Postgres checkpointer, managed by ``CheckpointerManager``.
 
-Uses `langgraph-checkpoint-postgres` to store graph snapshots in Postgres,
+Uses ``langgraph-checkpoint-postgres`` to store graph snapshots in Postgres,
 enabling HITL resume, fault tolerance, and long-running workflows.
 """
 from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from app.core.config import get_settings
-from app.core.logging import get_logger
 
-logger = get_logger(__name__)
+class CheckpointerManager:
+    """Manages the lifecycle of the LangGraph Postgres checkpointer.
 
-_checkpointer: AsyncPostgresSaver | None = None
+    Use the module-level ``get_checkpointer_manager()`` to obtain the singleton.
 
+    Example::
 
-@asynccontextmanager
-async def get_checkpointer():
-    """Context manager yielding an AsyncPostgresSaver instance.
-
-    Usage:
-        async with get_checkpointer() as cp:
+        async with get_checkpointer_manager().get() as cp:
             graph = builder.compile(checkpointer=cp)
     """
-    settings = get_settings()
-    # AsyncPostgresSaver expects a raw psycopg connection string
-    conn_str = settings.postgres_url.replace("+asyncpg", "")
-    async with AsyncPostgresSaver.from_conn_string(conn_str) as checkpointer:
-        # Create checkpointing tables if they don't exist
-        await checkpointer.setup()
-        logger.info("LangGraph checkpointer ready", backend="postgres")
-        yield checkpointer
+
+    @asynccontextmanager
+    async def get(self) -> AsyncIterator[AsyncPostgresSaver]:
+        """Async context manager yielding a ready ``AsyncPostgresSaver``.
+
+        Creates the checkpointing tables on first use if they don't exist.
+        """
+        settings = get_settings()
+        # AsyncPostgresSaver expects a raw psycopg connection string
+        conn_str = settings.postgres_url.replace("+asyncpg", "")
+        async with AsyncPostgresSaver.from_conn_string(conn_str) as checkpointer:
+            await checkpointer.setup()
+            yield checkpointer
+
+
+# ── Module-level singleton ────────────────────────────────────────────────────
+
+_checkpointer_manager: CheckpointerManager | None = None
+
+
+def get_checkpointer_manager() -> CheckpointerManager:
+    """Return the cached ``CheckpointerManager`` singleton."""
+    global _checkpointer_manager
+    if _checkpointer_manager is None:
+        _checkpointer_manager = CheckpointerManager()
+    return _checkpointer_manager
+
+
+# ── Backward-compatible shim ──────────────────────────────────────────────────
+
+@asynccontextmanager
+async def get_checkpointer() -> AsyncIterator[AsyncPostgresSaver]:
+    """Backward-compatible shim — prefer ``get_checkpointer_manager().get()``."""
+    async with get_checkpointer_manager().get() as cp:
+        yield cp
+

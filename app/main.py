@@ -2,27 +2,20 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from app.core.config import get_settings
-from app.core.logging import configure_logging, get_logger
 from app.core.database import close_engine
 from app.core.redis_client import close_redis
 from app.api.middleware import register_middleware
 from app.api.v1.router import v1_router
 
-logger = get_logger(__name__)
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan: startup and shutdown hooks."""
     # ── Startup ──
-    configure_logging()
     settings = get_settings()
-    logger.info("Starting Agentic Data Cleaner", version=settings.app_version)
     # TODO: run Alembic migrations on startup (optional)
     # TODO: warm up LLM connection pool
     yield
     # ── Shutdown ──
-    logger.info("Shutting down Agentic Data Cleaner")
     await close_engine()
     await close_redis()
 

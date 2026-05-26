@@ -1,1 +1,1 @@
-"""Database ORM models and Pydantic schemas."""
+"""Data models for the application."""

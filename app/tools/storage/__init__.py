@@ -1,1 +1,1 @@
-"""Storage tools: save results to Postgres or filesystem."""
+"""Storage tools: save results to filesystem."""

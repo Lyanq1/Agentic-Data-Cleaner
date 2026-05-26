@@ -10,12 +10,9 @@ The Supervisor uses this registry to know which agents are available.
 from typing import TYPE_CHECKING, Type
 
 from app.agents.base import BaseAgent
-from app.core.logging import get_logger
 
 if TYPE_CHECKING:
     pass
-
-logger = get_logger(__name__)
 
 
 class AgentRegistry:
@@ -31,7 +28,6 @@ class AgentRegistry:
                 f"{agent_class} must define a non-empty `name` class attribute"
             )
         cls._registry[agent_class.name] = agent_class
-        logger.debug("Agent registered", agent_name=agent_class.name)
         return agent_class
 
     @classmethod

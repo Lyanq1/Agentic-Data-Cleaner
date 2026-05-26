@@ -1,9 +1,6 @@
 """Custom FastAPI middleware: CORS, request logging."""
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.core.logging import get_logger
-
-logger = get_logger(__name__)
 
 
 def register_middleware(app: FastAPI) -> None:

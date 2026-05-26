@@ -1,87 +1,58 @@
-"""Graph builder — assembles and compiles the LangGraph StateGraph.
-
-Usage:
-    async with get_checkpointer() as cp:
-        graph = build_graph(checkpointer=cp)
-        result = await graph.ainvoke(initial_state, config={"configurable": {"thread_id": job_id}})
-"""
+"""Graph builder — assembles and compiles the LangGraph ``StateGraph``."""
 from langgraph.graph import END, StateGraph
 from langgraph.checkpoint.base import BaseCheckpointSaver
-from app.graphs.states.graph_state import AgentState
-from app.graphs.edges import supervisor_router
-from app.graphs.nodes import (
-    supervisor_node,
-    profiler_node,
-    cleaner_node,
-    validator_node,
-    transformer_node,
-    reporter_node,
-    error_node,
-)
-from app.core.config import get_settings
-
-# Node name constants — import these elsewhere instead of using raw strings
-SUPERVISOR = "supervisor_node"
-PROFILER = "profiler_node"
-CLEANER = "cleaner_node"
-VALIDATOR = "validator_node"
-TRANSFORMER = "transformer_node"
-REPORTER = "reporter_node"
-ERROR = "error_node"
-END_REJECTED = "end_rejected"
+from app.graphs.states.graph_state import GlobalState
+from app.graphs.edges import EdgeRouter
+from app.graphs.nodes import NodeRegistry, get_node_registry
 
 
-def build_graph(checkpointer: BaseCheckpointSaver | None = None):
-    """Build and compile the multi-agent StateGraph.
+class GraphBuilder:
+    """Assembles and compiles the ``StateGraph``."""
 
-    Args:
-        checkpointer: Optional checkpoint saver for state persistence & HITL.
+    def __init__(self, node_registry: NodeRegistry | None = None) -> None:
+        self._node_registry = node_registry or get_node_registry()
 
-    Returns:
-        A compiled CompiledStateGraph ready for invocation.
-    """
-    settings = get_settings()
-    builder = StateGraph(AgentState)
+    def build(self, checkpointer: BaseCheckpointSaver | None = None):
+        """Build and compile the ``StateGraph``.
 
-    # ── Register nodes ──
-    builder.add_node(SUPERVISOR, supervisor_node)
-    builder.add_node(PROFILER, profiler_node)
-    builder.add_node(CLEANER, cleaner_node)
-    builder.add_node(VALIDATOR, validator_node)
-    builder.add_node(TRANSFORMER, transformer_node)
-    builder.add_node(REPORTER, reporter_node)
-    builder.add_node(ERROR, error_node)
+        Args:
+            checkpointer: Optional checkpoint saver for state persistence.
 
-    # END_REJECTED is a terminal state (no-op node)
-    builder.add_node(END_REJECTED, lambda state: state)
+        Returns:
+            A compiled ``CompiledStateGraph`` ready for invocation.
+        """
+        builder = StateGraph(GlobalState)
+        nodes = self._node_registry.as_dict()
 
-    # ── Entry point ──
-    builder.set_entry_point(SUPERVISOR)
+        # ── Register nodes ────────────────────────────────────────────────────
+        for name, fn in nodes.items():
+            builder.add_node(name, fn)
 
-    # ── Supervisor routes to worker agents ──
-    builder.add_conditional_edges(
-        SUPERVISOR,
-        supervisor_router,
-        {
-            PROFILER: PROFILER,
-            CLEANER: CLEANER,
-            VALIDATOR: VALIDATOR,
-            TRANSFORMER: TRANSFORMER,
-            REPORTER: REPORTER,
-            END: END,
-        },
-    )
+        # ── Entry point ───────────────────────────────────────────────────────
+        builder.set_entry_point("template_node")
 
-    # ── Worker agents return to supervisor after completion ──
-    for worker in [PROFILER, CLEANER, VALIDATOR, TRANSFORMER, REPORTER]:
-        builder.add_edge(worker, SUPERVISOR)
+        # ── Routing ───────────────────────────────────────────────────────────
+        builder.add_conditional_edges(
+            "template_node",
+            EdgeRouter.template_router,
+            {
+                END: END,
+                # Add other nodes here if template_node returns them
+            },
+        )
 
-    # ── Error + rejected terminal edges ──
-    builder.add_edge(ERROR, END)
-    builder.add_edge(END_REJECTED, END)
+        return builder.compile(checkpointer=checkpointer)
 
-    return builder.compile(
-        checkpointer=checkpointer,
-        # interrupt_before is handled inside nodes via interrupt() for finer control
-        # but you can also use interrupt_before=[CLEANER, TRANSFORMER] here
-    )
+
+# ── Module-level singleton factory ────────────────────────────────────────────
+
+_graph_builder: GraphBuilder | None = None
+
+def get_graph_builder(node_registry: NodeRegistry | None = None) -> GraphBuilder:
+    """Return a ``GraphBuilder`` instance."""
+    global _graph_builder
+    if node_registry is not None:
+        return GraphBuilder(node_registry=node_registry)
+    if _graph_builder is None:
+        _graph_builder = GraphBuilder()
+    return _graph_builder
