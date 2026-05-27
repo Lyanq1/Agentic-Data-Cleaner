@@ -1,23 +1,15 @@
-"""Conditional edge functions for routing, grouped in ``EdgeRouter``."""
+"""Conditional edge functions for routing.
+
+Currently unused — the initial pipeline (profiler → input_validator) is linear.
+Add routing functions here when branching logic is needed.
+"""
 from langgraph.graph import END
 from app.graphs.states.graph_state import GlobalState
 
-class EdgeRouter:
-    """Namespace for all LangGraph conditional edge routing functions."""
 
-    @staticmethod
-    def template_router(state: GlobalState) -> str:
-        """Route to the next node based on the state.
-        
-        Args:
-            state: The current global state.
-            
-        Returns:
-            The name of the next node to execute, or END.
-        """
-        next_node = state.get("next_node")
-        
-        if next_node == "end" or not next_node:
-            return END
-            
-        return next_node
+def route_by_next_node(state: GlobalState) -> str:
+    """Generic router: read ``next_node`` from state and route accordingly."""
+    next_node = state.get("next_node")
+    if next_node == "end" or not next_node:
+        return END
+    return next_node

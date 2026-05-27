@@ -1,0 +1,102 @@
+"""Pipeline service — orchestrates the LangGraph execution."""
+import uuid
+import logging
+from typing import Any
+
+from app.graphs.graph import build_graph
+from app.graphs.checkpointer import get_checkpointer_manager
+
+logger = logging.getLogger(__name__)
+
+
+async def run_pipeline(
+    run_id: str,
+    canonical_path: str,
+    input_format: str,
+    user_prompt: str = "",
+    original_filename: str = "",
+) -> dict[str, Any]:
+    """Run the profiler → input_validator pipeline on a canonical Parquet dataset.
+
+    Args:
+        run_id: Unique identifier for this pipeline run.
+        canonical_path: Path to the canonical Parquet file (output of ingestion).
+        input_format: Original file format before conversion (csv/excel/json).
+        user_prompt: Optional user instruction for the cleaning task.
+        original_filename: Original uploaded filename for reference.
+
+    Returns:
+        Dict with run_id and the final state snapshot.
+    """
+    initial_state = {
+        "messages": [],
+        "dataset_path": canonical_path,
+        "user_prompt": user_prompt,
+        "project_id": run_id,
+    }
+
+    config = {"configurable": {"thread_id": run_id}}
+
+    async with get_checkpointer_manager().get() as checkpointer:
+        graph = build_graph(checkpointer=checkpointer)
+
+        logger.info(f"Pipeline started — run_id={run_id}, file={original_filename}")
+        final_state = await graph.ainvoke(initial_state, config=config)
+        logger.info(f"Pipeline finished — run_id={run_id}")
+
+    # Extract the last AI message (validation report)
+    validation_report = None
+    for msg in reversed(final_state.get("messages", [])):
+        if hasattr(msg, "name") and msg.name == "input_validator":
+            validation_report = msg.content
+            break
+
+    return {
+        "run_id": run_id,
+        "original_filename": original_filename,
+        "input_format": input_format,
+        "canonical_path": canonical_path,
+        "data_profile": final_state.get("data_profile"),
+        "validation_report": validation_report,
+        "completed_steps": final_state.get("completed_steps", []),
+    }
+
+
+async def get_pipeline_state(run_id: str) -> dict[str, Any] | None:
+    """Retrieve the current state of a pipeline run from the checkpointer.
+
+    Args:
+        run_id: The run/thread ID to look up.
+
+    Returns:
+        Dict with current state, or None if not found.
+    """
+    config = {"configurable": {"thread_id": run_id}}
+
+    async with get_checkpointer_manager().get() as checkpointer:
+        graph = build_graph(checkpointer=checkpointer)
+        snapshot = await graph.aget_state(config)
+
+    if not snapshot or not snapshot.values:
+        return None
+
+    state = snapshot.values
+
+    # Extract validation report from messages
+    validation_report = None
+    for msg in reversed(state.get("messages", [])):
+        if hasattr(msg, "name") and msg.name == "input_validator":
+            validation_report = msg.content
+            break
+
+    return {
+        "run_id": run_id,
+        "dataset_path": state.get("dataset_path"),
+        "user_prompt": state.get("user_prompt"),
+        "data_profile": state.get("data_profile"),
+        "validation_report": validation_report,
+        "current_step": state.get("current_step"),
+        "completed_steps": state.get("completed_steps", []),
+        "errors": state.get("global_errors", []),
+        "next_node": snapshot.next,  # which node would run next (empty if done)
+    }

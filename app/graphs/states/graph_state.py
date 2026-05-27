@@ -23,6 +23,7 @@ class GlobalState(TypedDict):
     # project context & configuration
     project_id: Optional[str]
     dataset_path: Optional[str]
+    user_prompt: Optional[str]  # original user instruction
     
     # centralized data references
     dataset_schema: Optional[Dict[str, Any]]

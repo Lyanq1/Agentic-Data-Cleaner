@@ -1,12 +1,26 @@
-"""Abstract base class for all agents."""
+"""Abstract base class and shared types for all agents."""
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING
+from dataclasses import dataclass, field
+from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from app.graphs.states.graph_state import AgentState
+    from app.graphs.states.graph_state import GlobalState
+
+
+@dataclass
+class AgentOutput:
+    """Standard output returned by every agent's ``run()`` method."""
+
+    agent_name: str
+    success: bool
+    data: dict[str, Any] = field(default_factory=dict)
+    next_agent: str | None = None  # routing hint for the supervisor
+    error: str | None = None
 
 
 class BaseAgent(ABC):
+    """Base class that all agents inherit from."""
+
     # Subclasses MUST set these class-level attributes
     name: str = "base_agent"
     description: str = "Override this in subclasses"
@@ -15,26 +29,23 @@ class BaseAgent(ABC):
     tools: list = []
 
     def __init__(self) -> None:
-        """Build the LLM and bind tools declared in ``self.tools``."""
-        from app.core.llm_factory import get_llm_factory
-        self.llm = get_llm_factory().create_with_tools(self.tools)
+        """Build the LLM and optionally bind tools declared in ``self.tools``."""
+        from app.core.llm_factory import create_llm
+
+        base_llm = create_llm()
+        if self.tools:
+            self.llm = base_llm.bind_tools(self.tools)
+        else:
+            self.llm = base_llm
 
     @abstractmethod
-    async def run(self, state: "AgentState") -> AgentOutput:
+    async def run(self, state: "GlobalState") -> dict:
         """Execute the agent logic given the current graph state.
 
         Args:
-            state: Current AgentState snapshot.
+            state: Current GlobalState snapshot.
 
         Returns:
-            AgentOutput with results and optional routing hint.
+            A dict of state updates to merge back into GlobalState.
         """
         ...
-
-    async def astream(self, state: "AgentState"):
-        """Stream agent output token-by-token (optional, override in subclasses).
-
-        By default falls back to run().
-        """
-        result = await self.run(state)
-        yield result
