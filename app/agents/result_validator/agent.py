@@ -3,7 +3,7 @@ from app.agents.base import BaseAgent
 from app.agents.registry import AgentRegistry
 from app.agents.result_validator.prompts import VALIDATOR_SYSTEM_PROMPT
 from app.graphs.states.graph_state import AgentState
-from app.tools.registry import VALIDATOR_TOOLS
+from app.tools.tool_registration import VALIDATOR_TOOLS
 
 
 @AgentRegistry.auto_register

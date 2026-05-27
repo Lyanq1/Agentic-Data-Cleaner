@@ -1,11 +1,5 @@
 """FastAPI shared dependencies — injected via Depends()."""
-from collections.abc import AsyncGenerator
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
-from app.core.database import get_database_manager
+from app.core.redis_client import get_redis
 
-
-async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
-    """Yield a database session per request via ``DatabaseManager``."""
-    async for session in get_database_manager().get_session():
-        yield session
+# You can add FastAPI dependencies here as needed

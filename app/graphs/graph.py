@@ -5,33 +5,23 @@ from app.graphs.states.graph_state import GlobalState
 from app.graphs.edges import EdgeRouter
 from app.graphs.nodes import NodeRegistry, get_node_registry
 
-
 class GraphBuilder:
     """Assembles and compiles the ``StateGraph``."""
-
     def __init__(self, node_registry: NodeRegistry | None = None) -> None:
         self._node_registry = node_registry or get_node_registry()
 
     def build(self, checkpointer: BaseCheckpointSaver | None = None):
-        """Build and compile the ``StateGraph``.
-
-        Args:
-            checkpointer: Optional checkpoint saver for state persistence.
-
-        Returns:
-            A compiled ``CompiledStateGraph`` ready for invocation.
-        """
         builder = StateGraph(GlobalState)
         nodes = self._node_registry.as_dict()
 
-        # ── Register nodes ────────────────────────────────────────────────────
+        # Register nodes
         for name, fn in nodes.items():
             builder.add_node(name, fn)
 
-        # ── Entry point ───────────────────────────────────────────────────────
+        # Entry point 
         builder.set_entry_point("template_node")
 
-        # ── Routing ───────────────────────────────────────────────────────────
+        # Routing
         builder.add_conditional_edges(
             "template_node",
             EdgeRouter.template_router,
@@ -42,9 +32,6 @@ class GraphBuilder:
         )
 
         return builder.compile(checkpointer=checkpointer)
-
-
-# ── Module-level singleton factory ────────────────────────────────────────────
 
 _graph_builder: GraphBuilder | None = None
 

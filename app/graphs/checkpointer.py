@@ -6,7 +6,7 @@ enabling HITL resume, fault tolerance, and long-running workflows.
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-from app.core.config import get_settings
+from app.config.config import get_settings
 
 class CheckpointerManager:
     """Manages the lifecycle of the LangGraph Postgres checkpointer.
@@ -27,17 +27,14 @@ class CheckpointerManager:
         """
         settings = get_settings()
         # AsyncPostgresSaver expects a raw psycopg connection string
-        conn_str = settings.postgres_url.replace("+asyncpg", "")
+        conn_str = settings.postgres_url
         async with AsyncPostgresSaver.from_conn_string(conn_str) as checkpointer:
             await checkpointer.setup()
             yield checkpointer
 
 
-# ── Module-level singleton ────────────────────────────────────────────────────
-
+# Module-level singleton
 _checkpointer_manager: CheckpointerManager | None = None
-
-
 def get_checkpointer_manager() -> CheckpointerManager:
     """Return the cached ``CheckpointerManager`` singleton."""
     global _checkpointer_manager
@@ -45,9 +42,7 @@ def get_checkpointer_manager() -> CheckpointerManager:
         _checkpointer_manager = CheckpointerManager()
     return _checkpointer_manager
 
-
-# ── Backward-compatible shim ──────────────────────────────────────────────────
-
+# Backward-compatible shim
 @asynccontextmanager
 async def get_checkpointer() -> AsyncIterator[AsyncPostgresSaver]:
     """Backward-compatible shim — prefer ``get_checkpointer_manager().get()``."""

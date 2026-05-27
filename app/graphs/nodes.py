@@ -10,22 +10,8 @@ class NodeRegistry:
         pass
 
     async def template_node(self, state: GlobalState) -> dict:
-        """A minimal template for a LangGraph node.
-        
-        Args:
-            state: The current global state.
-            
-        Returns:
-            A dictionary containing partial updates to the state.
-        """
-        
-        # TODO: Implement your agent's logic here.
-        # Example: Call an LLM, run a tool, etc.
-        
-        # Return state updates
         return {
-            "next_node": "end",  # Set the next node to route to
-            # "messages": [...],
+            "next_node": "end",
         }
 
     def as_dict(self) -> dict[str, Callable]:
@@ -35,7 +21,7 @@ class NodeRegistry:
         }
 
 
-# ── Module-level singleton ────────────────────────────────────────────────────
+# Module-level singleton
 
 _node_registry: NodeRegistry | None = None
 

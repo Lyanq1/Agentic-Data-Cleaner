@@ -1,6 +1,6 @@
 """Async Redis client manager."""
 import redis.asyncio as redis
-from app.core.config import get_settings
+from app.config.config import get_settings
 
 _redis_client: redis.Redis | None = None
 
@@ -15,7 +15,6 @@ def get_redis() -> redis.Redis:
             decode_responses=True,
         )
     return _redis_client
-
 
 async def close_redis() -> None:
     """Close the Redis client gracefully."""

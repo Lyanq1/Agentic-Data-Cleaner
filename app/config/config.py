@@ -30,9 +30,7 @@ class Settings(BaseSettings):
     llm_max_tokens: int = 4096
 
     # ── Database ──
-    postgres_url: str = Field(default="postgresql+asyncpg://user:password@localhost:5432/agentic_data_cleaner_db")
-    postgres_pool_size: int = 10
-    postgres_max_overflow: int = 20
+    postgres_url: str = Field(default="postgresql://user:password@localhost:5432/agentic_data_cleaner_db")
 
     # ── Redis ──
     redis_url: str = Field(default="redis://localhost:6379/0")

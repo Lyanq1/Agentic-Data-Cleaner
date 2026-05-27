@@ -3,7 +3,7 @@ from app.agents.base import BaseAgent
 from app.agents.registry import AgentRegistry
 from app.agents.reporter.prompts import REPORTER_SYSTEM_PROMPT
 from app.graphs.states.graph_state import AgentState
-from app.tools.registry import REPORTER_TOOLS
+from app.tools.tool_registration import REPORTER_TOOLS
 
 @AgentRegistry.auto_register
 class ReporterAgent(BaseAgent):

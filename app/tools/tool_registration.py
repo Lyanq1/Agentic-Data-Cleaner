@@ -6,19 +6,11 @@ How to add a new tool:
    OR import the tool and add it to the existing ``register()`` calls below.
 """
 from app.tools.data.eda import perform_eda
-
+from agents.base import AgentRole 
 class ToolRegistry:
-    """Central registry mapping agent roles to their allowed tools.
-
-    Usage::
-
-        tool_registry.register(my_tool, agent_roles=["profiler"])
-        tools = tool_registry.get_tools("profiler")
-    """
-
     def __init__(self) -> None:
         self._by_role: dict[str, list] = {}
-        self._all: dict[str, object] = {}  # keyed by tool name for dedup
+        self._all: dict[str, object] = {}
 
     # Registration
     def register(self, tool, *, agent_roles: list[str]) -> None:
