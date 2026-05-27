@@ -28,6 +28,7 @@ class GlobalState(TypedDict):
     # centralized data references
     dataset_schema: Optional[Dict[str, Any]]
     data_profile: Optional[Dict[str, Any]]
+    validation_result: Optional[Dict[str, Any]]
     
     # cleaning plan & progress tracking
     cleaning_plan: Optional[List[str]]

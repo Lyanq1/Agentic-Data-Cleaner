@@ -44,20 +44,13 @@ async def run_pipeline(
         final_state = await graph.ainvoke(initial_state, config=config)
         logger.info(f"Pipeline finished — run_id={run_id}")
 
-    # Extract the last AI message (validation report)
-    validation_report = None
-    for msg in reversed(final_state.get("messages", [])):
-        if hasattr(msg, "name") and msg.name == "input_validator":
-            validation_report = msg.content
-            break
-
     return {
         "run_id": run_id,
         "original_filename": original_filename,
         "input_format": input_format,
         "canonical_path": canonical_path,
-        "data_profile": final_state.get("data_profile"),
-        "validation_report": validation_report,
+        # "data_profile": final_state.get("data_profile"),
+        "validation_result": final_state.get("validation_result"),
         "completed_steps": final_state.get("completed_steps", []),
     }
 
@@ -82,19 +75,12 @@ async def get_pipeline_state(run_id: str) -> dict[str, Any] | None:
 
     state = snapshot.values
 
-    # Extract validation report from messages
-    validation_report = None
-    for msg in reversed(state.get("messages", [])):
-        if hasattr(msg, "name") and msg.name == "input_validator":
-            validation_report = msg.content
-            break
-
     return {
         "run_id": run_id,
         "dataset_path": state.get("dataset_path"),
         "user_prompt": state.get("user_prompt"),
         "data_profile": state.get("data_profile"),
-        "validation_report": validation_report,
+        "validation_result": state.get("validation_result"),
         "current_step": state.get("current_step"),
         "completed_steps": state.get("completed_steps", []),
         "errors": state.get("global_errors", []),

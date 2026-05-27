@@ -11,18 +11,23 @@ from app.agents.input_validator.prompts import INPUT_VALIDATOR_SYSTEM_PROMPT
 logger = logging.getLogger(__name__)
 
 
+class ClarificationQuestion(BaseModel):
+    question: str = Field(description="The multiple-choice question asking for clarification.")
+    options: list[str] = Field(
+        description="Exactly 3 distinct options for the user to choose from.",
+        min_items=3,
+        max_items=3
+    )
+
 class ValidationResult(BaseModel):
     """Structured output expected from the Input Validator LLM."""
 
-    is_sufficient_context: bool = Field(
-        description="True if the user's intent and data context are clear enough to proceed. False if you must ask the user for clarification."
+    intent_description: str = Field(
+        description="A description of what the user wants to achieve based on their prompt and the actual dataset EDA profile."
     )
-    message: str = Field(
-        description="The message to show to the user. If is_sufficient_context=False, this must be a clarifying question. If True, a summary of the plan."
-    )
-    suggested_cleaning_steps: list[str] = Field(
+    clarification_questions: list[ClarificationQuestion] = Field(
         default_factory=list,
-        description="List of concrete technical cleaning steps to execute (if is_sufficient_context=True)."
+        description="A list of about 3 multiple-choice questions to clarify data cleaning decisions."
     )
 
 
@@ -80,21 +85,18 @@ class InputValidatorAgent(BaseAgent):
         structured_llm = self.llm.with_structured_output(ValidationResult)
         response: ValidationResult = await structured_llm.ainvoke(messages)
 
-        logger.info(f"InputValidatorAgent result: sufficient_context={response.is_sufficient_context}")
+        logger.info("InputValidatorAgent successfully parsed structured output.")
+
+        # Format the response into a JSON string for the message, 
+        # and also put the raw dict into state for the frontend to consume.
+        json_data = response.model_dump()
+        final_message = json.dumps(json_data, ensure_ascii=False, indent=2)
 
         # Update state based on decision
         updates: dict[str, Any] = {
-            "messages": [AIMessage(content=response.message, name=self.name)]
+            "messages": [AIMessage(content=final_message, name=self.name)],
+            "validation_result": json_data,
+            "next_node": "end" # Pause for human input
         }
-
-        if response.is_sufficient_context:
-            updates["cleaning_plan"] = response.suggested_cleaning_steps
-            # Transition to the next logical step (e.g., planner or end for now)
-            updates["next_node"] = "end" 
-        else:
-            # We need human input. The graph should stop here.
-            # Setting next_node to "end" stops execution so the user can reply.
-            # In a real HITL, you might route to a "human_node".
-            updates["next_node"] = "end"
 
         return updates
