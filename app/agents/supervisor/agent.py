@@ -3,7 +3,7 @@ import json
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from app.agents.base import BaseAgent
+from app.agents.base import AgentOutput, BaseAgent
 from app.agents.registry import AgentRegistry
 from app.agents.supervisor.prompts import SUPERVISOR_SYSTEM_PROMPT
 from app.graphs.states.graph_state import AgentState
