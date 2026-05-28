@@ -107,7 +107,7 @@ export const Header: React.FC<HeaderProps> = ({
 
         {runId && (
           <div className="hidden md:block text-[11px] text-muted-foreground font-mono truncate max-w-[200px] lg:max-w-xs shrink-0" title={runId}>
-            Run: {runId}…
+            Run ID: {runId}
           </div>
         )}
       </div>
