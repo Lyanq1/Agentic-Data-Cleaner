@@ -2,18 +2,19 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from app.config.config import get_settings
-from app.core.redis_client import close_redis
+from app.core.redis_client import close_redis, get_redis
 from app.api.middleware import register_middleware
 from app.api.v1.router import v1_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan: startup and shutdown hooks."""
+
     # Startup
     settings = get_settings()
-    # TODO: run Alembic migrations on startup (optional)
-    # TODO: warm up LLM connection pool
+    redis_client = get_redis()
     yield
+
     # Shutdown
     await close_redis()
 

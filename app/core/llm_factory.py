@@ -1,10 +1,10 @@
 """LLM factory — creates ChatModel instances from app settings."""
-import logging
+from langchain_openai import ChatOpenAI
 from langchain_core.language_models import BaseChatModel
 from app.config.config import get_settings
+import logging
 
 logger = logging.getLogger(__name__)
-
 
 def create_llm(
     provider: str | None = None,
@@ -17,7 +17,6 @@ def create_llm(
     temperature = temperature if temperature is not None else settings.llm_temperature
 
     if provider == "openai":
-        from langchain_openai import ChatOpenAI
 
         kwargs = {
             "model": model,

@@ -2,6 +2,7 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, TYPE_CHECKING
+from app.core.llm_factory import create_llm
 
 if TYPE_CHECKING:
     from app.graphs.states.graph_state import GlobalState
@@ -30,7 +31,6 @@ class BaseAgent(ABC):
 
     def __init__(self) -> None:
         """Build the LLM and optionally bind tools declared in ``self.tools``."""
-        from app.core.llm_factory import create_llm
 
         base_llm = create_llm()
         if self.tools:

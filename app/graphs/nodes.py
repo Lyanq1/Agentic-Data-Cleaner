@@ -1,8 +1,9 @@
 """Node functions for the LangGraph pipeline."""
 import logging
 from typing import Any
-
 from app.graphs.states.graph_state import GlobalState
+from app.agents.input_validator.agent import InputValidatorAgent
+from app.tools.data.eda import perform_eda
 
 logger = logging.getLogger(__name__)
 
@@ -13,7 +14,6 @@ async def profiler_node(state: GlobalState) -> dict[str, Any]:
     Reads ``dataset_path`` from state, calls ``perform_eda``, and writes
     the result into ``data_profile``.
     """
-    from app.tools.data.eda import perform_eda
 
     dataset_path = state.get("dataset_path")
     if not dataset_path:
@@ -45,7 +45,6 @@ async def profiler_node(state: GlobalState) -> dict[str, Any]:
 # Input validation node (gọi agent để phân tích data profile và đưa ra đánh giá về chất lượng dữ liệu)
 async def input_validator_node(state: GlobalState) -> dict[str, Any]:
     """Invoke the InputValidatorAgent to analyze the EDA profile via LLM."""
-    from app.agents.input_validator.agent import InputValidatorAgent
 
     agent = InputValidatorAgent()
     result = await agent.run(state)
