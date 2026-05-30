@@ -54,3 +54,90 @@ async def input_validator_node(state: GlobalState) -> dict[str, Any]:
         "current_step": "input_validation",
         "completed_steps": "input_validation",
     }
+
+# Planner node (Đề xuất kế hoạch làm sạch động)
+async def planner_node(state: GlobalState) -> dict[str, Any]:
+    """Skeletal Planner Node — generates task_list DAG and resets control flow indices."""
+    logger.info("planner_node: Generating cleaning plan and DAG task list...")
+    
+    # Establish a default DAG list of steps for the skeletal flow
+    default_tasks = ["deduplication", "null_handling", "type_casting"]
+    
+    return {
+        "task_list": default_tasks,
+        "current_task_idx": 0,
+        "retry_count": 0,
+        "current_step": "planning",
+        "completed_steps": "planning",
+    }
+
+# Supervisor node (Điều phối luồng chạy của các Worker)
+async def supervisor_node(state: GlobalState) -> dict[str, Any]:
+    """Skeletal Supervisor Node — increments indices and coordinates task steps."""
+    current_idx = state.get("current_task_idx", 0)
+    task_list = state.get("task_list", [])
+    
+    if current_idx < len(task_list):
+        active_task = task_list[current_idx]
+        logger.info(f"supervisor_node: Active task is '{active_task}' (index {current_idx}/{len(task_list)})")
+    else:
+        logger.info("supervisor_node: All tasks in DAG completed successfully.")
+        
+    return {
+        "current_step": "supervisor",
+        "completed_steps": "supervisor",
+    }
+
+# Deduplication Worker stub node
+async def dedup_agent_node(state: GlobalState) -> dict[str, Any]:
+    """Skeletal Deduplication Worker."""
+    logger.info("dedup_agent_node: Executing dataset deduplication checks...")
+    return {
+        "current_step": "deduplication",
+        "completed_steps": "deduplication",
+    }
+
+# Null Handling Worker stub node
+async def null_agent_node(state: GlobalState) -> dict[str, Any]:
+    """Skeletal Null Handling Worker."""
+    logger.info("null_agent_node: Imputing missing values in dataset...")
+    return {
+        "current_step": "null_handling",
+        "completed_steps": "null_handling",
+    }
+
+# Type Casting Worker stub node
+async def type_agent_node(state: GlobalState) -> dict[str, Any]:
+    """Skeletal Type Casting Worker."""
+    logger.info("type_agent_node: Applying strict type cast constraints...")
+    return {
+        "current_step": "type_casting",
+        "completed_steps": "type_casting",
+    }
+
+# Self-Correction Validator node
+async def validator_node(state: GlobalState) -> dict[str, Any]:
+    """Skeletal Validator Node — verifies worker outputs and processes retry counts."""
+    current_idx = state.get("current_task_idx", 0)
+    task_list = state.get("task_list", [])
+    active_task = task_list[current_idx] if current_idx < len(task_list) else "unknown"
+    
+    logger.info(f"validator_node: Validating outputs of step '{active_task}'... PASS")
+    
+    # In skeletal phase, we always transition to the next step
+    return {
+        "current_task_idx": current_idx + 1,
+        "retry_count": 0,
+        "current_step": "validation",
+        "completed_steps": "validation",
+    }
+
+# Final Report Generator node
+async def report_agent_node(state: GlobalState) -> dict[str, Any]:
+    """Skeletal Report Node — aggregates execution outcomes."""
+    logger.info("report_agent_node: Summarizing transformations and token metrics...")
+    return {
+        "current_step": "reporting",
+        "completed_steps": "reporting",
+    }
+
