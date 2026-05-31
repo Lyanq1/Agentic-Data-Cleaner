@@ -1,8 +1,9 @@
 """Node functions for the LangGraph pipeline."""
 import logging
 from typing import Any
-from app.graphs.states.global_state import GlobalState
+from app.graphs.states.global_state import GlobalState, StatisticalProfile
 from app.agents.input_validator.agent import InputValidatorAgent
+from app.agents.semantic_analyzer.profiler_agent import SemanticProfilerAgent
 from app.tools.data.eda import perform_eda
 
 logger = logging.getLogger(__name__)
@@ -26,6 +27,7 @@ async def profiler_node(state: GlobalState) -> dict[str, Any]:
     try:
         # perform_eda is a @tool — call .invoke() to get the dict result
         profile: dict = perform_eda.invoke({"file_path": dataset_path})
+        validated_profile = StatisticalProfile.model_validate(profile)
     except Exception as e:
         logger.error(f"profiler_node: EDA failed — {e}")
         return {
@@ -37,10 +39,15 @@ async def profiler_node(state: GlobalState) -> dict[str, Any]:
         f"{profile.get('total_rows', '?')} rows × {profile.get('total_columns', '?')} cols"
     )
     return {
-        "statistical_profile": profile,
+        "statistical_profile": validated_profile,
         "current_step": "profiling",
         "completed_steps": "profiling",
     }
+
+async def semantic_profile_node(state: GlobalState) -> dict[str, Any]:
+    """Profile detailed semantic properties of the dataset columns by logical group."""
+    agent = SemanticProfilerAgent()
+    return await agent.run(state)
 
 # Input validation node (gọi agent để phân tích data profile và đưa ra đánh giá về chất lượng dữ liệu)
 async def input_validator_node(state: GlobalState) -> dict[str, Any]:

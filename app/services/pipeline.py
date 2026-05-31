@@ -9,6 +9,30 @@ from app.graphs.checkpointer import get_checkpointer_manager
 logger = logging.getLogger(__name__)
 
 
+def _format_profile_for_frontend(profile: Any) -> dict[str, Any] | None:
+    if not profile:
+        return None
+    if hasattr(profile, "model_dump"):
+        profile_dict = profile.model_dump()
+    elif hasattr(profile, "dict"):
+        profile_dict = profile.dict()
+    elif isinstance(profile, dict):
+        import copy
+        profile_dict = copy.deepcopy(profile)
+    else:
+        return None
+
+    columns_list = profile_dict.get("columns", [])
+    columns_dict = {}
+    for col in columns_list:
+        col_name = col.get("column_name")
+        if col_name:
+            columns_dict[col_name] = col
+    
+    profile_dict["columns"] = columns_dict
+    return profile_dict
+
+
 async def run_pipeline(
     run_id: str,
     canonical_path: str,
@@ -44,12 +68,17 @@ async def run_pipeline(
         final_state = await graph.ainvoke(initial_state, config=config)
         logger.info(f"Pipeline finished — run_id={run_id}")
 
+    raw_profile = final_state.get("statistical_profile")
+    formatted_profile = _format_profile_for_frontend(raw_profile)
+
     return {
         "run_id": run_id,
         "original_filename": original_filename,
         "input_format": input_format,
         "canonical_path": canonical_path,
-        "statistical_profile": final_state.get("statistical_profile"),
+        "statistical_profile": raw_profile,
+        "data_profile": formatted_profile,
+        "semantic_profile": final_state.get("semantic_profile"),
         "input_validation_result": final_state.get("input_validation_result"),
         "completed_steps": final_state.get("completed_steps", []),
     }
@@ -74,12 +103,16 @@ async def get_pipeline_state(run_id: str) -> dict[str, Any] | None:
         return None
 
     state = snapshot.values
+    raw_profile = state.get("statistical_profile")
+    formatted_profile = _format_profile_for_frontend(raw_profile)
 
     return {
         "run_id": run_id,
         "dataset_path": state.get("dataset_path"),
         "user_prompt": state.get("user_prompt"),
-        "statistical_profile": state.get("statistical_profile"),
+        "statistical_profile": raw_profile,
+        "data_profile": formatted_profile,
+        "semantic_profile": state.get("semantic_profile"),
         "input_validation_result": state.get("input_validation_result"),
         "current_step": state.get("current_step"),
         "completed_steps": state.get("completed_steps", []),

@@ -6,6 +6,7 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from app.graphs.states.global_state import GlobalState
 from app.graphs.nodes import (
     profiler_node,
+    semantic_profile_node,
     input_validator_node,
     planner_node,
     supervisor_node,
@@ -42,7 +43,7 @@ class GraphBuilder:
 
         Flow::
 
-            START --> profiler --> input_validator --> planner --> [HITL 1]
+            START --> profiler --> semantic_profile --> input_validator --> planner --> [HITL 1]
                   --> supervisor (Dynamic routing loop)
                       --> deduplication --> validator --> supervisor
                       --> null_handling --> validator --> supervisor
@@ -53,6 +54,7 @@ class GraphBuilder:
 
         # Register nodes
         builder.add_node("profiler", profiler_node)
+        builder.add_node("semantic_profile", semantic_profile_node)
         builder.add_node("input_validator", input_validator_node)
         builder.add_node("planner", planner_node)
         builder.add_node("supervisor", supervisor_node)
@@ -64,7 +66,8 @@ class GraphBuilder:
 
         # Edges
         builder.set_entry_point("profiler")
-        builder.add_edge("profiler", "input_validator")
+        builder.add_edge("profiler", "semantic_profile")
+        builder.add_edge("semantic_profile", "input_validator")
         builder.add_edge("input_validator", "planner")
         builder.add_edge("planner", "supervisor")
 

@@ -41,27 +41,6 @@ class StatisticalProfile(BaseModel):
     high_null_columns: List[str] = Field(default_factory=list)
     columns: List[ColumnStatProfile] = Field(default_factory=list)
 
-class ColumnSemanticDetail(BaseModel):
-    allow_missing: bool
-    thought_missing: str
-    expect_type: str
-    thought_type: str
-    potential_dmv: List[str] = Field(default_factory=list)
-    thought_dmv: str
-
-class ColumnSummary(BaseModel):
-    description: str
-    semantic_detail: ColumnSemanticDetail
-
-class ColumnGroup(BaseModel):
-    group_name: str
-    description: str
-
-class SemanticContext(BaseModel):
-    table_summary: str
-    column_groups: List[ColumnGroup] = Field(default_factory=list)
-    columns_summary: Dict[str, ColumnSummary] = Field(default_factory=dict)
-
 ### Pydantic Models for Validation & Planning ###
 class ValidationIssue(BaseModel):
     requirement: str
@@ -105,6 +84,29 @@ class ValidationResultItem(BaseModel):
     failed_rules: List[str] = Field(default_factory=list)
     timestamp: str
 
+class ColumnSemanticProfileDetail(BaseModel):
+    description: str = Field(description="A clear business description of the column.")
+    logical_group: str = Field(description="The logical group this column belongs to (e.g. Identity, Pricing, Address).")
+    relationships: List[str] = Field(default_factory=list, description="Cross-column relationships or functional dependencies (e.g. 'zip_code -> city').")
+    allow_missing: bool = Field(description="True if missing/null values are acceptable from a business standpoint.")
+    allow_missing_reason: str = Field(default="", description="Reasoning explaining allow_missing.")
+    expected_type: str = Field(description="Ideal semantic type: int | float | str | bool | date | datetime.")
+    expected_type_reason: str = Field(default="", description="Reasoning explaining expected_type.")
+    potential_dmv: List[str] = Field(default_factory=list, description="List of common disguised missing values detected.")
+    potential_dmv_reason: str = Field(default="", description="Reasoning explaining potential_dmv.")
+    expected_str_pattern: Optional[str] = Field(default=None, description="Expected regex or string format pattern.")
+    expected_str_pattern_reason: Optional[str] = Field(default=None, description="Reasoning explaining expected_str_pattern.")
+    
+    # Combined Semantic Review / Quality Audit
+    is_error: bool = Field(description="True if statistical reality deviates from business rules or has other anomalies.")
+    error_types: List[str] = Field(default_factory=list, description="Subset of 'missing' | 'type_mismatch' | 'dmv' | 'string_outlier' | 'numeric_outlier'.")
+    error_reason: Optional[str] = Field(default=None, description="Detailed explanation of the error if is_error is True.")
+
+class SemanticProfile(BaseModel):
+    table_summary: str = Field(description="Concise description of the overall business purpose of the dataset.")
+    thinking: str = Field(default="", description="Chain of thought thinking behind the semantic profile.")
+    columns: Dict[str, ColumnSemanticProfileDetail] = Field(default_factory=dict, description="Detailed semantic profile per column.")
+
 ### TypedDict for the LangGraph State ###
 class GlobalState(TypedDict):
     # Core Routing & Messages
@@ -129,7 +131,7 @@ class GlobalState(TypedDict):
 
     # Intelligence & Validation
     statistical_profile: Optional[StatisticalProfile]
-    semantic_context: Optional[SemanticContext]
+    semantic_profile: Optional[SemanticProfile]
     input_validation_result: Optional[InputValidationResult]
     
     # Execution & Routing

@@ -154,6 +154,21 @@ class StatisticalProfiler:
                     str_samples, threshold=self.string_pattern_threshold
                 )
 
+        # 4.5. Disguised nulls detection (rule-based)
+        detected_disguised_nulls = {}
+        is_numeric = (
+            pd.api.types.is_numeric_dtype(series)
+            and not pd.api.types.is_bool_dtype(series)
+            and not isinstance(series.dtype, pd.CategoricalDtype)
+        )
+        if not is_numeric:
+            disguised_null_rules = ["N/A", "null", "unknown", "-", "none", "0"]
+            str_series = series.dropna().astype(str).str.strip().str.lower()
+            for rule in disguised_null_rules:
+                count = int((str_series == rule.lower()).sum())
+                if count > 0:
+                    detected_disguised_nulls[rule] = count
+
         # 5. Human-readable interpretation
         interpretation = self._interpret(
             null_rate=null_rate,
@@ -164,6 +179,9 @@ class StatisticalProfiler:
             detected_patterns=detected_patterns,
             dtype_str=dtype_str,
         )
+        if detected_disguised_nulls:
+            msg = "Disguised nulls detected: " + ", ".join(f"'{k}' ({v} times)" for k, v in detected_disguised_nulls.items())
+            interpretation.append(msg)
 
         # 6. Compute Detailed Numerical / Categorical Statistics
         is_numeric = (
