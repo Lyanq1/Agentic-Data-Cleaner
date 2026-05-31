@@ -17,26 +17,6 @@ def append_list(left: list | None, right: list | Any | None) -> list:
         return left + right
     return left + [right]
 
-### Pydantic Models for State Requirements ###
-class NullHandlingReq(BaseModel):
-    column: str
-    strategy: Literal["fill_mean", "fill_median", "fill_mode", "fill_constant", "drop_row"]
-    fill_value: Optional[Any] = None
-
-class DeduplicationReq(BaseModel):
-    enabled: bool
-    key_columns: List[str]
-
-class TypecastReq(BaseModel):
-    column: str
-    target_type: Literal["int", "float", "str", "bool", "date", "datetime"]
-
-class AdditionalRequirementMarkdown(BaseModel):
-    null_handling: List[NullHandlingReq] = Field(default_factory=list)
-    deduplication: Optional[DeduplicationReq] = None
-    typecast: List[TypecastReq] = Field(default_factory=list)
-    other: List[str] = Field(default_factory=list)
-
 ### Pydantic Models for Profiling & Context ###
 class ColumnStatProfile(BaseModel):
     column_name: str
@@ -140,7 +120,6 @@ class GlobalState(TypedDict):
     dataset_schema: Optional[Dict[str, Any]]
     dataset_version: Optional[str]
     raw_requirement_input: Optional[str]
-    additional_requirement_markdown: Optional[AdditionalRequirementMarkdown]
 
     # Data References & Progress
     current_dataset_version: Optional[str]
