@@ -21,3 +21,8 @@ class BaseParser(ABC):
     def supports(self, file_path: Path) -> bool:
         """Return True if this parser can handle the given file."""
         ...
+
+    @abstractmethod
+    def get_schema(self, file_path: Path) -> dict:
+        """Return a dict mapping column names to their expected data types."""
+        ...

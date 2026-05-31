@@ -28,3 +28,20 @@ class JSONParser(BaseParser):
             return df.astype(str)
         except Exception as e:
             raise IngestionError(f"Failed to parse JSON file: {e}") from e
+
+    def get_schema(self, file_path: Path) -> dict:
+        try:
+            suffix = file_path.suffix.lower()
+            if suffix in {".jsonl", ".ndjson"}:
+                df = pd.read_json(file_path, lines=True, nrows=1000)
+            else:
+                # For regular JSON, reading the whole file is typically required
+                df = pd.read_json(file_path)
+
+            # Flatten one level of nesting
+            if len(df) > 0 and isinstance(df.iloc[0], dict):
+                df = pd.json_normalize(df.to_dict(orient="records"))
+
+            return {str(col): str(dtype) for col, dtype in df.dtypes.items()}
+        except Exception as e:
+            raise IngestionError(f"Failed to get schema for JSON file: {e}") from e

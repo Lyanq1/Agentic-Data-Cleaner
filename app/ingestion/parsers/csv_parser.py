@@ -48,3 +48,19 @@ class CSVParser(BaseParser):
             return dialect.delimiter
         except csv.Error:
             return ","
+
+    def get_schema(self, file_path: Path) -> dict:
+        try:
+            encoding = self._detect_encoding(file_path)
+            sep = self._sniff_delimiter(file_path, encoding)
+            df = pd.read_csv(
+                file_path,
+                encoding=encoding,
+                encoding_errors="replace",
+                sep=sep,
+                nrows=1000,
+                keep_default_na=True,
+            )
+            return {str(col): str(dtype) for col, dtype in df.dtypes.items()}
+        except Exception as e:
+            raise IngestionError(f"Failed to get schema for CSV file: {e}") from e

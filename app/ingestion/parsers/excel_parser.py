@@ -25,3 +25,16 @@ class ExcelParser(BaseParser):
             )
         except Exception as e:
             raise IngestionError(f"Failed to parse Excel file: {e}") from e
+
+    def get_schema(self, file_path: Path) -> dict:
+        try:
+            xf = pd.ExcelFile(file_path)
+            sheet = xf.sheet_names[0]
+            df = xf.parse(
+                sheet,
+                nrows=1000,
+                keep_default_na=True,
+            )
+            return {str(col): str(dtype) for col, dtype in df.dtypes.items()}
+        except Exception as e:
+            raise IngestionError(f"Failed to get schema for Excel file: {e}") from e

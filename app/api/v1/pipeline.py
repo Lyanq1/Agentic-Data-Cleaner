@@ -40,6 +40,7 @@ async def api_run_pipeline(
             input_format=result.input_format,
             user_prompt=user_prompt,
             original_filename=result.original_filename,
+            data_schema=result.data_schema,
         )
     except Exception as e:
         logger.error(f"Pipeline failed: {e}")
