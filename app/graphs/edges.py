@@ -4,7 +4,7 @@ Currently unused — the initial pipeline (profiler → input_validator) is line
 Add routing functions here when branching logic is needed.
 """
 from langgraph.graph import END
-from app.graphs.states.graph_state import GlobalState
+from app.graphs.states.global_state import GlobalState
 
 
 def route_by_next_node(state: GlobalState) -> str:

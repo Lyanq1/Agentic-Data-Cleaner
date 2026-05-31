@@ -49,8 +49,8 @@ async def run_pipeline(
         "original_filename": original_filename,
         "input_format": input_format,
         "canonical_path": canonical_path,
-        # "data_profile": final_state.get("data_profile"),
-        "validation_result": final_state.get("validation_result"),
+        "statistical_profile": final_state.get("statistical_profile"),
+        "input_validation_result": final_state.get("input_validation_result"),
         "completed_steps": final_state.get("completed_steps", []),
     }
 
@@ -79,8 +79,8 @@ async def get_pipeline_state(run_id: str) -> dict[str, Any] | None:
         "run_id": run_id,
         "dataset_path": state.get("dataset_path"),
         "user_prompt": state.get("user_prompt"),
-        "data_profile": state.get("data_profile"),
-        "validation_result": state.get("validation_result"),
+        "statistical_profile": state.get("statistical_profile"),
+        "input_validation_result": state.get("input_validation_result"),
         "current_step": state.get("current_step"),
         "completed_steps": state.get("completed_steps", []),
         "errors": state.get("global_errors", []),

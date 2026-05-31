@@ -5,8 +5,7 @@ from typing import Any, TYPE_CHECKING
 from app.core.llm_factory import create_llm
 
 if TYPE_CHECKING:
-    from app.graphs.states.graph_state import GlobalState
-
+    from app.graphs.states.global_state import GlobalState
 
 @dataclass
 class AgentOutput:

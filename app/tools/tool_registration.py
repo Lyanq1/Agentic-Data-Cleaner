@@ -6,7 +6,7 @@ How to add a new tool:
    OR import the tool and add it to the existing ``register()`` calls below.
 """
 from app.tools.data.eda import perform_eda
-from agents.base import AgentRole 
+from app.agents.roles import AgentRole
 class ToolRegistry:
     def __init__(self) -> None:
         self._by_role: dict[str, list] = {}

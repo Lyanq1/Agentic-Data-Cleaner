@@ -34,7 +34,7 @@ class ValidationResult(BaseModel):
 class InputValidatorAgent(BaseAgent):
     """Analyzes the statistical EDA profile of a dataset via the LLM.
 
-    Reads ``data_profile`` and conversation history from GlobalState, 
+    Reads ``statistical_profile`` and conversation history from GlobalState, 
     evaluates if the context is sufficient, and returns a structured decision.
     """
 
@@ -44,13 +44,13 @@ class InputValidatorAgent(BaseAgent):
 
     async def run(self, state: dict) -> dict[str, Any]:
         """Invoke the LLM with structured output."""
-        data_profile = state.get("data_profile")
+        data_profile = state.get("statistical_profile")
         user_prompt = state.get("user_prompt", "")
         # Get prior messages in case this is a continuation of a conversation
         prior_messages = state.get("messages", [])
 
         if not data_profile:
-            logger.warning("InputValidatorAgent: no data_profile found in state.")
+            logger.warning("InputValidatorAgent: no statistical_profile found in state.")
             return {
                 "messages": [
                     AIMessage(
@@ -95,7 +95,7 @@ class InputValidatorAgent(BaseAgent):
         # Update state based on decision
         updates: dict[str, Any] = {
             "messages": [AIMessage(content=final_message, name=self.name)],
-            "validation_result": json_data,
+            "input_validation_result": json_data,
             "next_node": "end" # Pause for human input
         }
 
