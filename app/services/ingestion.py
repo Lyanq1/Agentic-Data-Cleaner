@@ -18,6 +18,7 @@ class IngestionResult:
     input_format: str
     original_filename: str
     size_mb: float
+    data_schema: dict | None = None
 
 
 class IngestionService:
@@ -57,11 +58,12 @@ class IngestionService:
         logger.info(f"Saved raw upload: {raw_path} ({size_mb:.1f}MB)")
 
         # Parse → Parquet
-        canonical_path, input_format = ingest_to_canonical(raw_path, output_dir=upload_dir)
+        canonical_path, input_format, schema = ingest_to_canonical(raw_path, output_dir=upload_dir)
 
         return IngestionResult(
             canonical_path=str(canonical_path),
             input_format=input_format.value,
+            data_schema=schema,
             original_filename=filename,
             size_mb=round(size_mb, 2),
         )

@@ -39,6 +39,7 @@ async def run_pipeline(
     input_format: str,
     user_prompt: str = "",
     original_filename: str = "",
+    data_schema: dict | None = None,
 ) -> dict[str, Any]:
     """Run the profiler → input_validator pipeline on a canonical Parquet dataset.
 
@@ -57,6 +58,7 @@ async def run_pipeline(
         "dataset_path": canonical_path,
         "user_prompt": user_prompt,
         "project_id": run_id,
+        "dataset_schema": data_schema,
     }
 
     config = {"configurable": {"thread_id": run_id}}
@@ -79,6 +81,8 @@ async def run_pipeline(
         "statistical_profile": raw_profile,
         "data_profile": formatted_profile,
         "semantic_profile": final_state.get("semantic_profile"),
+        "dataset_schema": final_state.get("dataset_schema"),
+        "statistical_profile": final_state.get("statistical_profile"),
         "input_validation_result": final_state.get("input_validation_result"),
         "completed_steps": final_state.get("completed_steps", []),
     }
@@ -109,6 +113,7 @@ async def get_pipeline_state(run_id: str) -> dict[str, Any] | None:
     return {
         "run_id": run_id,
         "dataset_path": state.get("dataset_path"),
+        "dataset_schema": state.get("dataset_schema"),
         "user_prompt": state.get("user_prompt"),
         "statistical_profile": raw_profile,
         "data_profile": formatted_profile,

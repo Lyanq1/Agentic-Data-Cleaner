@@ -49,11 +49,11 @@ def detect_format(file_path: Path) -> InputFormat:
 def ingest_to_canonical(
     file_path: Path,
     output_dir: Path | None = None,
-) -> tuple[Path, InputFormat]:
+) -> tuple[Path, InputFormat, dict | None]:
     """Parse any supported file and write it as Parquet.
 
     Returns:
-        (canonical_parquet_path, detected_format)
+        (canonical_parquet_path, detected_format, schema)
     """
     fmt = detect_format(file_path)
 
@@ -63,6 +63,7 @@ def ingest_to_canonical(
 
     logger.info(f"Ingesting {file_path.name} (format={fmt.value})")
     df = parser.parse(file_path)
+    schema = parser.get_schema(file_path)
 
     if df.empty:
         raise IngestionError(f"File '{file_path.name}' produced an empty DataFrame.")
@@ -82,7 +83,7 @@ def ingest_to_canonical(
     df.to_parquet(canonical_path, index=False, engine="pyarrow")
 
     logger.info(f"Canonical Parquet saved: {canonical_path} ({len(df)} rows × {len(df.columns)} cols)")
-    return canonical_path, fmt
+    return canonical_path, fmt, schema
 
 
 
