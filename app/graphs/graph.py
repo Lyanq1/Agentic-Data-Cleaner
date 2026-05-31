@@ -3,7 +3,7 @@ import logging
 from langgraph.graph import END, StateGraph
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
-from app.graphs.states.graph_state import GlobalState
+from app.graphs.states.global_state import GlobalState
 from app.graphs.nodes import (
     profiler_node,
     input_validator_node,

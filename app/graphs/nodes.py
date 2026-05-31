@@ -1,7 +1,7 @@
 """Node functions for the LangGraph pipeline."""
 import logging
 from typing import Any
-from app.graphs.states.graph_state import GlobalState
+from app.graphs.states.global_state import GlobalState
 from app.agents.input_validator.agent import InputValidatorAgent
 from app.tools.data.eda import perform_eda
 
@@ -37,7 +37,7 @@ async def profiler_node(state: GlobalState) -> dict[str, Any]:
         f"{profile.get('total_rows', '?')} rows × {profile.get('total_columns', '?')} cols"
     )
     return {
-        "data_profile": profile,
+        "statistical_profile": profile,
         "current_step": "profiling",
         "completed_steps": "profiling",
     }

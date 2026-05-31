@@ -11,8 +11,8 @@ How to create a new agent
 5. Register your tools in ``app/tools/registry.py``.
 """
 from app.agents.base import BaseAgent
-from app.graphs.states.graph_state import AgentState
-
+from app.graphs.states.global_state import AgentState
+from app.agents.base import AgentOutput
 
 class TemplateAgent(BaseAgent):
     """TODO: Replace this docstring with a description of your agent."""
