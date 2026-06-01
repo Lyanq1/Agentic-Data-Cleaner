@@ -45,6 +45,7 @@ class InputValidatorAgent(BaseAgent):
     async def run(self, state: dict) -> dict[str, Any]:
         """Invoke the LLM with structured output."""
         data_profile = state.get("statistical_profile")
+        semantic_profile = state.get("semantic_profile")
         user_prompt = state.get("user_prompt", "")
         # Get prior messages in case this is a continuation of a conversation
         prior_messages = state.get("messages", [])
@@ -61,12 +62,28 @@ class InputValidatorAgent(BaseAgent):
                 ],
             }
 
-        # Format profile
-        profile_text = json.dumps(data_profile, indent=2, default=str)
+        # Format profiles safely (handling dict or Pydantic models)
+        def to_dict(obj: Any) -> Any:
+            if not obj:
+                return None
+            if hasattr(obj, "model_dump"):
+                return obj.model_dump()
+            elif hasattr(obj, "dict"):
+                return obj.dict()
+            return obj
+
+        data_profile_dict = to_dict(data_profile)
+        semantic_profile_dict = to_dict(semantic_profile)
+        if semantic_profile_dict and "thinking" in semantic_profile_dict:
+            # Remove thinking field to reduce token usage and avoid confusing the LLM parser
+            del semantic_profile_dict["thinking"]
+
         human_content = (
             f"## User Instruction\n{user_prompt}\n\n"
-            f"## Dataset EDA Profile\n```json\n{profile_text}\n```"
+            f"## Dataset EDA Profile\n```json\n{json.dumps(data_profile_dict, indent=2, default=str)}\n```\n"
         )
+        if semantic_profile_dict:
+            human_content += f"\n## Dataset Semantic Profile\n```json\n{json.dumps(semantic_profile_dict, indent=2, default=str)}\n```\n"
 
         messages = [
             SystemMessage(content=INPUT_VALIDATOR_SYSTEM_PROMPT),
@@ -82,8 +99,36 @@ class InputValidatorAgent(BaseAgent):
         logger.info("InputValidatorAgent: invoking LLM for structured dataset validation...")
         
         # Use structured output
-        structured_llm = self.llm.with_structured_output(ValidationResult)
-        response: ValidationResult = await structured_llm.ainvoke(messages)
+        try:
+            structured_llm = self.llm.with_structured_output(ValidationResult)
+            response: ValidationResult = await structured_llm.ainvoke(messages)
+        except Exception as e:
+            logger.warning(f"Structured output failed: {e}. Falling back to raw LLM and manual JSON parsing...")
+            
+            # Request raw JSON strictly
+            messages_fallback = messages + [
+                SystemMessage(content="CRITICAL: You must output ONLY a valid JSON object matching the ValidationResult schema. Do NOT wrap the response in markdown code blocks like ```json ... ```, and do NOT add any trailing characters or conversational text.")
+            ]
+            raw_response = await self.llm.ainvoke(messages_fallback)
+            content = raw_response.content
+            
+            # Clean up the output string
+            content_clean = content.strip()
+            if content_clean.startswith("```json"):
+                content_clean = content_clean[7:]
+            elif content_clean.startswith("```"):
+                content_clean = content_clean[3:]
+            if content_clean.endswith("```"):
+                content_clean = content_clean[:-3]
+            content_clean = content_clean.strip()
+            
+            # Extract only the JSON object boundaries
+            start = content_clean.find("{")
+            end = content_clean.rfind("}")
+            if start != -1 and end != -1:
+                content_clean = content_clean[start:end+1]
+                
+            response = ValidationResult.model_validate_json(content_clean)
 
         logger.info("InputValidatorAgent successfully parsed structured output.")
 

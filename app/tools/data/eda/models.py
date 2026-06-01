@@ -79,6 +79,7 @@ class StatisticalReport:
     near_unique_columns: list[str] = field(default_factory=list)
     categorical_columns: list[str] = field(default_factory=list)
     high_null_columns: list[str] = field(default_factory=list)   # null_rate > 0.5
+    duplicate_rows: int = 0
 
     def get_column(self, name: str) -> ColumnStat | None:
         return next((c for c in self.columns if c.column_name == name), None)
@@ -92,5 +93,6 @@ class StatisticalReport:
             "near_unique_columns": self.near_unique_columns,
             "categorical_columns": self.categorical_columns,
             "high_null_columns": self.high_null_columns,
+            "duplicate_rows": self.duplicate_rows,
             "columns": [c.to_dict() for c in self.columns],
         }

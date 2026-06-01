@@ -39,6 +39,7 @@ class StatisticalProfile(BaseModel):
     near_unique_columns: List[str] = Field(default_factory=list)
     categorical_columns: List[str] = Field(default_factory=list)
     high_null_columns: List[str] = Field(default_factory=list)
+    duplicate_rows: int = 0
     columns: List[ColumnStatProfile] = Field(default_factory=list)
 
 ### Pydantic Models for Validation & Planning ###

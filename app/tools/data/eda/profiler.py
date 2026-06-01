@@ -57,6 +57,7 @@ class StatisticalProfiler:
         near_unique       = [c.column_name for c in column_stats if c.unique_ratio_category == UniqueRatioCategory.NEAR_UNIQUE]
         categorical       = [c.column_name for c in column_stats if c.is_categorical]
         high_null         = [c.column_name for c in column_stats if c.null_rate > self.high_null_threshold]
+        duplicate_rows    = int(df.duplicated().sum())
 
         return StatisticalReport(
             source=source,
@@ -67,6 +68,7 @@ class StatisticalProfiler:
             near_unique_columns=near_unique,
             categorical_columns=categorical,
             high_null_columns=high_null,
+            duplicate_rows=duplicate_rows,
         )
 
     def print_report(self, report: StatisticalReport, *, max_samples: int = 8) -> None:
@@ -94,6 +96,7 @@ class StatisticalProfiler:
             print(f"  🏷️  Categorical columns                : {report.categorical_columns}")
         if report.high_null_columns:
             print(f"  🚨 High-null columns (> {self.high_null_threshold:.0%})        : {report.high_null_columns}")
+        print(f"  👥 Duplicate rows                     : {report.duplicate_rows:,}")
 
         print()
 
