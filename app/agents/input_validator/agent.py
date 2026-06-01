@@ -25,6 +25,12 @@ class ValidationResult(BaseModel):
     intent_description: str = Field(
         description="A description of what the user wants to achieve based on their prompt and the actual dataset EDA profile."
     )
+    is_feasible: bool = Field(
+        description="True if the user's instruction is feasible and realistic given the statistical and semantic profiles of the dataset, False otherwise."
+    )
+    feasibility_analysis: str = Field(
+        description="Detailed reasoning explaining why the user's instruction is or is not feasible, referencing specific columns, types, or statistical properties."
+    )
     clarification_questions: list[ClarificationQuestion] = Field(
         default_factory=list,
         description="A list of about 3 multiple-choice questions to clarify data cleaning decisions."

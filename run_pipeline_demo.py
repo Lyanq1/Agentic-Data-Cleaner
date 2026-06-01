@@ -32,7 +32,7 @@ async def main():
         run_id=run_id,
         canonical_path=str(canonical_path),
         input_format=input_format.value,
-        user_prompt="Analyze the business context of this dataset, identify the logical column groups, detect any cross-column functional dependencies or relationships, detect potential disguised null values, and suggest appropriate cleaning strategies for the entire dataset.",
+        user_prompt="Remove null values in the review_score column",
         original_filename="olist_order_reviews_dataset.csv"
     )
     
@@ -166,7 +166,25 @@ async def main():
     validation = state.get("input_validation_result")
     if validation:
         print(f"\n🛡️ [3. INPUT VALIDATION DECISION]")
-        print(f"   Intent Description: {get_val(validation, 'intent_description')}")
+        print("   Analyze User Intent & Data Profile:")
+        import textwrap
+        intent_desc = get_val(validation, 'intent_description', 'No intent description provided.')
+        wrapped_lines = textwrap.wrap(intent_desc, width=80)
+        for line in wrapped_lines:
+            print(f"     | {line}")
+        print()
+        
+        # Requirement Feasibility
+        is_feasible = get_val(validation, 'is_feasible')
+        status_symbol = "✅" if is_feasible else "⚠️"
+        print(f"   Requirement Feasible: {status_symbol} {is_feasible}")
+        print("   Feasibility Analysis:")
+        feasibility_anal = get_val(validation, 'feasibility_analysis', 'No feasibility analysis provided.')
+        wrapped_feasibility = textwrap.wrap(feasibility_anal, width=80)
+        for line in wrapped_feasibility:
+            print(f"     | {line}")
+        print()
+        
         print("   Clarification Questions Proposed:")
         questions = get_val(validation, 'clarification_questions') or []
         for i, q in enumerate(questions, 1):
