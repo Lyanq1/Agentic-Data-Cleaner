@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import { Database, Binary } from 'lucide-react';
 
 interface StatisticalProfilePanelProps {
@@ -148,9 +148,108 @@ export const StatisticalProfilePanel: React.FC<StatisticalProfilePanelProps> = (
     );
   };
 
+  const semanticProfile = profileData.semantic_profile;
+  const [showThinking, setShowThinking] = useState(false);
+
+  const logicalGroups = useMemo(() => {
+    const groups: Record<string, string[]> = {};
+    if (semanticProfile?.columns) {
+      Object.entries(semanticProfile.columns).forEach(([colName, detail]: [string, any]) => {
+        const grp = detail.logical_group || 'Uncategorized';
+        if (!groups[grp]) {
+          groups[grp] = [];
+        }
+        groups[grp].push(colName);
+      });
+    }
+    return groups;
+  }, [semanticProfile]);
+
+  const columns = Array.isArray(profileData.columns) 
+    ? profileData.columns 
+    : Object.values(profileData.columns || {});
+
   return (
     <div className="space-y-4">
-      {profileData.columns.map((col: any, index: number) => {
+      {/* Dataset Semantic Context */}
+      {semanticProfile && (
+        <div className="bg-card rounded-xl border border-slate-200 overflow-hidden shadow-sm p-6 text-left space-y-4">
+          <h2 className="text-base font-bold text-slate-800 tracking-tight border-b border-slate-100 pb-2">
+            Dataset Semantic Context
+          </h2>
+          
+          {/* Table Summary */}
+          {semanticProfile.table_summary && (
+            <div className="space-y-1">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                Table Summary
+              </h3>
+              <p className="text-sm text-slate-600 leading-relaxed font-sans">
+                {semanticProfile.table_summary}
+              </p>
+            </div>
+          )}
+
+          {/* Detected Logical Groups */}
+          {Object.keys(logicalGroups).length > 0 && (
+            <div className="space-y-2">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                Detected Logical Groups
+              </h3>
+              <div className="border rounded-lg overflow-hidden bg-white">
+                <table className="w-full text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50/75 border-b border-slate-200">
+                      <th className="text-left p-2.5 font-semibold text-slate-500 w-[220px]">Logical Group</th>
+                      <th className="text-left p-2.5 font-semibold text-slate-500">Associated Columns</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {Object.entries(logicalGroups).map(([groupName, cols], i) => (
+                      <tr key={i} className="hover:bg-slate-50/30">
+                        <td className="p-2.5 align-top font-medium text-slate-600">{groupName}</td>
+                        <td className="p-2.5 align-top">
+                          <div className="flex flex-wrap gap-1.5">
+                            {cols.map((colName, idx) => (
+                              <span key={idx} className="font-mono text-[10px] bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded">
+                                {colName}
+                              </span>
+                            ))}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* LLM Thinking (Chain of Thought) */}
+          {semanticProfile.thinking && (
+            <div className="space-y-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowThinking(!showThinking)}
+                className="text-xs font-medium text-blue-600 hover:text-blue-500 cursor-pointer"
+              >
+                {showThinking ? 'Hide LLM Chain of Thought' : 'Show LLM Chain of Thought'}
+              </button>
+              {showThinking && (
+                <div className="bg-slate-950 text-white rounded-lg p-4 font-mono text-md leading-relaxed max-h-64 overflow-y-auto custom-scrollbar">
+                  {semanticProfile.thinking.split('\n').map((line: string, i: number) => (
+                    <div key={i} className="min-h-[1.2rem]">
+                      {line}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {columns.map((col: any, index: number) => {
         const isNumeric = col.numeric_stats !== null;
         const stats = isNumeric ? col.numeric_stats : col.categorical_stats;
         
@@ -300,6 +399,133 @@ export const StatisticalProfilePanel: React.FC<StatisticalProfilePanelProps> = (
                 )}
               </div>
             </div>
+
+            {/* Semantic Profile Parallel Reason Table */}
+            {(() => {
+              const semanticDetail = profileData.semantic_profile?.columns?.[col.column_name];
+              if (!semanticDetail) return null;
+              
+              return (
+                <div className="border-t border-slate-100 px-5 py-4 bg-slate-50/20 text-left">
+                  <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-3">
+                    Semantic Analysis
+                  </h4>
+                  <div className="border rounded-lg overflow-hidden bg-white">
+                    <table className="w-full text-xs border-collapse">
+                      <thead>
+                        <tr className="bg-slate-50/75 border-b border-slate-200">
+                          <th className="text-left p-2.5 font-semibold text-slate-500 w-[220px]">Property & Expected Value</th>
+                          <th className="text-left p-2.5 font-semibold text-slate-500">Business Context / Reason</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {semanticDetail.description && (
+                          <tr className="hover:bg-slate-50/30">
+                            <td className="p-2.5 align-top font-medium text-slate-600">Description</td>
+                            <td className="p-2.5 align-top text-slate-600">{semanticDetail.description}</td>
+                          </tr>
+                        )}
+
+                        {semanticDetail.allow_missing !== undefined && (
+                          <tr className="hover:bg-slate-50/30">
+                            <td className="p-2.5 align-top font-medium text-slate-600 flex items-center gap-2">
+                              <span>Allow Missing</span>
+                              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                                semanticDetail.allow_missing 
+                                  ? 'bg-slate-100 text-slate-700' 
+                                  : 'bg-slate-200 text-slate-800'
+                              }`}>
+                                {semanticDetail.allow_missing ? 'True' : 'False'}
+                              </span>
+                            </td>
+                            <td className="p-2.5 align-top text-slate-600">
+                              {semanticDetail.allow_missing_reason || '—'}
+                            </td>
+                          </tr>
+                        )}
+                        {semanticDetail.expected_type && (
+                          <tr className="hover:bg-slate-50/30">
+                            <td className="p-2.5 align-top font-medium text-slate-600 flex items-center gap-2">
+                              <span>Expected Type</span>
+                              <span className="font-mono text-[10px] bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded">
+                                {semanticDetail.expected_type}
+                              </span>
+                            </td>
+                            <td className="p-2.5 align-top text-slate-600">
+                              {semanticDetail.expected_type_reason || '—'}
+                            </td>
+                          </tr>
+                        )}
+                        {semanticDetail.potential_dmv && semanticDetail.potential_dmv.length > 0 && (
+                          <tr className="hover:bg-slate-50/30">
+                            <td className="p-2.5 align-top font-medium text-slate-600 flex flex-col gap-1.5">
+                              <span>Potential DMVs</span>
+                              <div className="flex flex-wrap gap-1">
+                                {semanticDetail.potential_dmv.map((dmv: string, i: number) => (
+                                  <span key={i} className="font-mono text-[10px] bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded">
+                                    {dmv}
+                                  </span>
+                                ))}
+                              </div>
+                            </td>
+                            <td className="p-2.5 align-top text-slate-600">
+                              {semanticDetail.potential_dmv_reason || '—'}
+                            </td>
+                          </tr>
+                        )}
+                        {semanticDetail.expected_str_pattern && (
+                          <tr className="hover:bg-slate-50/30">
+                            <td className="p-2.5 align-top font-medium text-slate-600 flex items-center gap-2">
+                              <span>Expected Pattern</span>
+                              <span className="font-mono text-[10px] bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded">
+                                {semanticDetail.expected_str_pattern}
+                              </span>
+                            </td>
+                            <td className="p-2.5 align-top text-slate-600">
+                              {semanticDetail.expected_str_pattern_reason || '—'}
+                            </td>
+                          </tr>
+                        )}
+                        {semanticDetail.relationships && semanticDetail.relationships.length > 0 && (
+                          <tr className="hover:bg-slate-50/30">
+                            <td className="p-2.5 align-top font-medium text-slate-600 flex flex-col gap-1.5">
+                              <span>Relationships</span>
+                              <div className="flex flex-col gap-1">
+                                {semanticDetail.relationships.map((rel: string, i: number) => (
+                                  <span key={i} className="font-mono text-[10px] bg-slate-50 text-slate-700 px-1.5 py-0.5 rounded inline-block max-w-max">
+                                    {rel}
+                                  </span>
+                                ))}
+                              </div>
+                            </td>
+                            <td className="p-2.5 align-top text-slate-600">
+                              Functional dependencies detected for this column.
+                            </td>
+                          </tr>
+                        )}
+                        {semanticDetail.is_error && (
+                          <tr>
+                            <td className="p-2.5 align-top font-medium text-red-600 flex flex-col gap-1.5">
+                              <span>Quality Error</span>
+                              <div className="flex flex-wrap gap-1">
+                                {(semanticDetail.error_types || []).map((err: string, i: number) => (
+                                  <span key={i} className="text-[10px] font-bold uppercase text-red-600">
+                                    {err}
+                                  </span>
+                                ))}
+                              </div>
+                            </td>
+                            <td className="p-2.5 align-top text-red-600">
+                              Reason: {semanticDetail.error_reason || 'Anomalies detected in column data.'}
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Interpretation advice notes bar */}
             {col.interpretation && col.interpretation.length > 0 && (

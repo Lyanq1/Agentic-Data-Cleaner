@@ -116,7 +116,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({ runId, onComplete })
     mutationFn: (data: {
       decision: 'approve' | 'reject' | 'modify';
       feedback?: string;
-      disambiguation_answers?: Record<string, string>;
+      disambiguation_answers?: Record<string, string | string[]>;
     }) => {
       setIsTransitioning(true);
       if (!checkpoint) throw new Error('No checkpoint active');

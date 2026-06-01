@@ -12,8 +12,9 @@ export interface HeaderProps {
 
 const STEP_LABEL: Record<AppStep, string> = {
   upload: 'Upload',
-  profile: 'Profile',
+  profile: 'Statistical Profile',
   pipeline: 'Pipeline',
+  // input_validator: 'Human Input' for later use
   result: 'Results',
 };
 

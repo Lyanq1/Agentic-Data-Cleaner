@@ -134,6 +134,7 @@ export const pipelineApi = {
       } : null,
       agent_logs,
       data_profile: data.data_profile,
+      semantic_profile: data.semantic_profile,
     };
   },
 
@@ -184,6 +185,9 @@ export const pipelineApi = {
   
   getProfile: async (runId: string): Promise<any> => {
     const state = await pipelineApi.getFullState(runId);
+    if (state.data_profile) {
+      state.data_profile.semantic_profile = state.semantic_profile;
+    }
     return state.data_profile;
   },
   
