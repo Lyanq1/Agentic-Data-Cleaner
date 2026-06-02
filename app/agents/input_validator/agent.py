@@ -1,7 +1,7 @@
 """Input Validator Agent — uses LLM to analyze the EDA profile and validate the dataset."""
 import json
 import logging
-from typing import Any
+from typing import Any, Literal
 from langchain_core.messages import AIMessage, SystemMessage, HumanMessage
 from pydantic import BaseModel, Field
 
@@ -18,22 +18,24 @@ class ClarificationQuestion(BaseModel):
         min_items=3,
         max_items=3
     )
+    consequences: str | None = Field(default=None, description="Explanation of the consequences of the options.")
 
 class ValidationResult(BaseModel):
     """Structured output expected from the Input Validator LLM."""
 
-    intent_description: str = Field(
-        description="A description of what the user wants to achieve based on their prompt and the actual dataset EDA profile."
+    status: Literal["ready", "needs_clarification", "not_feasible"] = Field(
+        description="The status of the validation. 'ready' if we can proceed, 'needs_clarification' or 'not_feasible' if blocked."
     )
-    is_feasible: bool = Field(
-        description="True if the user's instruction is feasible and realistic given the statistical and semantic profiles of the dataset, False otherwise."
+    reasoning: str = Field(
+        description="Brief reasoning explaining the status."
     )
-    feasibility_analysis: str = Field(
-        description="Detailed reasoning explaining why the user's instruction is or is not feasible, referencing specific columns, types, or statistical properties."
+    action_plan: str | None = Field(
+        default=None,
+        description="The plan for the next steps if status is 'ready'."
     )
-    clarification_questions: list[ClarificationQuestion] = Field(
-        default_factory=list,
-        description="A list of about 3 multiple-choice questions to clarify data cleaning decisions."
+    question_to_user: ClarificationQuestion | None = Field(
+        default=None,
+        description="The question to ask the user if status is 'needs_clarification' or 'not_feasible'."
     )
 
 
@@ -104,21 +106,16 @@ class InputValidatorAgent(BaseAgent):
 
         logger.info("InputValidatorAgent: invoking LLM for structured dataset validation...")
         
-        # Use structured output
+        # Use JSON mode instead of structured function calling to strictly follow Prompt-based design
+        messages.append(SystemMessage(content="CRITICAL: You must output ONLY a valid JSON object matching the requested schema. Do NOT wrap the response in markdown code blocks like ```json ... ```, and do NOT add any trailing characters or conversational text."))
+        
         try:
-            structured_llm = self.llm.with_structured_output(ValidationResult)
-            response: ValidationResult = await structured_llm.ainvoke(messages)
-        except Exception as e:
-            logger.warning(f"Structured output failed: {e}. Falling back to raw LLM and manual JSON parsing...")
-            
-            # Request raw JSON strictly
-            messages_fallback = messages + [
-                SystemMessage(content="CRITICAL: You must output ONLY a valid JSON object matching the ValidationResult schema. Do NOT wrap the response in markdown code blocks like ```json ... ```, and do NOT add any trailing characters or conversational text.")
-            ]
-            raw_response = await self.llm.ainvoke(messages_fallback)
+            # Bind response_format to enforce JSON output
+            json_llm = self.llm.bind(response_format={"type": "json_object"})
+            raw_response = await json_llm.ainvoke(messages)
             content = raw_response.content
             
-            # Clean up the output string
+            # Clean up the output string in case the model ignores the response_format and uses markdown
             content_clean = content.strip()
             if content_clean.startswith("```json"):
                 content_clean = content_clean[7:]
@@ -135,6 +132,18 @@ class InputValidatorAgent(BaseAgent):
                 content_clean = content_clean[start:end+1]
                 
             response = ValidationResult.model_validate_json(content_clean)
+        except Exception as e:
+            logger.error(f"Failed to parse LLM JSON output: {e}")
+            # Fallback to a safe error state
+            response = ValidationResult(
+                status="needs_clarification",
+                reasoning="The system encountered an error parsing the LLM's JSON output.",
+                question_to_user=ClarificationQuestion(
+                    question="The AI failed to format its response correctly. Would you like to retry or abort?",
+                    options=["(Recommended) Retry analysis", "Abort analysis", "Provide new instructions"],
+                    consequences="Retrying might succeed if it was a transient formatting issue."
+                )
+            )
 
         logger.info("InputValidatorAgent successfully parsed structured output.")
 
@@ -144,10 +153,11 @@ class InputValidatorAgent(BaseAgent):
         final_message = json.dumps(json_data, ensure_ascii=False, indent=2)
 
         # Update state based on decision
+        next_node = "planner" if response.status == "ready" else "end"
         updates: dict[str, Any] = {
             "messages": [AIMessage(content=final_message, name=self.name)],
             "input_validation_result": json_data,
-            "next_node": "end" # Pause for human input
+            "next_node": next_node 
         }
 
         return updates
