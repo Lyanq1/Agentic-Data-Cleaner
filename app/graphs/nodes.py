@@ -64,19 +64,19 @@ async def input_validator_node(state: GlobalState) -> dict[str, Any]:
 
 # Planner node (Đề xuất kế hoạch làm sạch động)
 async def planner_node(state: GlobalState) -> dict[str, Any]:
-    """Skeletal Planner Node — generates task_list DAG and resets control flow indices."""
+    """Invoke the PlannerAgent to generate the cleaning plan and task list."""
     logger.info("planner_node: Generating cleaning plan and DAG task list...")
+    from app.agents.planner.agent import PlannerAgent
     
-    # Establish a default DAG list of steps for the skeletal flow
-    default_tasks = ["deduplication", "null_handling", "type_casting"]
+    agent = PlannerAgent()
+    result = await agent.run(state)
     
     return {
-        "task_list": default_tasks,
-        "current_task_idx": 0,
-        "retry_count": 0,
+        **result,
         "current_step": "planning",
         "completed_steps": "planning",
     }
+
 
 # Supervisor node (Điều phối luồng chạy của các Worker)
 async def supervisor_node(state: GlobalState) -> dict[str, Any]:
