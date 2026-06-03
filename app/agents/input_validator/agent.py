@@ -3,7 +3,7 @@ import json
 import logging
 from typing import Any, Literal
 from langchain_core.messages import AIMessage, SystemMessage, HumanMessage
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.agents.base import BaseAgent
 from app.agents.input_validator.prompts import INPUT_VALIDATOR_SYSTEM_PROMPT
@@ -45,6 +45,19 @@ class ActionPlan(BaseModel):
     null: str | None = None
     duplicate: str | None = None
     typecast: str | None = None
+
+    @field_validator("null", "duplicate", "typecast", mode="before")
+    @classmethod
+    def convert_to_string(cls, v: Any) -> str | None:
+        if v is None:
+            return None
+        if isinstance(v, str):
+            return v
+        if isinstance(v, dict):
+            return " | ".join(f"{k}: {val}" for k, val in v.items())
+        if isinstance(v, list):
+            return ", ".join(str(item) for item in v)
+        return str(v)
 
 class ValidationResult(BaseModel):
     """Structured output expected from the Input Validator LLM."""
@@ -163,10 +176,12 @@ class InputValidatorAgent(BaseAgent):
             response = ValidationResult.model_validate_json(content_clean)
         except Exception as e:
             logger.error(f"Failed to parse LLM JSON output: {e}")
+            print(f"\n[DEBUG ERROR] JSON parsing / validation failed: {e}")
+            print(f"[DEBUG ERROR] Cleaned Content received:\n{content_clean}\n")
             # Fallback to a safe error state
             response = ValidationResult(
                 status="needs_clarification",
-                reasoning="The system encountered an error parsing the LLM's JSON output.",
+                reasoning=f"The system encountered an error parsing the LLM's JSON output. Error: {e}",
                 clarifications=ClarificationIssues(
                     null=NullClarifications(
                         Q1_strategy=StrategyQuestion(

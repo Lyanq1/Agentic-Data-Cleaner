@@ -13,10 +13,10 @@ def get_val(obj, key, default=None):
     return getattr(obj, key, default)
 
 async def main():
-    # We will use the hospital-1.csv dataset
-    original_csv = Path("tests/hospital-1.csv")
+    # We will use the olist_products_dataset.csv dataset
+    original_csv = Path("tests/olist_products_dataset.csv")
     if not original_csv.exists():
-        print("Error: tests/hospital-1.csv not found.")
+        print("Error: tests/olist_products_dataset.csv not found.")
         return
         
     print(f"--- 1. Ingesting raw dataset: {original_csv} ---")
@@ -34,7 +34,7 @@ async def main():
         canonical_path=str(canonical_path),
         input_format=input_format.value,
         user_prompt="Resolve all null, duplicate, and typecasting errors present in the dataset",
-        original_filename="hospital-1.csv"
+        original_filename="olist_products_dataset.csv"
     )
     
     # 3. Retrieve final state
