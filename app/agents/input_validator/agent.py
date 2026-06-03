@@ -3,7 +3,7 @@ import json
 import logging
 from typing import Any, Literal
 from langchain_core.messages import AIMessage, SystemMessage, HumanMessage
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.agents.base import BaseAgent
 from app.agents.input_validator.prompts import INPUT_VALIDATOR_SYSTEM_PROMPT
@@ -11,31 +11,73 @@ from app.agents.input_validator.prompts import INPUT_VALIDATOR_SYSTEM_PROMPT
 logger = logging.getLogger(__name__)
 
 
-class ClarificationQuestion(BaseModel):
-    question: str = Field(description="The multiple-choice question asking for clarification.")
-    options: list[str] = Field(
-        description="Exactly 3 distinct options for the user to choose from.",
-        min_items=3,
-        max_items=3
-    )
-    consequences: str | None = Field(default=None, description="Explanation of the consequences of the options.")
+class StrategyQuestion(BaseModel):
+    question: str = Field(description="The strategy question text.")
+    options: list[str] = Field(description="Exactly 3 distinct options.")
+    consequences: str | None = Field(default=None, description="Consequences of each option.")
+
+class InsightQuestion(BaseModel):
+    question: str = Field(description="The insight question text.")
+    insight: str = Field(description="The semantic insight revealed.")
+    confirm: str = Field(description="The yes/no confirmation ask.")
+
+class NullClarifications(BaseModel):
+    Q1_strategy: StrategyQuestion | None = None
+    Q2_semantic_insight: InsightQuestion | None = None
+    Q3_semantic_insight: InsightQuestion | None = None
+
+class DuplicateClarifications(BaseModel):
+    Q1_strategy: StrategyQuestion | None = None
+    Q2_semantic_insight: InsightQuestion | None = None
+    Q3_semantic_insight: InsightQuestion | None = None
+
+class TypecastClarifications(BaseModel):
+    Q1_semantic_insight: InsightQuestion | None = None
+    Q2_semantic_insight: InsightQuestion | None = None
+    Q3_semantic_insight: InsightQuestion | None = None
+
+class ClarificationIssues(BaseModel):
+    null: NullClarifications | None = None
+    duplicate: DuplicateClarifications | None = None
+    typecast: TypecastClarifications | None = None
+
+class ActionPlan(BaseModel):
+    null: str | None = None
+    duplicate: str | None = None
+    typecast: str | None = None
+
+    @field_validator("null", "duplicate", "typecast", mode="before")
+    @classmethod
+    def convert_to_string(cls, v: Any) -> str | None:
+        if v is None:
+            return None
+        if isinstance(v, str):
+            return v
+        if isinstance(v, dict):
+            return " | ".join(f"{k}: {val}" for k, val in v.items())
+        if isinstance(v, list):
+            return ", ".join(str(item) for item in v)
+        return str(v)
 
 class ValidationResult(BaseModel):
     """Structured output expected from the Input Validator LLM."""
-
-    status: Literal["ready", "needs_clarification", "not_feasible"] = Field(
-        description="The status of the validation. 'ready' if we can proceed, 'needs_clarification' or 'not_feasible' if blocked."
+    status: Literal["ready", "needs_clarification"] = Field(
+        description="The status of the validation. 'ready' or 'needs_clarification'."
     )
     reasoning: str = Field(
         description="Brief reasoning explaining the status."
     )
-    action_plan: str | None = Field(
-        default=None,
-        description="The plan for the next steps if status is 'ready'."
+    resolved_by_user: list[str] = Field(
+        default_factory=list,
+        description="List of issues and columns resolved by the user's request."
     )
-    question_to_user: ClarificationQuestion | None = Field(
+    action_plan: ActionPlan | None = Field(
         default=None,
-        description="The question to ask the user if status is 'needs_clarification' or 'not_feasible'."
+        description="The plan for each issue if status is 'ready'."
+    )
+    clarifications: ClarificationIssues | None = Field(
+        default=None,
+        description="Clarifications needed per active issue if status is 'needs_clarification'."
     )
 
 
@@ -134,14 +176,20 @@ class InputValidatorAgent(BaseAgent):
             response = ValidationResult.model_validate_json(content_clean)
         except Exception as e:
             logger.error(f"Failed to parse LLM JSON output: {e}")
+            print(f"\n[DEBUG ERROR] JSON parsing / validation failed: {e}")
+            print(f"[DEBUG ERROR] Cleaned Content received:\n{content_clean}\n")
             # Fallback to a safe error state
             response = ValidationResult(
                 status="needs_clarification",
-                reasoning="The system encountered an error parsing the LLM's JSON output.",
-                question_to_user=ClarificationQuestion(
-                    question="The AI failed to format its response correctly. Would you like to retry or abort?",
-                    options=["(Recommended) Retry analysis", "Abort analysis", "Provide new instructions"],
-                    consequences="Retrying might succeed if it was a transient formatting issue."
+                reasoning=f"The system encountered an error parsing the LLM's JSON output. Error: {e}",
+                clarifications=ClarificationIssues(
+                    null=NullClarifications(
+                        Q1_strategy=StrategyQuestion(
+                            question="The AI failed to format its response correctly. Would you like to retry or abort?",
+                            options=["(Recommended) Retry analysis", "Abort analysis", "Provide new instructions"],
+                            consequences="Retrying might succeed if it was a transient formatting issue."
+                        )
+                    )
                 )
             )
 

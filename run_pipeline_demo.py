@@ -13,10 +13,10 @@ def get_val(obj, key, default=None):
     return getattr(obj, key, default)
 
 async def main():
-    # We will use the olist_order_reviews_dataset.csv dataset
-    original_csv = Path("tests/olist_order_reviews_dataset.csv")
+    # We will use the olist_products_dataset.csv dataset
+    original_csv = Path("tests/olist_products_dataset.csv")
     if not original_csv.exists():
-        print("Error: tests/olist_order_reviews_dataset.csv not found.")
+        print("Error: tests/olist_products_dataset.csv not found.")
         return
         
     print(f"--- 1. Ingesting raw dataset: {original_csv} ---")
@@ -25,15 +25,16 @@ async def main():
     print(f"Original input format: {input_format.value}")
 
     print("\n--- 2. Executing LangGraph Data Cleansing Pipeline ---")
-    run_id = "demo-run-hospital"
+    import uuid
+    run_id = f"demo-run-{uuid.uuid4().hex[:8]}"
     
     # Run the pipeline
     await run_pipeline(
         run_id=run_id,
         canonical_path=str(canonical_path),
         input_format=input_format.value,
-        user_prompt="Remove null values in the review_score column",
-        original_filename="olist_order_reviews_dataset.csv"
+        user_prompt="Resolve all null, duplicate, and typecasting errors present in the dataset",
+        original_filename="olist_products_dataset.csv"
     )
     
     # 3. Retrieve final state
@@ -166,30 +167,75 @@ async def main():
     validation = state.get("input_validation_result")
     if validation:
         print(f"\n🛡️ [3. INPUT VALIDATION DECISION]")
-        print("   Analyze User Intent & Data Profile:")
+        
+        status = get_val(validation, 'status')
+        status_symbol = "✅" if status == "ready" else "⚠️" if status == "needs_clarification" else "❌"
+        print(f"   Validation Status: {status_symbol} {status}")
+        
+        print("   Reasoning:")
         import textwrap
-        intent_desc = get_val(validation, 'intent_description', 'No intent description provided.')
-        wrapped_lines = textwrap.wrap(intent_desc, width=80)
-        for line in wrapped_lines:
+        reasoning = get_val(validation, 'reasoning', 'No reasoning provided.')
+        wrapped_reasoning = textwrap.wrap(reasoning, width=80)
+        for line in wrapped_reasoning:
             print(f"     | {line}")
         print()
         
-        # Requirement Feasibility
-        is_feasible = get_val(validation, 'is_feasible')
-        status_symbol = "✅" if is_feasible else "⚠️"
-        print(f"   Requirement Feasible: {status_symbol} {is_feasible}")
-        print("   Feasibility Analysis:")
-        feasibility_anal = get_val(validation, 'feasibility_analysis', 'No feasibility analysis provided.')
-        wrapped_feasibility = textwrap.wrap(feasibility_anal, width=80)
-        for line in wrapped_feasibility:
-            print(f"     | {line}")
-        print()
-        
-        print("   Clarification Questions Proposed:")
-        questions = get_val(validation, 'clarification_questions') or []
-        for i, q in enumerate(questions, 1):
-            print(f"     {i}. Question: {get_val(q, 'question')}")
-            print(f"        Options: {get_val(q, 'options')}")
+        resolved = get_val(validation, 'resolved_by_user') or []
+        if resolved:
+            print("   Resolved By User:")
+            for item in resolved:
+                print(f"     • {item}")
+            print()
+            
+        action_plan = get_val(validation, 'action_plan')
+        if action_plan:
+            has_any_plan = any(get_val(action_plan, it) for it in ['null', 'duplicate', 'typecast'])
+            if has_any_plan:
+                print("   Action Plan:")
+                for issue_type in ['null', 'duplicate', 'typecast']:
+                    plan = get_val(action_plan, issue_type)
+                    if plan:
+                        print(f"     • {issue_type.upper()}: {plan}")
+                print()
+            
+        clarifications = get_val(validation, 'clarifications')
+        if clarifications and status == "needs_clarification":
+            print("   Clarifications Needed:")
+            for issue_type in ['null', 'duplicate', 'typecast']:
+                issue_clarifications = get_val(clarifications, issue_type)
+                if issue_clarifications:
+                    print(f"     --- {issue_type.upper().center(12, ' ')} ---")
+                    # Check for strategy/insight questions
+                    for q_key in ['Q1_strategy', 'Q1_semantic_insight', 'Q2_semantic_insight', 'Q3_semantic_insight']:
+                        q_data = get_val(issue_clarifications, q_key)
+                        if q_data:
+                            question = get_val(q_data, 'question')
+                            print(f"       • Question: {question}")
+                            
+                            # If it's a strategy question, print options & consequences
+                            options = get_val(q_data, 'options')
+                            if options:
+                                print("         Options:")
+                                for opt in options:
+                                    print(f"           - {opt}")
+                                consequences = get_val(q_data, 'consequences')
+                                if consequences:
+                                    print("         Consequences:")
+                                    wrapped_consequences = textwrap.wrap(consequences, width=76)
+                                    for line in wrapped_consequences:
+                                        print(f"           | {line}")
+                            
+                            # If it's an insight question, print insight & confirm ask
+                            insight = get_val(q_data, 'insight')
+                            if insight:
+                                print("         Insight:")
+                                wrapped_insight = textwrap.wrap(insight, width=76)
+                                for line in wrapped_insight:
+                                    print(f"           | {line}")
+                                confirm = get_val(q_data, 'confirm')
+                                if confirm:
+                                    print(f"         Confirmation Ask: {confirm}")
+                            print()
             
     print("\n" + "="*80)
     
