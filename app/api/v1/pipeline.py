@@ -2,7 +2,7 @@
 import uuid
 import logging
 
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks
 
 from app.exceptions.ingestion_exceptions import IngestionError
 from app.services.ingestion import get_ingestion_service
@@ -14,6 +14,7 @@ router = APIRouter()
 
 @router.post("/pipeline/run", summary="Upload dataset and run the cleaning pipeline")
 async def api_run_pipeline(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(..., description="Dataset file (CSV, TSV, Excel, JSON, JSONL)"),
     user_prompt: str = Form(default="", description="Optional cleaning instruction"),
 ):
@@ -31,22 +32,25 @@ async def api_run_pipeline(
     except IngestionError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    # Run pipeline
+    # Run pipeline in background
     run_id = uuid.uuid4().hex[:12]
-    try:
-        pipeline_result = await run_pipeline(
-            run_id=run_id,
-            canonical_path=result.canonical_path,
-            input_format=result.input_format,
-            user_prompt=user_prompt,
-            original_filename=result.original_filename,
-            data_schema=result.data_schema,
-        )
-    except Exception as e:
-        logger.error(f"Pipeline failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Pipeline execution failed: {e}")
+    background_tasks.add_task(
+        run_pipeline,
+        run_id=run_id,
+        canonical_path=result.canonical_path,
+        input_format=result.input_format,
+        user_prompt=user_prompt,
+        original_filename=result.original_filename,
+        data_schema=result.data_schema,
+    )
 
-    return pipeline_result
+    return {
+        "run_id": run_id,
+        "message": "Pipeline execution started in the background.",
+        "original_filename": result.original_filename,
+        "input_format": result.input_format,
+        "canonical_path": result.canonical_path,
+    }
 
 
 @router.get("/pipeline/{run_id}/state", summary="Get current state of a pipeline run")
