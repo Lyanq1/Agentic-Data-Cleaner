@@ -116,17 +116,55 @@ class InputValidationResult(BaseModel):
         description="Clarifications needed per active issue if status is 'needs_clarification'."
     )
 
+class PlanMetadata(BaseModel):
+    plan_id: str
+    plan_version: int = 1
+    created_at: str
+
+class GlobalConstraints(BaseModel):
+    max_retries_per_task: int = 3
+    preserve_columns: List[str] = Field(default_factory=list)
+
+class ColumnTaskContext(BaseModel):
+    statistical: Dict[str, Any]
+    semantic: Dict[str, Any]
+
+class TaskInputs(BaseModel):
+    read_path_key: str = "physical_dataframe_path"
+    column_context: Dict[str, ColumnTaskContext] = Field(default_factory=dict)
+
+class TaskOutputs(BaseModel):
+    write_path_key: str = "physical_dataframe_path"
+    expected_artifacts: List[str] = Field(default_factory=list)
+    must_preserve_row_count: bool = False
+
+class TaskVerification(BaseModel):
+    pandera_checks: List[str] = Field(default_factory=list)
+    success_metrics: Optional[Dict[str, Any]] = None
+
 class TaskDetail(BaseModel):
     task_id: str
     agent: AgentRole
     skip: bool
     skip_reason: Optional[str] = None
     columns: List[str] = Field(default_factory=list)
-    strategy: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    rationale: Optional[str] = None
+    execution_mode: Optional[Literal["tools_only", "tools_then_llm", "llm_assist"]] = None
+    tool_sequence_hint: Optional[List[str]] = None
+    inputs: Optional[TaskInputs] = None
+    outputs: Optional[TaskOutputs] = None
+    verification: Optional[TaskVerification] = None
+    strategy: Optional[Dict[str, Any]] = None
+
+class TaskDetailWrapper(BaseModel):
+    work_order: TaskDetail
 
 class ExecutionPlan(BaseModel):
-    task_list: List[TaskDetail] = Field(default_factory=list)
+    metadata: PlanMetadata
     plan_summary: str
+    assumptions: List[str] = Field(default_factory=list)
+    global_constraints: GlobalConstraints
+    task_list: List[TaskDetailWrapper] = Field(default_factory=list)
 
 ### Pydantic Models for Workers & Checkpoints ###
 class WorkerStateDetail(BaseModel):

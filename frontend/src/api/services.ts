@@ -152,6 +152,7 @@ export const pipelineApi = {
       data_profile: data.data_profile,
       semantic_profile: data.semantic_profile,
       input_validation_result: valResult,
+      execution_plan: data.execution_plan,
     };
   },
 
@@ -187,6 +188,11 @@ export const pipelineApi = {
     }
 
     return { message: 'Decision submitted successfully' };
+  },
+
+  approvePlan: async (runId: string): Promise<{ message: string }> => {
+    const response = await apiClient.post<{ message: string }>(`/pipeline/${runId}/approve_plan`);
+    return response.data;
   },
 
   getReport: async (runId: string): Promise<any> => {

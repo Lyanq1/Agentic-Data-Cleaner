@@ -876,7 +876,7 @@ export const HITLCheckpointPanel: React.FC<{
         )}
 
         {/* ── Result Approval Content ────────────────────────────────── */}
-        {!isPlanApproval && !isRequirementApproval && (
+        {!isPlanApproval && !isRequirementApproval && !isInputValidationClarification && (
           <>
             {/* Message */}
             <div className="rounded-xl bg-white border p-5 shadow-sm">
@@ -983,7 +983,6 @@ export const HITLCheckpointPanel: React.FC<{
                 title={isRequirementApproval && !allMcqAnswered ? 'Answer all required questions first' : ''}
                 className="flex-1 inline-flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white px-5 py-2.5 rounded-lg text-sm font-semibold transition-all shadow-sm hover:shadow-md disabled:opacity-50"
               >
-                
                 {isRequirementApproval ? 'Approve Requirements' : isPlanApproval ? 'Approve Plan' : 'Accept Results'}
               </button>
               <button
@@ -1028,31 +1027,26 @@ export const HITLCheckpointPanel: React.FC<{
 export const ResolvedValidationPlanPanel: React.FC<{
   validationResult: any;
   runId: string;
-}> = ({ validationResult, runId }) => {
+  onGeneratePlan: () => void;
+  isGenerating: boolean;
+}> = ({ validationResult, runId, onGeneratePlan, isGenerating }) => {
   const reasoning = validationResult.reasoning || '';
   const actionPlan = validationResult.action_plan || {};
   const resolvedByUser = validationResult.resolved_by_user || [];
 
-  // Read saved answers data from localStorage if available
-  const savedAnswersData = useMemo(() => {
+  // Read saved answers from localStorage if available
+  const savedAnswers = useMemo(() => {
     const saved = localStorage.getItem(`hitl_answers_${runId}`);
     if (saved) {
       try {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        return parsed.answers || {};
       } catch (e) {
         return null;
       }
     }
     return null;
   }, [runId]);
-
-  const answers = savedAnswersData?.answers || {};
-  const clarifications = validationResult.clarifications || savedAnswersData?.questions || {};
-
-  const getQuestionText = (cat: string, qKey: string): string => {
-    const qObj = clarifications[cat]?.[qKey];
-    return qObj?.question || `${cat.toUpperCase()} - ${qKey}`;
-  };
 
   return (
     <div className="mb-8 rounded-2xl border-2 border-emerald-400/40 bg-gradient-to-br from-emerald-50/80 via-white to-teal-50/40 shadow-lg overflow-hidden text-left animate-fadeIn">
@@ -1094,6 +1088,9 @@ export const ResolvedValidationPlanPanel: React.FC<{
 
               return (
                 <div key={issue} className="flex gap-4 p-4 rounded-xl border bg-card/60 backdrop-blur-md shadow-sm">
+                  <div className={`w-8 h-8 rounded-lg border flex items-center justify-center shrink-0 ${iconColor}`}>
+                    <Zap className="w-4 h-4" />
+                  </div>
                   <div>
                     <h5 className="text-sm font-bold text-foreground mb-1">{title}</h5>
                     <p className="text-xs text-muted-foreground leading-relaxed whitespace-pre-line">
@@ -1121,58 +1118,270 @@ export const ResolvedValidationPlanPanel: React.FC<{
         )}
 
         {/* User answers summary */}
-        {answers && Object.keys(answers).length > 0 && (
-          <details className="mt-4 text-xs">
+        {savedAnswers && Object.keys(savedAnswers).length > 0 && (
+          <details className="mt-4 text-xs font-semibold">
             <summary className="cursor-pointer text-muted-foreground hover:text-foreground font-medium select-none transition-colors">
               View your submitted answers
             </summary>
-            <div className="mt-2.5 rounded-xl border bg-muted/30 p-4 space-y-3 divide-y divide-border/40">
-              {Object.entries(answers).map(([key, value]: [string, any]) => {
+            <div className="mt-2.5 rounded-xl border bg-muted/30 p-4 space-y-2.5 divide-y divide-border/40">
+              {Object.entries(savedAnswers).map(([key, value]: [string, any]) => {
                 const parts = key.split('.');
                 const cat = parts[0];
                 const qKey = parts[1];
-                const questionText = getQuestionText(cat, qKey);
-                const qObj = clarifications[cat]?.[qKey];
-                const consequence = qObj ? getOptionConsequence(qObj.consequences, value) : null;
                 return (
-                  <div key={key} className="pt-3 first:pt-0">
-                    <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 mb-1.5">
-                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border shrink-0 text-center w-fit ${
-                        cat === 'null'
-                          ? 'bg-sky-50 text-sky-700 border-sky-200'
-                          : cat === 'duplicate'
-                            ? 'bg-violet-50 text-violet-700 border-violet-200'
-                            : 'bg-amber-50 text-amber-700 border-amber-200'
-                      }`}>
-                        {cat}
-                      </span>
-                      <span className="text-xs font-bold text-foreground leading-snug">
-                        {questionText}
-                      </span>
-                    </div>
-                    <div className="pl-3 border-l-2 border-emerald-400 ml-2 py-0.5 space-y-1">
-                      <div>
-                        <p className="text-xs text-muted-foreground/80 font-medium">Your answer:</p>
-                        <p className="text-xs text-emerald-700 font-bold leading-normal">{value}</p>
-                      </div>
-                      {consequence && (
-                        <div className="mt-1.5 p-2 rounded-lg bg-indigo-50/40 border border-indigo-100/30 text-[11px] text-indigo-900/90 leading-relaxed flex items-start gap-1.5 animate-fadeIn">
-                          <AlertCircle className="w-3.5 h-3.5 text-indigo-500 shrink-0 mt-0.5" />
-                          <div>
-                            <span className="font-bold text-indigo-950 block">Consequence:</span>
-                            {consequence}
-                          </div>
-                        </div>
-                      )}
-                    </div>
+                  <div key={key} className="pt-2 first:pt-0">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/60 block mb-0.5">
+                      {cat} - {qKey}
+                    </span>
+                    <p className="text-xs text-foreground font-medium">{value}</p>
                   </div>
                 );
               })}
             </div>
           </details>
         )}
+
+        {/* Proceed to plan button */}
+        <div className="pt-4 border-t border-slate-100 flex justify-end">
+          <button
+            type="button"
+            onClick={onGeneratePlan}
+            disabled={isGenerating}
+            className="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white rounded-xl text-sm font-semibold transition-all shadow-sm hover:shadow-md disabled:opacity-50"
+          >
+            {isGenerating ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Generating Cleaning Plan...
+              </>
+            ) : (
+              <>
+                <Layers className="w-4 h-4" />
+                Tiến hành tạo plan
+              </>
+            )}
+          </button>
+        </div>
       </div>
     </div>
   );
 };
 
+export const ExecutionPlanPanel: React.FC<{
+  executionPlan: any;
+  onApprove: () => void;
+  isApproving: boolean;
+}> = ({ executionPlan, onApprove, isApproving }) => {
+  const metadata = executionPlan.metadata || {};
+  const assumptions = executionPlan.assumptions || [];
+  const globalConstraints = executionPlan.global_constraints || {};
+  const taskList = executionPlan.task_list || [];
+
+  return (
+    <div className="mb-8 rounded-2xl border-2 border-indigo-400/40 bg-gradient-to-br from-indigo-50/80 via-white to-violet-50/40 shadow-lg overflow-hidden text-left animate-fadeIn">
+      {/* Header */}
+      <div className="bg-gradient-to-r from-indigo-500 to-violet-600 px-6 py-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center">
+            <Columns3 className="w-5 h-5 text-white" />
+          </div>
+          <div>
+            <h3 className="text-lg font-bold text-white">Execution Plan</h3>
+            <p className="text-white/80 text-sm">Generated cleaning DAG and worker strategies</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="p-6 space-y-6">
+        {/* Metadata & Global Constraints */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="rounded-xl border bg-white p-4 shadow-sm text-xs space-y-2">
+            <h4 className="font-bold text-foreground uppercase tracking-wider mb-2">Plan Details</h4>
+            <div><span className="text-muted-foreground">Plan ID:</span> <code className="bg-muted px-1.5 py-0.5 rounded font-mono">{metadata.plan_id}</code></div>
+            <div><span className="text-muted-foreground">Version:</span> {metadata.plan_version}</div>
+            <div><span className="text-muted-foreground">Created At:</span> {metadata.created_at}</div>
+          </div>
+          <div className="rounded-xl border bg-white p-4 shadow-sm text-xs space-y-2">
+            <h4 className="font-bold text-foreground uppercase tracking-wider mb-2">Global Constraints</h4>
+            <div><span className="text-muted-foreground">Max Retries:</span> {globalConstraints.max_retries_per_task}</div>
+            <div>
+              <span className="text-muted-foreground block mb-1">Preserve Columns:</span>
+              <div className="flex flex-wrap gap-1">
+                {globalConstraints.preserve_columns?.length > 0 ? (
+                  globalConstraints.preserve_columns.map((col: string) => (
+                    <span key={col} className="px-1.5 py-0.5 bg-slate-100 rounded text-[10px] font-mono text-slate-700">
+                      {col}
+                    </span>
+                  ))
+                ) : (
+                  <span className="text-slate-400 italic">None</span>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Assumptions */}
+        {assumptions.length > 0 && (
+          <div className="rounded-xl border bg-muted/20 p-4">
+            <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-2">Plan Assumptions</h4>
+            <ul className="list-disc pl-5 space-y-1 text-xs text-foreground">
+              {assumptions.map((asm: string, i: number) => (
+                <li key={i}>{asm}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* Summary */}
+        <div className="rounded-xl bg-white border p-5 shadow-sm">
+          <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-2">Plan Summary</h4>
+          <p className="text-xs text-foreground leading-relaxed leading-5">{executionPlan.plan_summary}</p>
+        </div>
+
+        {/* Tasks List */}
+        <div className="space-y-4">
+          <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+            Work Orders ({taskList.length})
+          </h4>
+          
+          <div className="space-y-4">
+            {taskList.map((item: any, i: number) => {
+              const task = item.work_order || {};
+              const title = task.task_id === 'deduplication' ? 'Exact & Fuzzy Deduplication' : task.task_id === 'null_handling' ? 'Null & Disguised Value Imputation' : 'Strict Type Casting';
+              const agentLabel = task.agent;
+              const isSkipped = task.skip;
+              
+              return (
+                <div key={i} className={`rounded-xl border bg-card p-4 shadow-sm transition-all duration-200 ${isSkipped ? 'opacity-60 bg-muted/10' : 'hover:shadow-md'}`}>
+                  <div className="flex items-start justify-between mb-3 flex-wrap gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold ${
+                        isSkipped 
+                          ? 'bg-slate-100 text-slate-500 border-slate-200' 
+                          : task.task_id === 'deduplication' 
+                            ? 'bg-violet-500/10 text-violet-600 border-violet-200' 
+                            : task.task_id === 'null_handling'
+                              ? 'bg-sky-500/10 text-sky-600 border-sky-200'
+                              : 'bg-amber-500/10 text-amber-600 border-amber-200'
+                      }`}>
+                        {title}
+                      </span>
+                      <span className="text-xs text-muted-foreground font-mono">({agentLabel})</span>
+                    </div>
+                    {isSkipped && (
+                      <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 bg-gray-100 text-gray-500 rounded border border-gray-200">
+                        Skipped
+                      </span>
+                    )}
+                  </div>
+
+                  {isSkipped ? (
+                    <p className="text-xs text-slate-500 italic">Reason: {task.skip_reason}</p>
+                  ) : (
+                    <div className="space-y-3 mt-2 text-xs">
+                      {task.rationale && (
+                        <p className="text-slate-600 leading-relaxed"><strong className="text-foreground">Rationale:</strong> {task.rationale}</p>
+                      )}
+                      
+                      {task.columns?.length > 0 && (
+                        <div>
+                          <span className="font-semibold text-foreground mr-2">Target columns:</span>
+                          <div className="inline-flex flex-wrap gap-1">
+                            {task.columns.map((col: string) => (
+                              <span key={col} className="px-1.5 py-0.5 bg-indigo-50 border border-indigo-100 rounded text-[10px] font-mono text-indigo-600">
+                                {col}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Display strategy depending on task_id */}
+                      {task.strategy && (
+                        <div className="bg-muted/30 border rounded-lg p-3">
+                          <span className="font-bold text-foreground block mb-2 text-[11px] uppercase tracking-wider text-muted-foreground/80">Strategy Configuration</span>
+                          {task.task_id === 'deduplication' && (
+                            <div className="space-y-1">
+                              <div>Tier level: {task.strategy.tier}</div>
+                              <div>Primary keys: {task.strategy.primary_keys?.join(', ')}</div>
+                              {task.strategy.fuzzy_columns && Object.keys(task.strategy.fuzzy_columns).length > 0 && (
+                                <div>
+                                  Fuzzy matching:
+                                  <ul className="list-disc pl-4 mt-0.5">
+                                    {Object.entries(task.strategy.fuzzy_columns).map(([col, cfg]: [string, any]) => (
+                                      <li key={col}>{col}: {cfg.method} (threshold {cfg.threshold})</li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                          {task.task_id === 'null_handling' && task.strategy.per_column && (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              {Object.entries(task.strategy.per_column).map(([col, cfg]: [string, any]) => (
+                                <div key={col} className="bg-white border rounded p-2 text-[11px]">
+                                  <span className="font-mono font-bold text-foreground block">{col}</span>
+                                  <span className="text-muted-foreground">Imputation: {cfg.strategy} {cfg.fill_value !== null ? `(${cfg.fill_value})` : ''}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {task.task_id === 'type_casting' && task.strategy.per_column && (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              {Object.entries(task.strategy.per_column).map(([col, cfg]: [string, any]) => (
+                                <div key={col} className="bg-white border rounded p-2 text-[11px]">
+                                  <span className="font-mono font-bold text-foreground block">{col}</span>
+                                  <span className="text-muted-foreground">Cast expected: {cfg.expected_type} {cfg.parse_format ? `(Format: ${cfg.parse_format})` : ''}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {task.verification?.pandera_checks?.length > 0 && (
+                        <div>
+                          <span className="font-semibold text-foreground block mb-1">Validation rules:</span>
+                          <div className="flex flex-wrap gap-1.5">
+                            {task.verification.pandera_checks.map((rule: string, ri: number) => (
+                              <span key={ri} className="px-2 py-0.5 bg-emerald-50 border border-emerald-100 rounded-md text-[10px] font-mono text-emerald-700">
+                                {rule}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Action Button */}
+        <div className="pt-4 border-t border-slate-100 flex justify-end">
+          <button
+            type="button"
+            onClick={onApprove}
+            disabled={isApproving}
+            className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-600 hover:to-violet-700 text-white rounded-xl text-sm font-semibold transition-all shadow-md hover:shadow-lg disabled:opacity-50"
+          >
+            {isApproving ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Executing Pipeline...
+              </>
+            ) : (
+              <>
+                <CheckCircle2 className="w-4 h-4" />
+                Approve & Execute Cleaning
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};

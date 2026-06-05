@@ -81,8 +81,8 @@ async def run_pipeline(
         "data_profile": formatted_profile,
         "semantic_profile": final_state.get("semantic_profile"),
         "dataset_schema": final_state.get("dataset_schema"),
-        # "statistical_profile": final_state.get("statistical_profile"),
         "input_validation_result": final_state.get("input_validation_result"),
+        "execution_plan": final_state.get("execution_plan").model_dump() if final_state.get("execution_plan") and hasattr(final_state.get("execution_plan"), "model_dump") else final_state.get("execution_plan"),
         "completed_steps": final_state.get("completed_steps", []),
     }
 
@@ -118,6 +118,7 @@ async def get_pipeline_state(run_id: str) -> dict[str, Any] | None:
         "data_profile": formatted_profile,
         "semantic_profile": state.get("semantic_profile"),
         "input_validation_result": state.get("input_validation_result"),
+        "execution_plan": state.get("execution_plan").model_dump() if state.get("execution_plan") and hasattr(state.get("execution_plan"), "model_dump") else state.get("execution_plan"),
         "current_step": state.get("current_step"),
         "completed_steps": state.get("completed_steps", []),
         "errors": state.get("global_errors", []),

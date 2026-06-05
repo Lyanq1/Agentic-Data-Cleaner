@@ -156,3 +156,32 @@ async def api_resolve_pipeline(
     return {
         "message": "Answers submitted and pipeline resume triggered successfully."
     }
+
+
+@router.post("/pipeline/{run_id}/approve_plan", summary="Approve execution plan and resume cleaning pipeline")
+async def api_approve_plan(
+    run_id: str,
+    background_tasks: BackgroundTasks,
+):
+    """Resume the pipeline from the supervisor node after plan approval."""
+    config = {"configurable": {"thread_id": run_id}}
+    
+    async with get_checkpointer_manager().get() as checkpointer:
+        graph = build_graph(checkpointer=checkpointer)
+        snapshot = await graph.aget_state(config)
+        
+        if not snapshot or not snapshot.values:
+            raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found.")
+            
+    # Resume graph execution in the background
+    async def resume_graph():
+        async with get_checkpointer_manager().get() as cp:
+            gr = build_graph(checkpointer=cp)
+            # Passing None as inputs resumes from the last checkpoint
+            await gr.ainvoke(None, config=config)
+            
+    background_tasks.add_task(resume_graph)
+    
+    return {
+        "message": "Plan approved, pipeline execution resumed."
+    }

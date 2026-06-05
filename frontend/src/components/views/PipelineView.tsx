@@ -19,7 +19,7 @@ interface PipelineViewProps {
   onComplete: () => void;
 }
 
-import { HITLCheckpointPanel, ResolvedValidationPlanPanel } from './PipelineHitlPanel';
+import { HITLCheckpointPanel, ResolvedValidationPlanPanel, ExecutionPlanPanel } from './PipelineHitlPanel';
 import { RequirementSummaryPanel } from './RequirementSummaryPanel';
 
 /* ── Status Badge ───────────────────────────────────────────────────────── */
@@ -57,6 +57,24 @@ export const PipelineView: React.FC<PipelineViewProps> = ({ runId, onComplete })
   const [showLogs, setShowLogs] = useState(true);
   const [lastCheckpoint, setLastCheckpoint] = useState<any>(null);
   const [showSpecDetails, setShowSpecDetails] = useState(false);
+
+  const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
+  const [showExecutionPlan, setShowExecutionPlan] = useState(false);
+  const [isApprovingPlan, setIsApprovingPlan] = useState(false);
+
+  useEffect(() => {
+    setShowExecutionPlan(false);
+    setIsGeneratingPlan(false);
+    setIsApprovingPlan(false);
+  }, [runId]);
+
+  const handleGeneratePlan = () => {
+    setIsGeneratingPlan(true);
+    setTimeout(() => {
+      setIsGeneratingPlan(false);
+      setShowExecutionPlan(true);
+    }, 2000);
+  };
 
   // Fetch full state periodically or when invalidated
   const { data: state } = useQuery({
@@ -139,6 +157,22 @@ export const PipelineView: React.FC<PipelineViewProps> = ({ runId, onComplete })
     }
   });
 
+  const approvePlanMutation = useMutation({
+    mutationFn: () => {
+      setIsApprovingPlan(true);
+      return pipelineApi.approvePlan(runId);
+    },
+    onSuccess: () => {
+      setIsApprovingPlan(false);
+      queryClient.invalidateQueries({ queryKey: ['pipeline-state', runId] });
+      queryClient.invalidateQueries({ queryKey: ['hitl-checkpoint', runId] });
+    },
+    onError: (err: any) => {
+      setIsApprovingPlan(false);
+      alert(`Error approving plan: ${err.message || err}`);
+    }
+  });
+
   useEffect(() => {
     if (!state) return;
     
@@ -161,10 +195,10 @@ export const PipelineView: React.FC<PipelineViewProps> = ({ runId, onComplete })
     </span>
   );
 
-  const activeCheckpoint = checkpoint || (state?.awaiting_hitl || isTransitioning ? lastCheckpoint : null);
+  const activeCheckpoint = checkpoint || lastCheckpoint;
   const hasHitl = Boolean(activeCheckpoint);
   const isValidationReady = state?.input_validation_result?.status === 'ready';
- 
+  
   const displayHitl = hasHitl && showHitl;
   const displayResolvedPlan = isValidationReady && showHitl && !hasHitl;
   const showLeftPanel = displayHitl || displayResolvedPlan;
@@ -267,10 +301,18 @@ export const PipelineView: React.FC<PipelineViewProps> = ({ runId, onComplete })
                   isPending={submitDecisionMutation.isPending || isTransitioning}
                   isAwaiting={Boolean(state?.awaiting_hitl && checkpoint)}
                 />
+              ) : showExecutionPlan && state?.execution_plan ? (
+                <ExecutionPlanPanel
+                  executionPlan={state.execution_plan}
+                  onApprove={() => approvePlanMutation.mutate()}
+                  isApproving={isApprovingPlan || approvePlanMutation.isPending}
+                />
               ) : (
                 <ResolvedValidationPlanPanel
                   validationResult={state.input_validation_result}
                   runId={runId}
+                  onGeneratePlan={handleGeneratePlan}
+                  isGenerating={isGeneratingPlan}
                 />
               )}
               

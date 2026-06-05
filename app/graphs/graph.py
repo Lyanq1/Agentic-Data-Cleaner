@@ -137,10 +137,10 @@ class GraphBuilder:
         # Final endpoint
         builder.add_edge("report_agent", END)
 
-        # Compile graph with HITL interrupt before Report Agent only (no supervisor interrupt)
+        # Compile graph with HITL interrupt before supervisor and Report Agent
         return builder.compile(
             checkpointer=checkpointer,
-            interrupt_before=["report_agent"]
+            interrupt_before=["supervisor", "report_agent"]
         )
 
 
