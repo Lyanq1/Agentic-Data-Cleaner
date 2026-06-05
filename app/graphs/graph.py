@@ -9,7 +9,6 @@ from app.graphs.nodes import (
     semantic_profile_node,
     input_validator_node,
     planner_node,
-    supervisor_node,
     dedup_agent_node,
     null_agent_node,
     type_agent_node,
@@ -20,8 +19,8 @@ from app.graphs.nodes import (
 logger = logging.getLogger(__name__)
 
 
-def route_from_supervisor(state: GlobalState):
-    """Determine the next step in the DAG from the supervisor state."""
+def route_to_current_task(state: GlobalState):
+    """Route to the current worker task, or to the report when all tasks are done."""
     current_idx = state.get("current_task_idx", 0)
     task_list = state.get("task_list", [])
     
@@ -30,7 +29,10 @@ def route_from_supervisor(state: GlobalState):
         # Map task keys to node names
         if next_task in ["deduplication", "null_handling", "type_casting"]:
             return next_task
-        logger.warning(f"route_from_supervisor: Unrecognized task '{next_task}'. Falling back to supervisor check.")
+        logger.warning(
+            "route_to_current_task: Unrecognized task '%s'. Falling back to report.",
+            next_task,
+        )
         
     return "report_agent"
 
@@ -69,6 +71,14 @@ def route_from_input_validator(state: GlobalState):
     return "planner"
 
 
+def route_from_validator(state: GlobalState):
+    """Route after Pandera validation based on retry/replan decision."""
+    next_node = state.get("next_node")
+    if next_node == "planner":
+        return "planner"
+    return route_to_current_task(state)
+
+
 class GraphBuilder:
     """Assembles the multi-agent ETL pipeline graph."""
 
@@ -78,10 +88,7 @@ class GraphBuilder:
         Flow::
 
             START --> profiler --> semantic_profile --> input_validator --> planner
-                  --> supervisor (Dynamic routing loop)
-                      --> deduplication --> validator --> supervisor
-                      --> null_handling --> validator --> supervisor
-                      --> type_casting  --> validator --> supervisor
+                  --> worker --> validator --> next worker/report
                   --> report_agent --> END
         """
         builder = StateGraph(GlobalState)
@@ -91,7 +98,6 @@ class GraphBuilder:
         builder.add_node("semantic_profile", semantic_profile_node)
         builder.add_node("input_validator", input_validator_node)
         builder.add_node("planner", planner_node)
-        builder.add_node("supervisor", supervisor_node)
         builder.add_node("deduplication", dedup_agent_node)
         builder.add_node("null_handling", null_agent_node)
         builder.add_node("type_casting", type_agent_node)
@@ -112,12 +118,10 @@ class GraphBuilder:
                 "end": END
             }
         )
-        builder.add_edge("planner", "supervisor")
-
-        # Dynamic routing loop from supervisor
+        # Route directly from planner to the first active worker task.
         builder.add_conditional_edges(
-            "supervisor",
-            route_from_supervisor,
+            "planner",
+            route_to_current_task,
             {
                 "deduplication": "deduplication",
                 "null_handling": "null_handling",
@@ -131,16 +135,26 @@ class GraphBuilder:
         builder.add_edge("null_handling", "validator")
         builder.add_edge("type_casting", "validator")
         
-        # Validator feedback loop to supervisor
-        builder.add_edge("validator", "supervisor")
+        # Validator feedback loop: pass/retry -> current worker/report, exhausted retries -> planner
+        builder.add_conditional_edges(
+            "validator",
+            route_from_validator,
+            {
+                "deduplication": "deduplication",
+                "null_handling": "null_handling",
+                "type_casting": "type_casting",
+                "report_agent": "report_agent",
+                "planner": "planner",
+            },
+        )
         
         # Final endpoint
         builder.add_edge("report_agent", END)
 
-        # Compile graph with HITL interrupt before supervisor and Report Agent
+        # Compile graph with HITL interrupt before worker execution and final report.
         return builder.compile(
             checkpointer=checkpointer,
-            interrupt_before=["supervisor", "report_agent"]
+            interrupt_before=["deduplication", "null_handling", "type_casting", "report_agent"]
         )
 
 

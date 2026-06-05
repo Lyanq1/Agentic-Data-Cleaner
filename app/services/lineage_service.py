@@ -1,4 +1,6 @@
 import uuid
+from typing import Any
+
 import pandas as pd
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -47,7 +49,10 @@ class LineageService:
             db.flush()
             
             # 3. Insert new dataset records
-            records_dict = df.to_dict(orient="records")
+            records_dict = [
+                {key: _json_safe_value(value) for key, value in row.items()}
+                for row in df.to_dict(orient="records")
+            ]
             db_records = [
                 DatasetRecord(
                     session_id=session_id,
@@ -67,7 +72,7 @@ class LineageService:
             raise e
         finally:
             db.close()
-
+            
     @staticmethod
     def get_latest_version(session_id: uuid.UUID) -> pd.DataFrame:
         """Retrieves the latest version of the dataset as a Pandas DataFrame."""
@@ -97,7 +102,7 @@ class LineageService:
             
         finally:
             db.close()
-            
+
     @staticmethod
     def get_version(session_id: uuid.UUID, version: int) -> pd.DataFrame:
         """Retrieves a specific version of the dataset as a Pandas DataFrame."""
@@ -116,3 +121,17 @@ class LineageService:
             
         finally:
             db.close()
+
+
+def _json_safe_value(value: Any) -> Any:
+    """Convert pandas missing scalar values to JSONB-safe nulls."""
+    if isinstance(value, dict):
+        return {key: _json_safe_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_json_safe_value(item) for item in value]
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        return value
+    return value

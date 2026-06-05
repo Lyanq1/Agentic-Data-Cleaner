@@ -1,6 +1,7 @@
 """Pipeline service — orchestrates the LangGraph execution."""
 import uuid
 import logging
+from pathlib import Path
 from typing import Any
 
 from app.graphs.graph import build_graph
@@ -58,6 +59,7 @@ async def run_pipeline(
         "dataset_path": canonical_path,
         "user_prompt": user_prompt,
         "project_id": run_id,
+        "session_id": Path(canonical_path).stem,
         "dataset_schema": data_schema,
     }
 

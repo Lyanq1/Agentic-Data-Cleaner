@@ -8,7 +8,6 @@ class AgentRole(str, Enum):
     PROFILER = "profiler"
     INPUT_VALIDATOR = "input_validator"
     PLANNER = "planner"
-    SUPERVISOR = "supervisor"
     VALIDATOR = "validator"
     REPORT_AGENT = "report_agent"
     

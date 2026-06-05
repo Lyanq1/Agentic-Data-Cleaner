@@ -216,6 +216,7 @@ class GlobalState(TypedDict):
 
     # Project Context
     project_id: Optional[str]
+    session_id: Optional[str]
     dataset_path: Optional[str]
     user_prompt: Optional[str]
 
@@ -237,12 +238,16 @@ class GlobalState(TypedDict):
     
     # Execution & Routing
     execution_plan: Optional[ExecutionPlan]
+    task_list: List[str]
     worker_states: Optional[WorkerStates]
     validation_results: Annotated[List[ValidationResultItem], append_list]
     
     # Control flow variables
     current_task_idx: Optional[int]
     retry_count: Optional[int]
+    last_validation_error: Optional[str]
+    failed_task_id: Optional[str]
+    replan_reason: Optional[str]
 
     # HITL Fields
     hitl_checkpoint: Optional[int]

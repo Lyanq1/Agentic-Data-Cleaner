@@ -163,7 +163,7 @@ async def api_approve_plan(
     run_id: str,
     background_tasks: BackgroundTasks,
 ):
-    """Resume the pipeline from the supervisor node after plan approval."""
+    """Resume the pipeline from the plan-approval checkpoint."""
     config = {"configurable": {"thread_id": run_id}}
     
     async with get_checkpointer_manager().get() as checkpointer:
