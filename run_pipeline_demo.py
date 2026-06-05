@@ -221,9 +221,13 @@ async def main():
                                 consequences = get_val(q_data, 'consequences')
                                 if consequences:
                                     print("         Consequences:")
-                                    wrapped_consequences = textwrap.wrap(consequences, width=76)
-                                    for line in wrapped_consequences:
-                                        print(f"           | {line}")
+                                    if isinstance(consequences, dict):
+                                        for opt_name, cons in consequences.items():
+                                            print(f"           • {opt_name}: {cons}")
+                                    else:
+                                        wrapped_consequences = textwrap.wrap(str(consequences), width=76)
+                                        for line in wrapped_consequences:
+                                            print(f"           | {line}")
                             
                             # If it's an insight question, print insight & confirm ask
                             insight = get_val(q_data, 'insight')

@@ -10,6 +10,7 @@ from app.agents.base import BaseAgent
 from app.graphs.states.global_state import (
     SemanticProfile,
     ColumnSemanticProfileDetail,
+    GlobalState,
 )
 
 logger = logging.getLogger(__name__)
@@ -67,7 +68,7 @@ class SemanticProfilerAgent(BaseAgent):
     description = "Generates combined semantic profiles, relationships, and data quality audits."
     tools = []
 
-    async def run(self, state: dict) -> dict[str, Any]:
+    async def run(self, state: GlobalState) -> dict[str, Any]:
         statistical_profile = state.get("statistical_profile")
         dataset_path = state.get("dataset_path")
 

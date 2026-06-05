@@ -8,7 +8,7 @@ from app.agents.base import BaseAgent
 from app.agents.registry import AgentRegistry
 from app.agents.planner.prompts import PLANNER_SYSTEM_PROMPT
 from datetime import datetime
-from app.graphs.states.global_state import ExecutionPlan, TaskDetail, TaskDetailWrapper, PlanMetadata, GlobalConstraints
+from app.graphs.states.global_state import ExecutionPlan, TaskDetail, TaskDetailWrapper, PlanMetadata, GlobalConstraints, GlobalState
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +21,7 @@ class PlannerAgent(BaseAgent):
     description = "Generates a structured execution plan for deduplication, null handling, and type casting."
     tools = []  # pure LLM reasoning
 
-    async def run(self, state: dict) -> dict[str, Any]:
+    async def run(self, state: GlobalState) -> dict[str, Any]:
         """Invoke the LLM to generate the ExecutionPlan.
 
         Args:

@@ -1,907 +1,352 @@
 # Báo Cáo Tổng Hợp Codebase — Agentic Data Engineering
 
-> **Mục đích:** File context toàn diện cho AI (Claude, GPT, v.v.) phân tích sâu repository HCMUS Capstone Project.  
-> **Ngày tạo:** 2026-05-24  
-> **Repo:** `HCMUS-Capstone-Project` — Multi-Agent ETL/Data Engineering với Human-In-The-Loop  
-> **Package Python:** `app/` (không phải `src/` — thư mục `src/` chỉ còn `__pycache__` legacy)
+> **Mục đích:** File context toàn diện cho AI (Gemini, Claude, GPT, v.v.) phân tích sâu repository HCMUS Capstone Project.  
+> **Ngày cập nhật:** 2026-06-05 (Cập nhật khớp 100% với cấu trúc và code thực tế hiện tại)  
+> **Repo:** `Agentic-Data-Cleaner` — Multi-Agent ETL/Data Engineering với Human-In-The-Loop  
+> **Package Python:** `app/`
 
 ---
 
 ## 1. Tóm Tắt Executive
 
-Hệ thống **Agentic Data Engineering** là đồ án tốt nghiệp HCMUS xây dựng pipeline ETL tự động làm sạch dữ liệu dạng bảng (CSV, Excel, JSON) bằng kiến trúc **Multi-Agent** trên **LangGraph**, kế thừa và mở rộng ý tưởng từ bài báo nghiên cứu **AutoDCWorkflow** (Li et al., 2024).
+Hệ thống **Agentic Data Engineering** là đồ án tốt nghiệp HCMUS xây dựng pipeline ETL tự động làm sạch dữ liệu dạng bảng (CSV, Excel, JSON) bằng kiến trúc **Multi-Agent** trên **LangGraph**, kết hợp cơ chế kiểm soát chất lượng tự động thông qua **Pandera** và tương tác người dùng **Human-In-The-Loop (HITL)**.
 
-**Điểm khác biệt cốt lõi so với AutoDCWorkflow:**
-
-- Multi-agent song song thay vì single-agent tuần tự
-- Human-In-The-Loop (2 checkpoint) thay vì fully automated
-- Pandas code generation thay vì OpenRefine operations
-- Hỗ trợ concurrent requests + PostgreSQL checkpointing
-- Deduplication sequential trước parallel workers
-
-**Luồng pipeline bắt buộc (không được phá vỡ thứ tự):**
-
+**Luồng pipeline thực tế hiện tại:**
 ```
-ingest → profile → select_columns → plan → [HITL-1] → deduplicate
-→ parallel_workers → merge → validate → [HITL-2 nếu cần] → report
+[Ingest] (normalizer) 
+   ↓
+[profiler_node] (Thống kê EDA)
+   ↓
+[semantic_profile_node] (LLM Semantic Audit & Quality Review)
+   ↓
+[input_validator_node] (Đánh giá chất lượng & Yêu cầu làm rõ)
+   ↓ ── (Nếu status == 'needs_clarification' → HITL: Dừng chờ user trả lời)
+[planner_node] (Lập kế hoạch làm sạch ExecutionPlan)
+   ↓ ── (HITL: interrupt_before ở các worker task)
+[deduplication] ── [validator] (Pandera check & Retry/Replan loop)
+   ↓
+[null_handling] ── [validator] (Pandera check & Retry/Replan loop)
+   ↓
+[type_casting]  ── [validator] (Pandera check & Retry/Replan loop)
+   ↓ ── (HITL: interrupt_before)
+[report_agent] (Tạo báo cáo kết quả và kết thúc)
 ```
 
 ---
 
-## 2. Bối Cảnh Nghiên Cứu
-
-### 2.1 AutoDCWorkflow — Những gì đã adopt
-
-| Insight                              | Implementation trong repo                                                  |
-| ------------------------------------ | -------------------------------------------------------------------------- |
-| 4-dimension quality model            | `ColumnQualityDimensions` — Accuracy, Relevance, Completeness, Conciseness |
-| Select target columns trước planning | `ColumnSelectorAgent` node (`node_select_columns`)                         |
-| Quality context cho Planner          | `DataProfiler.profile_async()` enrich `ColumnProfile` với LLM assessment   |
-
-### 2.2 AutoDCWorkflow — Những gì đã từ chối / cải tiến
-
-| Vấn đề AutoDC                  | Giải pháp của repo                                             |
-| ------------------------------ | -------------------------------------------------------------- |
-| Single-agent, column-by-column | Multi-agent parallel với batching                              |
-| Không có HITL                  | 2 checkpoints: plan approval + result approval                 |
-| Không xử lý dedup              | `DuplicateHandlerAgent` chạy sequential đầu tiên               |
-| 6 OpenRefine ops cứng          | Pandas code generation linh hoạt                               |
-| Không concurrent               | `asyncio.gather` + `PipelineManager` + PostgreSQL checkpointer |
-
-### 2.3 Tài liệu tham khảo trong repo
-
-| File                                  | Nội dung                                                 |
-| ------------------------------------- | -------------------------------------------------------- |
-| `docs/ARCHITECTURE.md`                | Kiến trúc v2, Mermaid diagrams, agent roles              |
-| `docs/full_data_flow.md`              | End-to-end data/control flow                             |
-| `docs/TEAM_ASSIGNMENT.md`             | Phân công 6 thành viên                                   |
-| `docs/REDESIGN_PLAN.md`               | Kế hoạch redesign (hallucination, KB, evaluation)        |
-| `docs/HITL/HITL_research.md`          | Nghiên cứu HITL synthesis                                |
-| `docs/PHASE1-5_COMPLETION_SUMMARY.md` | Tiến độ các phase triển khai: KB, multi-file, evaluation |
-
----
-
-## 3. Tech Stack
+## 2. Tech Stack
 
 | Layer                   | Technology                           | Version/Notes                |
 | ----------------------- | ------------------------------------ | ---------------------------- |
-| **Language**            | Python                               | >=3.13 (pyproject.toml)      |
-| **Agent Orchestration** | LangGraph                            | >=1.1.0                      |
-| **LLM Framework**       | LangChain                            | >=1.2.0                      |
-| **LLM Providers**       | OpenAI GPT-4o/mini, Anthropic Claude | Configurable per agent       |
-| **Data Processing**     | pandas, polars, pyarrow              | Parquet canonical format     |
-| **SQL Engine**          | DuckDB                               | Per-run file-based DB        |
-| **API**                 | FastAPI + WebSocket                  | Port 8000                    |
-| **State Persistence**   | PostgreSQL                           | LangGraph AsyncPostgresSaver |
-| **Session Cache**       | Redis                                | TTL 24h, run metadata        |
-| **Vector Store**        | ChromaDB                             | Knowledge Base RAG           |
-| **Embeddings**          | OpenAI text-embedding-3-small        | Via langchain-chroma         |
-| **Frontend**            | React 19 + Vite 8 + TypeScript       | Tailwind 4, TanStack Query   |
-| **Observability**       | LangSmith, structlog                 | Optional tracing             |
-| **Containerization**    | Docker Compose                       | Postgres 16 + Redis 7        |
-| **CLI**                 | Typer                                | Entry point `ade`            |
+| **Language**            | Python                               | >=3.11                       |
+| **Agent Orchestration** | LangGraph                            | >=0.1                        |
+| **LLM Framework**       | LangChain                            | langchain-core, langchain-openai, langchain-anthropic |
+| **LLM Providers**       | OpenAI (mặc định), Anthropic         | Cấu hình qua `.env`          |
+| **Data Processing**     | pandas, pyarrow                      | Parquet format cho Ingestion |
+| **Validation Engine**   | Pandera                              | Định nghĩa và check schemas  |
+| **Database**            | PostgreSQL                           | Lưu trữ Lineage và dữ liệu   |
+| **ORM & Driver**        | SQLAlchemy, psycopg2-binary          | Quản lý kết nối PostgreSQL   |
+| **Session Cache**       | Redis                                | Quản lý session              |
+| **API Framework**       | FastAPI + Uvicorn                    | Port 8000                    |
+| **Frontend**            | React + Vite + TypeScript            | Tailwind CSS, TanStack Query |
 
 ---
 
-## 4. Cấu Trúc Thư Mục Chi Tiết
+## 3. Cấu Trúc Thư Mục Chi Tiết Thực Tế
 
 ```
-HCMUS-Capstone-Project/
-├── app/                          # ← BACKEND CHÍNH (Python package)
+Agentic-Data-Cleaner/
+├── app/                          # ← BACKEND CHÍNH
 │   ├── __init__.py
-│   ├── cli.py                    # Typer CLI: `ade serve`, `ade version`
+│   ├── main.py                   # Khởi tạo FastAPI app, lifespan, CORS, routers
 │   │
-│   ├── core/                     # Domain models, config, state, exceptions
-│   │   ├── config.py             # Pydantic Settings từ .env
-│   │   ├── state.py              # PipelineState TypedDict (LangGraph)
-│   │   ├── exceptions.py         # ADEBaseError hierarchy
-│   │   ├── pipeline_manager.py   # Async queue concurrent pipelines
-│   │   ├── format_converter.py   # Multi-format read/write
-│   │   ├── model_config.py       # MODEL_REGISTRY, AGENT_MODEL_ASSIGNMENT
-│   │   ├── cost_tracker.py       # Token usage/cost logging
-│   │   └── model/                # Pydantic domain models
-│   │       ├── enums.py          # InputFormat, AgentRole, PipelineStatus, HITLDecision
-│   │       ├── quality.py        # QualityDimension, ColumnQualityDimensions
-│   │       ├── profile.py        # ColumnProfile, DataProfile, CrossColumnIssue
-│   │       ├── selection.py      # TargetColumnSelection
-│   │       ├── plan.py           # WorkerTask, ExecutionPlan
-│   │       ├── validation.py     # ValidationIssue, ValidationResult
-│   │       └── pipeline.py       # UserRequirements, HITLCheckpoint, PipelineRun
+│   ├── config/
+│   │   ├── __init__.py
+│   │   └── config.py             # Pydantic BaseSettings, load biến môi trường từ .env
 │   │
-│   ├── graph/                    # LangGraph pipeline definition
-│   │   ├── pipeline.py           # build_graph() — StateGraph wiring
-│   │   ├── nodes.py              # 11 async node implementations
-│   │   └── edges.py              # after_validate() conditional routing
+│   ├── core/
+│   │   ├── __init__.py
+│   │   ├── database.py           # Thiết lập SQLAlchemy engine, SessionLocal, init_db()
+│   │   ├── llm_factory.py        # create_llm() chat model ChatOpenAI / ChatAnthropic
+│   │   └── redis_client.py       # Quản lý kết nối Redis
 │   │
-│   ├── agents/                   # Multi-agent implementations
-│   │   ├── base.py               # BaseAgent — LLM, ReAct tool loop
-│   │   ├── column_selector/      # ColumnSelectorAgent + prompts
-│   │   ├── planner/              # PlannerAgent + RAG KnowledgeBase + prompts
-│   │   ├── duplicate_handler/    # DuplicateHandlerAgent (sequential)
-│   │   ├── null_type_handler/    # NullTypeHandlerAgent (parallel, code gen)
-│   │   ├── validator_agent/      # ValidatorAgent (4-layer) + unauthorized_change_detector
-│   │   └── reporter/             # ReporterAgent (export + JSON report)
+│   ├── exceptions/
+│   │   ├── __init__.py
+│   │   └── ingestion_exceptions.py  # IngestionError class
 │   │
-│   ├── ingestion/                # File parsing & normalization
-│   │   ├── normalizer.py         # detect_format → parse → Parquet canonical
-│   │   ├── parsers/              # CSV, Excel, JSON parsers
-│   │   └── duckdb/duckdb_mapper.py  # Per-run DuckDB: raw/canonical tables
+│   ├── models/
+│   │   ├── __init__.py
+│   │   ├── lineage.py            # SQLAlchemy models: Session, LineageVersion, DatasetRecord
+│   │   └── schemas/
 │   │
-│   ├── tools/                    # Non-agent utilities
-│   │   ├── data_profiler/        # DataProfiler (3-phase), StatisticalProfiler
-│   │   ├── column_inspector/     # ColumnQualityInspector, CrossColumnInspector
-│   │   └── sql_executer/         # SQLExecutor (DuckDB wrapper)
+│   ├── graphs/                   # LangGraph pipeline definition
+│   │   ├── __init__.py
+│   │   ├── graph.py              # build_graph() — Định nghĩa graph, nodes, conditional edges và checkpointer
+│   │   ├── nodes.py              # Implementations của các node trong graph
+│   │   ├── edges.py              # Logic định tuyến phụ trợ
+│   │   ├── checkpointer.py       # AsyncPostgresSaver checkpointer cho LangGraph
+│   │   └── states/
+│   │       └── global_state.py   # GlobalState TypedDict (LangGraph) & các Pydantic helper models
 │   │
-│   ├── memory/                   # Persistence & RAG
-│   │   ├── knowledge_base.py     # Chroma RAG: best_practices, chat_history, past_tasks
-│   │   ├── vector_store.py       # Chroma + OpenAI embeddings
-│   │   ├── session_store.py      # Redis async session metadata
-│   │   ├── chat_history.py       # Conversation persistence
-│   │   ├── best_practices.json   # 36 curated cleaning rules (v2.0)
-│   │   └── .kb_store/            # Persisted Chroma SQLite
+│   ├── agents/                   # Thư mục Multi-agent
+│   │   ├── __init__.py
+│   │   ├── base.py               # Lớp BaseAgent chứa BaseChatModel và bind tools
+│   │   ├── roles.py              # Enum AgentRole (profiler, planner, validator, null_agent, v.v.)
+│   │   ├── registry.py           # AgentRegistry quản lý đăng ký/khởi tạo Agent tự động
+│   │   │
+│   │   ├── input_validator/      # Agent kiểm tra input và hỏi clarification
+│   │   │   ├── agent.py
+│   │   │   └── prompts.py
+│   │   │
+│   │   ├── planner/              # Agent lập kế hoạch làm sạch
+│   │   │   ├── agent.py
+│   │   │   └── prompts.py
+│   │   │
+│   │   ├── semantic_analyzer/    # Agent profiling ngữ nghĩa & audit chất lượng
+│   │   │   ├── profiler_agent.py
+│   │   │   └── prompts.py
+│   │   │
+│   │   ├── result_validator/     # Agent validator stub (TODO)
+│   │   │   └── agent.py
+│   │   │
+│   │   └── reporter/             # Agent reporter stub (TODO)
+│   │       └── agent.py
 │   │
-│   ├── hitl/                     # Human-In-The-Loop service
-│   │   └── service.py            # submit_decision, get_pending_checkpoint
+│   ├── ingestion/                # Ingestion pipeline
+│   │   ├── __init__.py
+│   │   ├── normalizer.py         # ingest_to_canonical() convert file → Parquet + lưu database
+│   │   └── parsers/              # Parsers cho các loại file
+│   │       ├── base.py
+│   │       ├── csv_parser.py
+│   │       ├── excel_parser.py
+│   │       └── json_parser.py
 │   │
-│   ├── api/                      # FastAPI application
-│   │   ├── main.py               # App factory, lifespan, checkpointer, CORS
-│   │   ├── websocket.py          # /ws/{run_id} realtime events
-│   │   └── routes/
-│   │       ├── upload.py         # POST upload, POST /multi, GET profile
-│   │       ├── pipeline.py       # GET status, GET state
-│   │       ├── hitl.py           # GET checkpoint, POST decision
-│   │       └── reports.py        # GET report, GET download
+│   ├── validators/               # Thư viện kiểm chuẩn chất lượng dữ liệu với Pandera
+│   │   ├── __init__.py
+│   │   ├── models.py             # ValidationOutcome model
+│   │   ├── runner.py             # validate_current_task() chạy kiểm thử thực tế trên dataframe
+│   │   └── schema_builder.py     # Tự động sinh Pandera Schema động từ profile
 │   │
-│   ├── evaluation/               # Thesis evaluation metrics
-│   │   ├── metrics.py            # Hallucination, RequirementAdherence, DataFidelity
-│   │   └── comparator.py         # DataComparator input vs output
+│   ├── services/                 # Business logic services
+│   │   ├── __init__.py
+│   │   ├── ingestion.py          # IngestionService quản lý validation và lưu trữ ban đầu
+│   │   ├── lineage_service.py    # LineageService đọc/ghi version dữ liệu từ Postgres JSONB
+│   │   ├── lineage_utils.py
+│   │   └── pipeline.py           # run_pipeline(), get_pipeline_state()
 │   │
-│   └── services/                 # LEGACY — duplicate validator copy
-│       └── agents/validator_agent/agent.py
+│   └── tools/                    # Các module chứa tool phụ trợ
+│       ├── __init__.py
+│       ├── tool_registration.py  # Đăng ký tool cho agents
+│       └── data/
+│           └── eda/              # Tool thực hiện EDA thống kê
+│               ├── __init__.py
+│               ├── cli.py
+│               ├── models.py
+│               ├── profiler.py   # StatisticalProfiler phân tích data thô
+│               ├── tool.py       # perform_eda LangChain tool
+│               └── utils.py
 │
-├── frontend/                     # React SPA
-│   ├── src/
-│   │   ├── App.tsx               # Step router: upload|profile|pipeline|result
-│   │   ├── api/                  # axios client + pipelineApi services
-│   │   ├── lib/                  # pipelineSession URL sync, utils
-│   │   └── components/
-│   │       ├── layout/Header.tsx
-│   │       └── views/
-│   │           ├── UploadView.tsx
-│   │           ├── PipelineView.tsx
-│   │           ├── PipelineHitlPanel.tsx
-│   │           └── ResultView.tsx
-│   └── package.json              # React 19, Vite 8, Tailwind 4
-│
-├── tests/
-│   ├── conftest.py               # Fixtures: sample_csv, sample_excel, clean_df
-│   ├── test_pipeline_manager.py
-│   ├── test_format_converter.py
-│   ├── test_upload_multi.py
-│   ├── test_knowledge_base.py
-│   ├── test_practices_structure.py
-│   ├── benchmarks/test_pipeline_throughput.py
-│   └── evaluation/test_cases/    # CSV fixtures: casing, null, semantic drift
-│
-├── scripts/
-│   ├── simulate_load.py          # HTTP load test N concurrent uploads
-│   └── merge_best_practices.py   # Merge research practices into KB JSON
-│
-├── docs/                         # Documentation (xem §2.3)
-├── docker-compose.yml            # postgres + redis; profile `full` = API
-├── Dockerfile                    # Python 3.11-slim (NOTE: pyproject requires 3.13)
-├── Makefile / make.ps1           # Dev automation
-├── pyproject.toml                # Dependencies, CLI, ruff, mypy, pytest
-└── .env.example                  # Environment template
+├── frontend/                     # React App
+├── tests/                        # Hệ thống test
+├── docker-compose.yml            # Khởi tạo Postgres + Redis
+└── .env                          # Cấu hình môi trường thực tế
 ```
 
 ---
 
-## 5. Kiến Trúc Pipeline LangGraph
+## 4. Kiến Trúc Pipeline LangGraph & Luồng HITL
 
-### 5.1 Sơ đồ luồng
+### 4.1 Chi tiết các Nodes của Pipeline
 
-```mermaid
-flowchart TB
-    START --> ingest
-    ingest --> profile
-    profile --> select_columns
-    select_columns --> plan
-    plan --> hitl_plan
+Hệ thống định nghĩa 9 nodes chính trong [app/graphs/nodes.py](file:///Users/lyanhquan/code/Agentic-Data-Cleaner/app/graphs/nodes.py):
 
-    hitl_plan -->|approve| deduplicate
-    hitl_plan -->|modify| plan
-    hitl_plan -->|reject| END
+| Node | Tên hàm | Vai trò | Tương tác Agent/Tool |
+| :--- | :--- | :--- | :--- |
+| **profiler** | `profiler_node` | Chạy EDA thống kê mô tả trên dataset thô, tạo ra profile kỹ thuật cơ bản. | Gọi `@tool perform_eda` |
+| **semantic_profile** | `semantic_profile_node` | Phân tích ngữ nghĩa của từng cột, nhóm logic, tìm mối liên hệ, và audit chất lượng dữ liệu ban đầu. | `SemanticProfilerAgent` |
+| **input_validator** | `input_validator_node` | Đối chiếu profile thống kê & ngữ nghĩa với yêu cầu làm sạch của người dùng, xác định có cần làm rõ thông tin hay không. | `InputValidatorAgent` |
+| **planner** | `planner_node` | Sinh kế hoạch dọn dẹp dữ liệu chi tiết (`ExecutionPlan`) gồm các task cho deduplication, null handling và type casting. | `PlannerAgent` |
+| **deduplication** | `deduplication_node` | Node thực hiện dọn dẹp các dòng trùng lặp (hiện tại là worker stub lưu pass-through dữ liệu). | `_persist_passthrough_worker_version` |
+| **null_handling** | `null_handling_node` | Node xử lý giá trị khuyết thiếu (hiện tại là worker stub). | `_persist_passthrough_worker_version` |
+| **type_casting** | `type_casting_node` | Node chuẩn hóa kiểu dữ liệu theo mong đợi ngữ nghĩa (hiện tại là worker stub). | `_persist_passthrough_worker_version` |
+| **validator** | `validator_node` | Kiểm thử chất lượng dữ liệu đầu ra của worker hiện tại bằng Pandera schema sinh tự động. | `validate_current_task()` |
+| **report_agent** | `report_agent_node` | Node xuất báo cáo tổng kết pipeline (hiện tại là stub). | Trả về trạng thái `reporting` |
 
-    deduplicate --> parallel_workers
-    parallel_workers --> merge
-    merge --> validate
+### 4.2 Định Tuyến Có Điều Kiện (Conditional Edges)
 
-    validate -->|passed| report
-    validate -->|retry, count<=2| parallel_workers
-    validate -->|needs_human_review| hitl_result
+Các hàm định tuyến chính trong [app/graphs/graph.py](file:///Users/lyanhquan/code/Agentic-Data-Cleaner/app/graphs/graph.py):
+1. **`route_from_input_validator(state)`**:
+   - Nếu `input_validation_result.status == "needs_clarification"` và còn câu hỏi chưa được trả lời → định tuyến tới `END` (Pipeline dừng chờ tương tác người dùng).
+   - Nếu sẵn sàng → đi tiếp tới `planner`.
+2. **`route_to_current_task(state)`**:
+   - Dựa trên danh sách `task_list` được lập bởi planner và index `current_task_idx` hiện tại để trỏ tới worker node tiếp theo: `deduplication`, `null_handling`, `type_casting`.
+   - Nếu đã hoàn thành tất cả task trong list → chuyển tới `report_agent`.
+3. **`route_from_validator(state)`**:
+   - Nếu kết quả validation của task hiện tại **passed**: tăng `current_task_idx` và chuyển sang task tiếp theo (gọi lại `route_to_current_task`).
+   - Nếu **failed**: tăng `retry_count`.
+     - Nếu `retry_count < max_retries`: quay lại chạy tiếp worker hiện tại để tự sửa sai (Self-correction).
+     - Nếu đã cạn lượt retry (`retry_count >= max_retries`): lưu lỗi vào `last_validation_error` và định tuyến quay lại `planner` để replan kế hoạch mới.
 
-    hitl_result -->|approve/reject| report
-    hitl_result -->|modify| plan
+### 4.3 Điểm Ngắt HITL (Interrupts)
 
-    report --> END
+Graph được biên dịch với cơ chế ngắt trạng thái (interrupt):
+```python
+builder.compile(
+    checkpointer=checkpointer,
+    interrupt_before=["deduplication", "null_handling", "type_casting", "report_agent"]
+)
 ```
-
-### 5.2 Chi tiết từng node
-
-| #   | Node               | File       | Chức năng                                                    | Agent/Tool                                      |
-| --- | ------------------ | ---------- | ------------------------------------------------------------ | ----------------------------------------------- |
-| 1   | `ingest`           | `nodes.py` | Parse file → canonical Parquet, init DuckDB                  | `ingest_to_canonical()`, `duckdb_mapper`        |
-| 2   | `profile`          | `nodes.py` | 3-phase profiling (statistical + LLM quality + cross-column) | `DataProfiler.profile_async()`                  |
-| 3   | `select_columns`   | `nodes.py` | Lọc target vs skipped columns                                | `ColumnSelectorAgent`                           |
-| 4   | `plan`             | `nodes.py` | Tạo ExecutionPlan với RAG                                    | `PlannerAgent` + `KnowledgeBase`                |
-| 5   | `hitl_plan`        | `nodes.py` | **HITL-1:** interrupt() plan approval                        | LangGraph `interrupt()`                         |
-| 6   | `deduplicate`      | `nodes.py` | Xử lý duplicate **sequential** (trước parallel)              | `DuplicateHandlerAgent`                         |
-| 7   | `parallel_workers` | `nodes.py` | Fan-out null/type cleaning theo batches                      | `NullTypeHandlerAgent` × N via `asyncio.gather` |
-| 8   | `merge`            | `nodes.py` | Gộp partial Parquets, carry skipped columns                  | Pure Python/pandas                              |
-| 9   | `validate`         | `nodes.py` | 4-layer validation gate                                      | `ValidatorAgent`                                |
-| 10  | `hitl_result`      | `nodes.py` | **HITL-2:** interrupt() result approval (conditional)        | LangGraph `interrupt()`                         |
-| 11  | `report`           | `nodes.py` | Export cleaned file + JSON report                            | `ReporterAgent`                                 |
-
-### 5.3 Conditional routing sau validate
-
-File: `app/graph/edges.py` — function `after_validate(state)`:
-
-| Điều kiện                                                  | Route tới                  |
-| ---------------------------------------------------------- | -------------------------- |
-| `validation_result.needs_human_review == True`             | `hitl_result`              |
-| `validation_result.passed == False` AND `retry_count <= 2` | `parallel_workers` (retry) |
-| Else                                                       | `report`                   |
-
-### 5.4 Graph builder
-
-File: `app/graph/pipeline.py` — `build_graph() -> StateGraph`
-
-Compiled trong `app/api/main.py` với:
-
-- `AsyncPostgresSaver.from_conn_string(settings.postgres_url)`
-- `thread_id = run_id` cho mỗi pipeline execution
+- **HITL-1 (Clarification Checkpoint):** Xảy ra tại `input_validator` nếu phát hiện dữ liệu thiếu rõ ràng, app sẽ dừng graph bằng cách trỏ link tới `END` và lưu trạng thái để chờ frontend submit API `/pipeline/{run_id}/resolve` nhằm nạp câu trả lời của user.
+- **HITL-2 (Plan / Worker Approval Checkpoint):** Trước khi chạy bất kỳ worker làm sạch nào (`deduplication`, `null_handling`, `type_casting`), graph sẽ bị ngắt (interrupt) để người dùng xem xét kế hoạch làm sạch. Khi được phê duyệt qua API `/pipeline/{run_id}/approve_plan`, graph tiếp tục chạy từ vị trí bị dừng (`ainvoke(None)`).
+- **HITL-3 (Final Report Checkpoint):** Interrupt xảy ra trước node `report_agent` để người dùng kiểm duyệt kết quả làm sạch lần cuối.
 
 ---
 
-## 6. PipelineState — Single Source of Truth
+## 5. Trạng Thái Hệ Thống (`GlobalState`)
 
-File: `app/core/state.py`
-
-**Thiết kế quan trọng:**
-
-- Extends `MessagesState` (LangGraph native)
-- **DataFrame KHÔNG lưu trong state** — chỉ file path (`canonical_path`, `processed_path`)
-- Lists dùng `Annotated[..., operator.add]` reducer cho parallel node append
-- Tất cả fields Optional trừ identity fields
-
-### 6.1 Các nhóm field chính
+Được định nghĩa trong [app/graphs/states/global_state.py](file:///Users/lyanhquan/code/Agentic-Data-Cleaner/app/graphs/states/global_state.py):
 
 ```python
-class PipelineState(MessagesState):
-    # Identity
-    run_id: str
-    session_id: str
-    status: PipelineStatus          # QUEUED | RUNNING | AWAITING_HITL | COMPLETED | FAILED
+class GlobalState(TypedDict):
+    # Core Routing & Messages
+    messages: Annotated[list[AnyMessage], add_messages]
+    next_node: Optional[str]
 
-    # Ingestion
-    input_format: InputFormat       # CSV | EXCEL | JSON | PARQUET
-    input_path: str                 # Raw uploaded file
-    canonical_path: str             # Normalized Parquet
-    mapping_metadata: dict | None   # Schema provenance
-    output_format: InputFormat
-    output_path: str | None
+    # Project Context
+    project_id: Optional[str]
+    session_id: Optional[str]
+    dataset_path: Optional[str]
+    user_prompt: Optional[str]
 
-    # User intent
-    user_requirements: UserRequirements | None  # Free-text cleaning requirements
+    # Data Schema and Requirements
+    dataset_schema: Optional[Dict[str, Any]]
+    dataset_version: Optional[str]
+    raw_requirement_input: Optional[str]
 
-    # Profiling
-    data_profile: DataProfile | None
+    # Data References & Progress
+    current_dataset_version: Optional[str]
+    physical_dataframe_path: Optional[str]
+    current_step: Optional[str]
+    completed_steps: Annotated[List[str], append_list]
 
-    # Column selection (AutoDC §4.1)
-    column_selection: TargetColumnSelection | None
+    # Intelligence & Validation
+    statistical_profile: Optional[StatisticalProfile]
+    semantic_profile: Optional[SemanticProfile]
+    input_validation_result: Optional[InputValidationResult]
+    
+    # Execution & Routing
+    execution_plan: Optional[ExecutionPlan]
+    task_list: List[str]
+    worker_states: Optional[WorkerStates]
+    validation_results: Annotated[List[ValidationResultItem], append_list]
+    
+    # Control flow variables
+    current_task_idx: Optional[int]
+    retry_count: Optional[int]
+    last_validation_error: Optional[str]
+    failed_task_id: Optional[str]
+    replan_reason: Optional[str]
 
-    # Planning
-    execution_plan: ExecutionPlan | None
+    # HITL Fields
+    hitl_checkpoint: Optional[int]
+    hitl_status: Optional[Literal["pending", "approved", "rejected"]]
+    hitl_feedback: Optional[str]
 
-    # HITL
-    hitl_checkpoints: Annotated[list[HITLCheckpoint], operator.add]
-    awaiting_hitl: bool
-    hitl_last_decision: str | None  # approve | reject | modify
-    hitl_user_feedback: str | None
-    modify_count: int               # Max 3 re-plan cycles
-
-    # Workers
-    worker_results: Annotated[list[dict], operator.add]
-    completed_task_ids: Annotated[list[str], operator.add]
-    processed_path: str | None
-
-    # Validation
-    validation_result: ValidationResult | None
-    retry_count: int                # Max 2 retry cycles
-
-    # Reporting
-    report_path: str | None
-
-    # Observability
-    agent_logs: Annotated[list[dict], operator.add]
-    total_tokens_used: int
-    error_message: str | None
-```
-
-### 6.2 Factory function
-
-`initial_state(run_id, session_id, input_format, input_filename, input_path, user_requirements)` — khởi tạo state mặc định cho pipeline mới.
-
----
-
-## 7. Domain Models (Pydantic)
-
-Tất cả models trong `app/core/model/`, re-export qua `models.py`.
-
-### 7.1 Enums (`enums.py`)
-
-| Enum             | Values                                                                                 |
-| ---------------- | -------------------------------------------------------------------------------------- |
-| `InputFormat`    | CSV, TSV, EXCEL, JSON, JSONL, PARQUET                                                  |
-| `PipelineStatus` | QUEUED, RUNNING, AWAITING_HITL, COMPLETED, FAILED, CANCELLED                           |
-| `AgentRole`      | PLANNER, COLUMN_SELECTOR, DUPLICATE_HANDLER, NULL_TYPE_HANDLER, VALIDATOR, REPORTER    |
-| `HITLDecision`   | APPROVE, REJECT, MODIFY                                                                |
-| `ErrorType`      | NULL_VIOLATION, TYPE_MISMATCH, DUPLICATE, QUALITY_REGRESSION, UNAUTHORIZED_CHANGE, ... |
-
-### 7.2 Quality Model (`quality.py`)
-
-```python
-class ColumnQualityDimensions:
-    accuracy: QualityDimension      # Free from errors, wrong types
-    relevance: QualityDimension     # Relevant to user requirements
-    completeness: QualityDimension  # Sufficient non-null values
-    conciseness: QualityDimension   # Standardised, no duplicate representations
-
-    def failing_dimensions(self) -> list[str]  # Returns dims with score < threshold
-```
-
-**Chạy 2 lần:** profiling phase (before) + validation phase (after) → so sánh delta.
-
-### 7.3 Execution Plan (`plan.py`)
-
-```python
-class WorkerTask:
-    task_id: str
-    task_type: str                  # "deduplicate" | "null_type"
-    target_columns: list[str]
-    instructions: dict[str, Any]    # JSON structured — KHÔNG phải natural language
-    priority: int
-
-class ExecutionPlan:
-    plan_id: str
-    sequential_tasks: list[WorkerTask]   # Dedup MUST be first
-    parallel_task_groups: list[list[WorkerTask]]  # Batched null/type tasks
-    rationale: str
-    estimated_token_cost: int | None
-```
-
-### 7.4 Validation Result (`validation.py`)
-
-```python
-class ValidationResult:
-    passed: bool
-    needs_human_review: bool        # Triggers HITL-2
-    issues: list[ValidationIssue]
-    quality_delta: dict[str, float] # Before vs after per dimension
-    layer_results: dict[str, bool]  # layer_1_statistical, layer_2_constraints, ...
+    # Global Shared Errors
+    global_errors: Annotated[List[str], append_list]
 ```
 
 ---
 
-## 8. Agents — Chi Tiết Từng Agent
+## 6. Cấu Hình và Đăng Ký Agents
 
-Tất cả agents kế thừa `BaseAgent` (`app/agents/base.py`):
+### 6.1 Cơ Chế Khởi Tạo và Cấu Hình LLM
 
-- `_build_llm()` — construct LLM theo `AgentRole` từ `model_config.py`
-- `_run_tool_loop()` — ReAct pattern với LangChain tools
-- `run(state)` — abstract method, mỗi agent implement
+- **BaseAgent class** ([app/agents/base.py](file:///Users/lyanhquan/code/Agentic-Data-Cleaner/app/agents/base.py)):
+  Tất cả các agent trong hệ thống đều kế thừa từ `BaseAgent`. Khi khởi tạo, nó gọi hàm `create_llm()` từ `app/core/llm_factory.py`.
+- **Cấu hình Model:** 
+  Hiện tại, hệ thống không chỉ định model cụ thể cho từng Agent ở trong file config Python mà lấy cấu hình tập trung từ `.env` thông qua `Settings`:
+  - `DEFAULT_LLM_PROVIDER` (mặc định: `openai`)
+  - `DEFAULT_LLM_MODEL` (mặc định: `gpt-4o`)
+  - `LLM_TEMPERATURE` (mặc định: `0.0`)
+- **Tự động Đăng ký Agent:**
+  Sử dụng decorator `@AgentRegistry.auto_register` ở đầu mỗi class Agent kế thừa từ `BaseAgent` để đăng ký vào `AgentRegistry` singleton.
 
-### 8.1 Model Assignment
+### 6.2 Chi Tiết Các Hoạt Động Của Agent
 
-File: `app/core/model_config.py`
+#### A. SemanticProfilerAgent (`semantic_profiler`)
+- **File:** [app/agents/semantic_analyzer/profiler_agent.py](file:///Users/lyanhquan/code/Agentic-Data-Cleaner/app/agents/semantic_analyzer/profiler_agent.py)
+- **Phương thức hoạt động:** 
+  1. Đọc dữ liệu thực tế và lấy ra **10 dòng dữ liệu phổ biến nhất** (`value_counts().head(10)`) kết hợp với profile thống kê EDA làm context.
+  2. Sử dụng `structured_llm = self.llm.with_structured_output(CombinedSemanticProfilerOutput)` để buộc LLM phân tích ngữ nghĩa và đưa ra JSON đầu ra chứa:
+     - `table_summary`: Tóm tắt ý nghĩa nghiệp vụ của bảng dữ liệu.
+     - `thinking`: CoT giải thích suy luận phân tích.
+     - `columns`: Danh sách chi tiết thông tin ngữ nghĩa của từng cột (description, logical_group, expected_type, allow_missing, potential_dmv, expected_str_pattern, và quality review audit như `is_error`, `error_types`, `error_reason`).
+  3. Có cơ chế **Retry Loop (lên đến 3 lần)**: Nếu LLM output thiếu thông tin của bất kỳ cột nào trong schema gốc, Agent sẽ tự động gửi feedback yêu cầu LLM phân tích lại.
 
-| Agent                   | Model Key       | Provider  | Rationale                            |
-| ----------------------- | --------------- | --------- | ------------------------------------ |
-| `PlannerAgent`          | claude-sonnet-4 | Anthropic | Complex reasoning, structured output |
-| `ColumnSelectorAgent`   | gpt-4o-mini     | OpenAI    | Simple filtering                     |
-| `DuplicateHandlerAgent` | gpt-4o-mini     | OpenAI    | Rule-based (minimal LLM)             |
-| `NullTypeHandlerAgent`  | gpt-4o-mini     | OpenAI    | Code generation + self-correction    |
-| `ValidatorAgent`        | claude-sonnet-4 | Anthropic | Quality inspection                   |
-| `ReporterAgent`         | gpt-4o-mini     | OpenAI    | Template-based output                |
+#### B. InputValidatorAgent (`input_validator`)
+- **File:** [app/agents/input_validator/agent.py](file:///Users/lyanhquan/code/Agentic-Data-Cleaner/app/agents/input_validator/agent.py)
+- **Phương thức hoạt động:**
+  1. Sử dụng Prompt-based JSON mode (`self.llm.bind(response_format={"type": "json_object"})`) để đối chiếu các profile chất lượng dữ liệu với mong muốn dọn dẹp của người dùng.
+  2. Sinh ra cấu trúc JSON đầu ra khớp với model `InputValidationResult`.
+  3. Nếu có các điểm bất hợp lý trong dữ liệu, Agent sinh ra cấu trúc các câu hỏi làm rõ (`clarifications`) chứa các `StrategyQuestion` và `InsightQuestion` có các options cụ thể cho user lựa chọn.
+  4. Khi nhận được phản hồi của user từ API, Agent sẽ đọc lại lịch sử chat chứa câu trả lời để chuyển trạng thái thành `ready`, sinh ra `action_plan` và chuyển tiếp luồng tới planner.
 
-### 8.2 ColumnSelectorAgent
-
-- **File:** `app/agents/column_selector/agent.py`
-- **Prompts:** `app/agents/column_selector/prompts.py`
-- **Input:** Full `DataProfile` + `UserRequirements`
-- **Output:** `TargetColumnSelection` (target_columns, skipped_columns, rationale)
-- **Vị trí pipeline:** Sau profile, trước plan
-- **Mục đích:** Giảm token context cho Planner, tránh touch irrelevant columns
-
-### 8.3 PlannerAgent
-
-- **File:** `app/agents/planner/agent.py`
-- **Prompts:** `app/agents/planner/prompts.py` — `PLAN_SYSTEM`, `PLAN_PROMPT`
-- **RAG:** Khởi tạo `KnowledgeBase()`, gọi `get_relevant_practices()` + `get_similar_tasks()`
-- **Input:** `DataProfile` (target cols only) + quality dimensions + user requirements
-- **Output:** `ExecutionPlan` với sequential_tasks (dedup first) + parallel_task_groups
-- **Re-plan:** Hỗ trợ modify từ HITL với `hitl_user_feedback`
-
-### 8.4 DuplicateHandlerAgent
-
-- **File:** `app/agents/duplicate_handler/agent.py`
-- **Strategies:** `keep_first`, `keep_last`, `drop_all`, `subset` (specific columns)
-- **Bắt buộc sequential:** Chạy trước parallel workers vì dedup thay đổi row count → index misalignment
-- **Output:** Ghi lại canonical Parquet
-
-### 8.5 NullTypeHandlerAgent
-
-- **File:** `app/agents/null_type_handler/agent.py`
-- **Prompts:** `app/agents/null_type_handler/prompts.py` — pandas code generation rules
-- **Pattern:** LLM generate pandas code → execute → self-correction on error
-- **Tools:** `inspect_column_values` (LangChain tool)
-- **Parallel:** Mỗi instance xử lý 1 batch columns (max `settings.max_columns_per_worker = 20`)
-- **Output:** Partial Parquet files → merge node gộp lại
-- **Data fidelity rules trong prompt:** Không đổi casing, không fill unauthorized, không truncate
-
-### 8.6 ValidatorAgent
-
-- **File:** `app/agents/validator_agent/agent.py`
-- **Supporting:** `unauthorized_change_detector.py`
-
-**4-layer validation:**
-
-| Layer | Check                 | Method                                                         |
-| ----- | --------------------- | -------------------------------------------------------------- |
-| 1     | Statistical           | Null counts, duplicate counts vs pre-profile                   |
-| 2     | User constraints      | Type checks theo requirements                                  |
-| 3     | Quality re-inspection | 4-dimension LLM re-assess target columns, compare before/after |
-| 4     | Unauthorized changes  | Casing, semantic drift, unauthorized fills, truncation         |
-
-**Routing logic:**
-
-- `passed=True` → report
-- `passed=False`, `retry_count <= 2` → parallel_workers (retry)
-- Persistent errors after max retries → `needs_human_review=True` → HITL-2
-
-### 8.7 ReporterAgent
-
-- **File:** `app/agents/reporter/agent.py`
-- **Actions:**
-  1. Export cleaned data qua `export_from_canonical()` (same format as input)
-  2. Write `processing_report.json` (quality delta, operations log, token cost)
-  3. Set `status = COMPLETED`
+#### C. PlannerAgent (`planner`)
+- **File:** [app/agents/planner/agent.py](file:///Users/lyanhquan/code/Agentic-Data-Cleaner/app/agents/planner/agent.py)
+- **Phương thức hoạt động:**
+  1. Đọc toàn bộ context dữ liệu, bao gồm các câu trả lời/quyết định của user ở bước Input Validation.
+  2. Phân tích xem có cần thực hiện các task dọn dẹp hay không:
+     - **Deduplication:** Nếu có dòng lặp lại hoặc tỷ lệ unique < 1.0 trên cột key.
+     - **Null Handling:** Nếu phát hiện null hay disguised missing values.
+     - **Type Casting:** Nếu kiểu dữ liệu thực tế sai lệch so với kiểu dữ liệu mong đợi của ngữ nghĩa.
+  3. Buộc LLM sinh JSON khớp với Pydantic model `ExecutionPlan` chứa danh sách chi tiết các công việc (`task_list`), bao gồm config chiến lược dọn dẹp cụ thể cho từng cột (`strategy`), logic kiểm tra Pandera và các metrics đo lường thành công.
 
 ---
 
-## 9. Tools (Non-Agent Utilities)
+## 7. PostgreSQL-Backed Lineage Tracking
 
-### 9.1 DataProfiler
+Thay vì lưu file Parquet ad-hoc cho từng bước xử lý, hệ thống triển khai cơ chế **Data Lineage Tracking** lưu trữ trực tiếp trên PostgreSQL:
 
-- **File:** `app/tools/data_profiler/data_profiler.py`
-- **3 phases:**
-  1. **Statistical** (sync): null rate, unique ratio, dtype, patterns — `StatisticalProfiler`
-  2. **LLM Quality** (async): 4-dimension per column — `ColumnQualityInspector`
-  3. **Cross-column** (async): temporal ordering, functional deps — `CrossColumnInspector`
-- **Methods:** `profile()`, `profile_async()`
-
-### 9.2 ColumnQualityInspector
-
-- **File:** `app/tools/column_inspector/column_quality_inspector.py`
-- **Output:** JSON structured `ColumnQualityDimensions`
-- **Prompts inline:** `SYSTEM_PROMPT`, `INSPECT_PROMPT`
-- **Reused by:** Profiler (before) + Validator (after)
-
-### 9.3 StatisticalProfiler
-
-- **File:** `app/tools/data_profiler/statistical_profiler.py`
-- **Standalone EDA:** ColumnStat dataclass, PK/categorical heuristics
-- **CLI entry point** available
-
-### 9.4 SQLExecutor
-
-- **File:** `app/tools/sql_executer/sql_executor.py`
-- **DuckDB in-memory SQL** on Parquet files
+- **Database Schema ([app/models/lineage.py](file:///Users/lyanhquan/code/Agentic-Data-Cleaner/app/models/lineage.py)):**
+  - **`sessions` table:** Theo dõi mỗi phiên làm việc dọn dẹp của tệp dữ liệu.
+  - **`lineage_versions` table:** Ghi lại lịch sử dọn dẹp theo từng phiên bản (`version`), lưu tên tác nhân tác động (`agent_name`) và mô tả hành động (`description`).
+  - **`dataset_records` table:** Lưu trữ **dữ liệu thực tế của từng dòng** dưới định dạng **JSONB** (`data` column), kèm chỉ số dòng gốc (`row_index`) để đảm bảo bảo toàn thứ tự dòng.
+- **LineageService ([app/services/lineage_service.py](file:///Users/lyanhquan/code/Agentic-Data-Cleaner/app/services/lineage_service.py)):**
+  - Cung cấp hàm `append_new_version(session_id, df, agent_name, description)` để lưu một DataFrame mới thành một version tiếp theo trong database.
+  - Hàm `get_latest_version(session_id)` giúp truy vấn toàn bộ các record của version mới nhất từ bảng `dataset_records`, sắp xếp theo `row_index` và xuất ra dưới dạng Pandas DataFrame để nạp vào các worker xử lý hoặc validator.
 
 ---
 
-## 10. Ingestion Pipeline
+## 8. Cơ Chế Kiểm Thử Chất Lượng (Validator Node)
 
-### 10.1 Supported formats
+Khác với các tài liệu cũ đề xuất sử dụng LLM để validate kết quả làm sạch, hệ thống hiện tại sử dụng **Pandera Engine** để thực hiện kiểm thử tự động một cách nghiêm ngặt:
 
-| Format             | Parser            | Notes                                           |
-| ------------------ | ----------------- | ----------------------------------------------- |
-| CSV/TSV/TXT        | `csv_parser.py`   | chardet encoding, delimiter sniffing, dtype=str |
-| Excel (.xlsx/.xls) | `excel_parser.py` | First sheet only                                |
-| JSON/JSONL/NDJSON  | `json_parser.py`  | One-level flatten via json_normalize            |
-
-### 10.2 Canonical format
-
-**Parquet** là internal canonical format. Flow:
-
-```
-Raw file → Parser → DataFrame → Parquet (canonical_path)
-                                    ↓
-                            All agents read/write Parquet
-                                    ↓
-                            Export → same format as input
-```
-
-### 10.3 DuckDB Mapper
-
-- **File:** `app/ingestion/duckdb/duckdb_mapper.py`
-- Per-run file-based DuckDB database
-- Tables: raw, canonical, default `data` view
-- Column mapping metadata for SQL lineage
+1. **Sinh Schema Động (`app/validators/schema_builder.py`):**
+   Đọc cấu hình dọn dẹp từ `TaskDetail` của planner kết hợp với thông tin ngữ nghĩa của `SemanticProfile` để tạo ra một `pandera.DataFrameSchema` động phù hợp cho cột cần check.
+2. **Thực thi Validate (`app/validators/runner.py`):**
+   Hàm `validate_current_task(state)` lấy DataFrame của phiên bản dữ liệu mới nhất từ `LineageService` và thực hiện validate dựa trên schema động đã xây dựng.
+3. **Phản hồi lỗi dọn dẹp:**
+   Nếu validation thất bại, validator bắt các lỗi `SchemaErrors`, trích xuất các quy tắc kiểm tra bị lỗi (`failed_rules`) và trả về `ValidationOutcome` chứa mã lỗi để graph điều phối thực hiện cơ chế **Self-correction (sửa sai tự động)** hoặc **Re-planning** bởi PlannerAgent.
 
 ---
 
-## 11. Human-In-The-Loop (HITL)
+## 9. Chi Tiết API Endpoints (FastAPI)
 
-### 11.1 Kiến trúc
+Tất cả các router được quản lý tập trung trong [app/api/v1/pipeline.py](file:///Users/lyanhquan/code/Agentic-Data-Cleaner/app/api/v1/pipeline.py):
 
-- **Mechanism:** LangGraph `interrupt()` inside graph nodes
-- **Persistence:** PostgreSQL checkpointer (graph state frozen at interrupt)
-- **Resume:** `Command(resume={"decision": ..., "feedback": ...})`
-- **Service:** `app/hitl/service.py`
-
-### 11.2 HITL-1: Plan Approval
-
-| Property  | Value                                                      |
-| --------- | ---------------------------------------------------------- |
-| Node      | `node_hitl_plan`                                           |
-| Trigger   | Always — sau plan, trước workers                           |
-| Payload   | execution_plan, column_selection, modify limits            |
-| Decisions | approve → deduplicate, modify → plan (max 3), reject → END |
-
-### 11.3 HITL-2: Result Approval
-
-| Property  | Value                                          |
-| --------- | ---------------------------------------------- |
-| Node      | `node_hitl_result`                             |
-| Trigger   | Conditional — khi `needs_human_review=True`    |
-| Payload   | validation_result, persistent quality issues   |
-| Decisions | approve/reject → report, modify → plan (max 3) |
-
-### 11.4 API Flow
-
-```
-Frontend polls GET /api/v1/pipeline/{run_id}/status
-  OR listens WebSocket /ws/{run_id}
-    → detects interrupt in snap.tasks[].interrupts
-
-User submits POST /api/v1/hitl/{run_id}/decision
-  → HITLService.submit_decision()
-  → Background: pipeline.astream(Command(resume=...))
-  → Graph continues from interrupt point
-```
+| Method | Path | Description |
+| :--- | :--- | :--- |
+| **POST** | `/api/v1/pipeline/run` | Nhận file tải lên cùng yêu cầu dọn dẹp của người dùng. Thực hiện Ingestion lưu trữ thô, chuyển đổi thành canonical Parquet, tạo session và khởi động pipeline chạy bất đồng bộ trong background. |
+| **GET** | `/api/v1/pipeline/{run_id}/state` | Truy cập trực tiếp Postgres checkpointer để lấy snapshot trạng thái hiện tại của pipeline dọn dẹp. |
+| **POST** | `/api/v1/pipeline/{run_id}/resolve` | Gửi câu trả lời của người dùng cho các câu hỏi clarification của `input_validator` để cập nhật thread state và kích hoạt chạy tiếp pipeline. |
+| **POST** | `/api/v1/pipeline/{run_id}/approve_plan` | Gửi tín hiệu phê duyệt kế hoạch làm sạch từ user, khôi phục trạng thái từ checkpoint ngắt hiện tại và tiếp tục chạy pipeline. |
+| **GET** | `/api/v1/health` | API kiểm tra trạng thái hoạt động của hệ thống. |
 
 ---
 
-## 12. Knowledge Base & RAG
-
-### 12.1 Architecture
-
-- **File:** `app/memory/knowledge_base.py`
-- **Vector store:** ChromaDB persisted at `app/memory/.kb_store/`
-- **Embeddings:** OpenAI `text-embedding-3-small`
-
-### 12.2 Collections
-
-| Collection       | Purpose                   | Methods                                                      |
-| ---------------- | ------------------------- | ------------------------------------------------------------ |
-| `best_practices` | 36 curated cleaning rules | `get_relevant_practices()`, `get_practices_by_category()`    |
-| `chat_history`   | Conversation persistence  | Chat history methods                                         |
-| `past_tasks`     | Similar task retrieval    | `get_similar_tasks()`, `record_successful/failed_strategy()` |
-
-### 12.3 Best Practices Data
-
-- **File:** `app/memory/best_practices.json`
-- **Version:** 2.0 (updated 2026-05-10)
-- **Count:** 36 practices
-- **Categories:** null_handling, data_fidelity, type_casting, deduplication, formatting, ...
-
-### 12.4 Integration
-
-`PlannerAgent` khởi tạo `KnowledgeBase()` và inject relevant practices vào planning prompt.
-
----
-
-## 13. API Endpoints
-
-Base URL: `http://localhost:8000`
-
-### 13.1 Upload
-
-| Method | Path                              | Description                       |
-| ------ | --------------------------------- | --------------------------------- |
-| POST   | `/api/v1/upload/`                 | Single file upload + requirements |
-| POST   | `/api/v1/upload/multi`            | Multi-file upload                 |
-| GET    | `/api/v1/upload/{run_id}/profile` | Get profiling results             |
-
-### 13.2 Pipeline
-
-| Method | Path                               | Description                  |
-| ------ | ---------------------------------- | ---------------------------- |
-| GET    | `/api/v1/pipeline/{run_id}/status` | Run status + HITL detection  |
-| GET    | `/api/v1/pipeline/{run_id}/state`  | Full pipeline state snapshot |
-
-### 13.3 HITL
-
-| Method | Path                               | Description                  |
-| ------ | ---------------------------------- | ---------------------------- |
-| GET    | `/api/v1/hitl/{run_id}/checkpoint` | Pending checkpoint payload   |
-| POST   | `/api/v1/hitl/{run_id}/decision`   | Submit approve/reject/modify |
-
-### 13.4 Reports
-
-| Method | Path                                | Description            |
-| ------ | ----------------------------------- | ---------------------- |
-| GET    | `/api/v1/reports/{run_id}/report`   | JSON processing report |
-| GET    | `/api/v1/reports/{run_id}/download` | Download cleaned file  |
-
-### 13.5 WebSocket
-
-| Path           | Events                                                   |
-| -------------- | -------------------------------------------------------- |
-| `/ws/{run_id}` | `status_change`, `hitl_checkpoint`, `completed`, `error` |
-
-### 13.6 Health
-
-| Method | Path      | Description   |
-| ------ | --------- | ------------- |
-| GET    | `/`       | API info JSON |
-| GET    | `/health` | Health check  |
-| GET    | `/docs`   | Swagger UI    |
-
----
-
-## 14. Frontend
-
-### 14.1 Stack
-
-- React 19, Vite 8, TypeScript
-- Tailwind CSS 4
-- TanStack Query (data fetching)
-- Axios (HTTP client)
-
-### 14.2 Application Flow
-
-```
-App.tsx step router:
-  upload → profile → pipeline → result
-
-URL sync via pipelineSession.ts:
-  ?step=upload|profile|pipeline|result&run={run_id}
-```
-
-### 14.3 Views
-
-| View              | File                    | Purpose                           |
-| ----------------- | ----------------------- | --------------------------------- |
-| UploadView        | `UploadView.tsx`        | File upload + requirements form   |
-| PipelineView      | `PipelineView.tsx`      | Live status via polling/WebSocket |
-| PipelineHitlPanel | `PipelineHitlPanel.tsx` | HITL approve/reject/modify UI     |
-| ResultView        | `ResultView.tsx`        | Final report + download           |
-
-### 14.4 API Client
-
-- **Base:** `frontend/src/api/client.ts` — axios to `localhost:8000/api/v1`
-- **Services:** `frontend/src/api/services.ts` — `pipelineApi` wrapper
-
----
-
-## 15. Infrastructure & Deployment
-
-### 15.1 Docker Compose
-
-```yaml
-services:
-  postgres: # postgres:16-alpine, port 5432, db=ade_db
-  redis: # redis:7-alpine, port 6379
-  api: # profile: full, port 8000, depends on postgres+redis
-```
-
-### 15.2 Environment Variables
-
-File: `.env.example`
-
-| Variable                   | Default                                            | Purpose                          |
-| -------------------------- | -------------------------------------------------- | -------------------------------- |
-| `OPENAI_API_KEY`           | —                                                  | OpenAI LLM                       |
-| `ANTHROPIC_API_KEY`        | —                                                  | Anthropic LLM                    |
-| `POSTGRES_URL`             | `postgresql://user:password@localhost:5432/ade_db` | LangGraph checkpointer           |
-| `REDIS_URL`                | `redis://localhost:6379/0`                         | Session store                    |
-| `MAX_CONCURRENT_PIPELINES` | 10                                                 | PipelineManager queue limit      |
-| `WORKER_CONCURRENCY`       | 4                                                  | Parallel worker batches          |
-| `HITL_TIMEOUT_SECONDS`     | 300                                                | HITL wait timeout                |
-| `MAX_COLUMNS_PER_WORKER`   | 20                                                 | Batch size for null/type workers |
-
-### 15.3 Dev Setup
-
-```bash
-make setup    # venv + pip + .env + docker compose
-make run      # ade serve (uses .venv/bin/ade)
-make test     # pytest
-```
-
-**Quan trọng:** Luôn dùng `.venv` Python, không dùng Anaconda base (NumPy version conflicts).
-
----
-
-## 16. Testing & Evaluation
-
-### 16.1 Unit/Integration Tests
-
-| File                          | Coverage                              |
-| ----------------------------- | ------------------------------------- |
-| `test_pipeline_manager.py`    | Concurrency queue, status transitions |
-| `test_format_converter.py`    | CSV/Excel/JSON/Parquet conversion     |
-| `test_upload_multi.py`        | FastAPI multi-file upload             |
-| `test_knowledge_base.py`      | KB RAG smoke test                     |
-| `test_practices_structure.py` | Validate 36 best practices JSON       |
-
-### 16.2 Benchmarks
-
-| File                                           | Purpose                                  |
-| ---------------------------------------------- | ---------------------------------------- |
-| `tests/benchmarks/test_pipeline_throughput.py` | Parametrized concurrency [1,5,10]        |
-| `scripts/simulate_load.py`                     | HTTP load test `--concurrent N --rows M` |
-
-### 16.3 Evaluation Metrics (Thesis)
-
-File: `app/evaluation/metrics.py`
-
-| Metric                        | Description                           |
-| ----------------------------- | ------------------------------------- |
-| `HallucinationMetrics`        | Detect unauthorized data changes      |
-| `RequirementAdherenceMetrics` | Did cleaning match user requirements? |
-| `DataFidelityMetrics`         | Input vs output fidelity score        |
-
-Fixtures: `tests/evaluation/test_cases/` — casing, null, semantic drift scenarios.
-
----
-
-## 17. Phân Công Team (6 thành viên)
-
-| Thành viên     | Module chính                                                                  | Priority |
-| -------------- | ----------------------------------------------------------------------------- | -------- |
-| **Trần Vĩ**    | `app/core/`, `app/graph/`, `app/api/`, Docker, benchmarks                     | P0       |
-| **Quân Lý**    | `app/ingestion/`, `app/tools/`, `app/memory/knowledge_base.py`                | P0       |
-| **Quân Bùi**   | `app/agents/planner/`, `app/agents/column_selector/`, prompts                 | P0       |
-| **Thiện Nhân** | `app/agents/null_type_handler/`, parallel batching, retry                     | P1       |
-| **Thiên Đức**  | `app/agents/validator_agent/`, `duplicate_handler/`, `reporter/`, `app/hitl/` | P1       |
-| **Quân Huỳnh** | `frontend/` 100% — UI, WebSocket, HITL panel                                  | P2-P3    |
-
-**Lưu ý ranh giới:** Mỗi agent/node tuân thủ interface contracts (`BaseAgent`, `PipelineState`, JSON structured outputs). Không sửa module người khác mà không kiểm tra dependencies.
-
----
-
-## 18. Technical Debt & Known Issues
-
-| Issue                                    | Location                                            | Notes                                                          |
-| ---------------------------------------- | --------------------------------------------------- | -------------------------------------------------------------- |
-| Legacy `src/` path in docs               | `TEAM_ASSIGNMENT.md`, `ARCHITECTURE.md` §7          | Docs reference `src/` but code is in `app/`                    |
-| Dockerfile Python 3.11 vs pyproject 3.13 | `Dockerfile`                                        | Version mismatch                                               |
-| Legacy validator duplicate               | `app/services/agents/validator_agent/`              | Unused copy, pipeline uses `app/agents/validator_agent/`       |
-| Missing test files                       | `tests/test_statistical_profiler.py`, `tests/unit/` | Referenced in docs/Makefile but not present                    |
-| Empty fixtures dir                       | `tests/fixtures/`                                   | conftest references FIXTURE_DIR but empty                      |
-| Makefile stale refs                      | `Makefile`                                          | References `src.api.main`, `tests/unit/`                       |
-| Model config vs settings mismatch        | `model_config.py` vs `config.py`                    | model_config assigns claude-sonnet-4, settings defaults gpt-4o |
-
----
-
-## 19. Interface Contracts (Quan Trọng Cho AI)
-
-Khi sửa code, **phải tuân thủ** các contracts sau:
-
-### 19.1 Agent Contract
-
-```python
-class BaseAgent:
-    async def run(self, state: PipelineState, **kwargs) -> dict[str, Any]:
-        """Returns partial state update dict."""
-```
-
-### 19.2 Structured Outputs (KHÔNG dùng natural language)
-
-```python
-# WorkerTask.instructions phải là JSON dict:
-{"strategy": "fill_mean", "target_columns": ["age"], "null_replacement": "mean"}
-
-# ExecutionPlan output phải parse được thành Pydantic model
-# TargetColumnSelection phải có target_columns + skipped_columns lists
-```
-
-### 19.3 State Update Pattern
-
-```python
-# Nodes return dict partial updates, KHÔNG mutate state trực tiếp
-return {"data_profile": profile, "status": PipelineStatus.RUNNING}
-```
-
-### 19.4 HITL Resume Contract
-
-```python
-Command(resume={"decision": "approve|reject|modify", "feedback": "optional text"})
-```
-
----
-
-## 20. Prompt Engineering Structure
-
-Prompts nằm trong Python modules (không phải YAML/JSON):
-
-| File                           | Prompts                                          | Pattern                                      |
-| ------------------------------ | ------------------------------------------------ | -------------------------------------------- |
-| `planner/prompts.py`           | `PLAN_SYSTEM`, `PLAN_PROMPT`                     | Dedup-first rules, data fidelity constraints |
-| `column_selector/prompts.py`   | `SELECT_COLUMNS_SYSTEM`, `SELECT_COLUMNS_PROMPT` | Target vs skipped rationale                  |
-| `null_type_handler/prompts.py` | `SYSTEM_PROMPT`, `CODE_PROMPT`                   | Pandas code gen, fidelity rules              |
-| `column_quality_inspector.py`  | Inline `SYSTEM_PROMPT`, `INSPECT_PROMPT`         | 4-dimension JSON output                      |
-
-**Pattern chung:** System message + human template với `{placeholders}`, output enforced via `response_format={"type": "json_object"}`.
-
----
-
-## 21. Quick Reference — Key Files Index
-
-| Cần hiểu...       | Đọc file                                                            |
-| ----------------- | ------------------------------------------------------------------- |
-| Pipeline flow     | `app/graph/pipeline.py`, `app/graph/nodes.py`, `app/graph/edges.py` |
-| State schema      | `app/core/state.py`, `app/core/model/*.py`                          |
-| Agent logic       | `app/agents/*/agent.py`                                             |
-| API endpoints     | `app/api/routes/*.py`, `app/api/main.py`                            |
-| HITL mechanism    | `app/hitl/service.py`, `node_hitl_plan/result` in nodes.py          |
-| Config/env        | `app/core/config.py`, `.env.example`                                |
-| Frontend flow     | `frontend/src/App.tsx`, `frontend/src/api/services.ts`              |
-| Architecture docs | `docs/ARCHITECTURE.md`, `docs/full_data_flow.md`                    |
-| Team ownership    | `docs/TEAM_ASSIGNMENT.md`                                           |
-
----
-
-## 22. Hướng Dẫn Sử Dụng File Này Với Claude
-
-Khi paste context cho Claude, có thể kèm prompt mẫu:
-
-```
-Bạn đang phân tích repository Agentic Data Engineering (HCMUS Capstone).
-Đọc file CODEBASE_CONTEXT_REPORT.md để hiểu:
-- Kiến trúc Multi-Agent LangGraph pipeline
-- 11 nodes và thứ tự bắt buộc
-- 6 agents và interface contracts
-- 2 HITL checkpoints
-- Team ownership boundaries
-
-Câu hỏi của tôi: [YOUR QUESTION HERE]
-
-Khi đề xuất sửa code:
-1. Tuân thủ thứ tự pipeline (§5)
-2. Không phá interface contracts (§19)
-3. Respect team boundaries (§17)
-4. Output phải là JSON structured, không natural language
-```
-
----
-
-## 23. Glossary
-
-| Term                    | Definition                                                          |
-| ----------------------- | ------------------------------------------------------------------- |
-| **Canonical format**    | Internal Parquet representation after ingestion                     |
-| **HITL**                | Human-In-The-Loop — graph interrupt for user approval               |
-| **WorkerTask**          | Atomic cleaning task in ExecutionPlan                               |
-| **4-dimension quality** | Accuracy, Relevance, Completeness, Conciseness                      |
-| **Batch**               | Group of columns processed by one NullTypeHandlerAgent instance     |
-| **Checkpointer**        | PostgreSQL persistence for LangGraph state (enables resume)         |
-| **RAG**                 | Retrieval-Augmented Generation — KB practices injected into Planner |
-| **Self-correction**     | Worker retries code generation on execution error                   |
-
----
-
-_Tài liệu này được generate tự động từ codebase scan. Cập nhật khi có thay đổi lớn về architecture._
+## 10. Technical Debt & Cần Cải Thiện Trong Tương Lai
+
+1. **Worker Agents thực sự:** Hiện nay, các node `deduplication`, `null_handling` và `type_casting` mới chỉ là stubs ghi đè dữ liệu pass-through vào database. Cần triển khai các worker thực tế sinh code Pandas hoặc sử dụng thư viện chuyên dụng dựa trên cấu hình `strategy` do planner lập ra.
+2. **ResultValidator và Reporter Agents:** Các agent `result_validator` và `reporter` trong thư mục `app/agents/` hiện tại vẫn đang là stubs trả về giá trị TODO. Cần tích hợp chúng sâu vào pipeline LangGraph tương ứng với node `validator` và `report_agent_node`.
+3. **Hỗ trợ Multi-file Ingestion:** Mặc dù API endpoints có nhắc đến upload multi-file nhưng backend hiện tại mới chỉ tập trung xử lý dọn dẹp đơn file (single session).

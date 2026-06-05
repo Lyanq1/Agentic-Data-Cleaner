@@ -6,12 +6,11 @@ the deterministic mapping from that intent to Pandera checks.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 import pandera.pandas as pa
 
 from app.graphs.states.global_state import SemanticProfile, TaskDetail
-
 
 PANDERA_DTYPE_BY_EXPECTED_TYPE: dict[str, Any] = {
     "int": int,
@@ -56,13 +55,26 @@ def build_pandera_schema(
     )
 
 
+def _get_strategy_dict(task: TaskDetail) -> dict[str, Any]:
+    val = task.strategy
+    if val is None:
+        return {}
+    if hasattr(val, "model_dump"):
+        return cast("dict[str, Any]", val.model_dump())
+    if hasattr(val, "dict"):
+        return cast("dict[str, Any]", val.dict())
+    if isinstance(val, dict):
+        return val
+    return {}
+
+
 def _base_columns(
     task: TaskDetail,
     semantic_profile: SemanticProfile | None,
 ) -> dict[str, pa.Column]:
     """Create required columns from task columns, strategy, verification, and profile hints."""
     column_names = set(task.columns or [])
-    strategy = task.strategy or {}
+    strategy = _get_strategy_dict(task)
     per_column = strategy.get("per_column")
     if isinstance(per_column, dict):
         column_names.update(str(col) for col in per_column)
@@ -72,10 +84,13 @@ def _base_columns(
 
     verification = task.verification
     if verification:
-        for check_id in verification.pandera_checks:
-            parts = check_id.split(":")
-            if len(parts) >= 2:
-                column_names.add(parts[1])
+        for check in verification.pandera_checks:
+            if isinstance(check, dict):
+                col = check.get("column")
+            else:
+                col = check.column
+            if col:
+                column_names.add(col)
 
     semantic_columns = semantic_profile.columns if semantic_profile else {}
     columns: dict[str, pa.Column] = {}
@@ -89,7 +104,7 @@ def _base_columns(
 
 
 def _dedup_unique_columns(task: TaskDetail) -> list[str]:
-    strategy = task.strategy or {}
+    strategy = _get_strategy_dict(task)
     primary_keys = strategy.get("primary_keys")
     if isinstance(primary_keys, list):
         return [str(col) for col in primary_keys if col]
@@ -101,7 +116,7 @@ def _apply_null_strategy(
     task: TaskDetail,
     semantic_profile: SemanticProfile | None,
 ) -> None:
-    strategy = task.strategy or {}
+    strategy = _get_strategy_dict(task)
     per_column = strategy.get("per_column")
     if not isinstance(per_column, dict):
         return
@@ -113,7 +128,13 @@ def _apply_null_strategy(
         dtype = _semantic_dtype(column, semantic_profile)
         checks = _semantic_checks(column, semantic_profile)
 
-        nullable = null_strategy not in {"fill_mean", "fill_median", "fill_mode", "fill_value", "drop_row"}
+        nullable = null_strategy not in {
+            "fill_mean",
+            "fill_median",
+            "fill_mode",
+            "fill_value",
+            "drop_row",
+        }
         columns[column] = pa.Column(dtype, checks=checks, nullable=nullable, required=True)
 
 
@@ -122,7 +143,7 @@ def _apply_type_strategy(
     task: TaskDetail,
     semantic_profile: SemanticProfile | None,
 ) -> None:
-    strategy = task.strategy or {}
+    strategy = _get_strategy_dict(task)
     per_column = strategy.get("per_column")
     if not isinstance(per_column, dict):
         return
@@ -146,22 +167,23 @@ def _verification_checks(task: TaskDetail, columns: dict[str, pa.Column]) -> lis
         return []
 
     checks: list[pa.Check] = []
-    for check_id in verification.pandera_checks:
-        parts = check_id.split(":")
-        rule = parts[0]
-        if rule == "is_unique" and len(parts) >= 2:
-            column = parts[1]
-            if column in columns:
-                _set_column_unique(columns, column)
-        elif rule == "null_rate_lt" and len(parts) >= 3:
-            column = parts[1]
-            threshold = _safe_float(parts[2], default=0.0)
-            _add_null_rate_check(columns, column, threshold)
-        elif rule == "null_rate_lte" and len(parts) >= 3:
-            column = parts[1]
-            threshold = _safe_float(parts[2], default=0.0)
-            _add_null_rate_check(columns, column, threshold)
-        elif rule == "no_duplicate_rows":
+    for check in verification.pandera_checks:
+        if isinstance(check, dict):
+            rule = check.get("type", "")
+            col = check.get("column")
+            threshold_val = check.get("threshold")
+        else:
+            rule = check.type
+            col = check.column
+            threshold_val = check.threshold
+
+        if rule in ("column_unique", "is_unique") and col:
+            if col in columns:
+                _set_column_unique(columns, col)
+        elif rule in ("null_rate_lt", "null_rate_lte") and col:
+            threshold = float(threshold_val if threshold_val is not None else 0.0)
+            _add_null_rate_check(columns, col, threshold)
+        elif rule in ("dataframe_no_exact_duplicates", "no_duplicate_rows"):
             checks.append(
                 pa.Check(
                     lambda df: not bool(df.duplicated().any()),
@@ -221,7 +243,7 @@ def _set_column_unique(columns: dict[str, pa.Column], column: str) -> None:
     )
 
 
-def _semantic_dtype(column: str, semantic_profile: SemanticProfile | None) -> Any:
+def _semantic_dtype(column: str, semantic_profile: SemanticProfile | None) -> Any:  # noqa: ANN401
     if not semantic_profile:
         return None
     semantic = semantic_profile.columns.get(column)
@@ -251,7 +273,9 @@ def _semantic_checks(
     if semantic.potential_dmv:
         checks.append(pa.Check.notin(semantic.potential_dmv, name="no_disguised_missing_values"))
     if semantic.expected_str_pattern:
-        checks.append(pa.Check.str_matches(semantic.expected_str_pattern, name="expected_str_pattern"))
+        checks.append(
+            pa.Check.str_matches(semantic.expected_str_pattern, name="expected_str_pattern")
+        )
     return checks
 
 

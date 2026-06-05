@@ -1,14 +1,18 @@
 """State models for the LangGraph pipeline."""
-from typing import Annotated, Any, Dict, List, Optional, Literal
-from typing_extensions import TypedDict
-from langgraph.graph.message import add_messages
+
+from typing import Annotated, Any, Literal, TypedDict
+
 from langchain_core.messages import AnyMessage
-from pydantic import BaseModel, Field
+from langgraph.graph.message import add_messages
+from pydantic import BaseModel, Field, field_validator
 
 from app.agents.roles import AgentRole
 
+
 ### helper function ###
-def append_list(left: list | None, right: list | Any | None) -> list:
+def append_list(
+    left: list[Any] | None, right: list[Any] | Any | None  # noqa: ANN401
+) -> list[Any]:
     if left is None:
         left = []
     if right is None:
@@ -16,6 +20,7 @@ def append_list(left: list | None, right: list | Any | None) -> list:
     if isinstance(right, list):
         return left + right
     return left + [right]
+
 
 ### Pydantic Models for Profiling & Context ###
 class ColumnStatProfile(BaseModel):
@@ -25,66 +30,77 @@ class ColumnStatProfile(BaseModel):
     null_rate: float
     unique_count: int
     unique_ratio: float
-    sample_values: List[Any] = Field(default_factory=list)
-    detected_patterns: List[str] = Field(default_factory=list)
-    interpretation: List[str] = Field(default_factory=list)
-    numeric_stats: Optional[Dict[str, Any]] = None
-    categorical_stats: Optional[Dict[str, Any]] = None
+    sample_values: list[Any] = Field(default_factory=list)
+    detected_patterns: list[str] = Field(default_factory=list)
+    interpretation: list[str] = Field(default_factory=list)
+    numeric_stats: dict[str, Any] | None = None
+    categorical_stats: dict[str, Any] | None = None
+
 
 class StatisticalProfile(BaseModel):
     source: str
     total_rows: int
     total_columns: int
-    pk_candidates: List[str] = Field(default_factory=list)
-    near_unique_columns: List[str] = Field(default_factory=list)
-    categorical_columns: List[str] = Field(default_factory=list)
-    high_null_columns: List[str] = Field(default_factory=list)
+    pk_candidates: list[str] = Field(default_factory=list)
+    near_unique_columns: list[str] = Field(default_factory=list)
+    categorical_columns: list[str] = Field(default_factory=list)
+    high_null_columns: list[str] = Field(default_factory=list)
     duplicate_rows: int = 0
-    columns: List[ColumnStatProfile] = Field(default_factory=list)
+    columns: list[ColumnStatProfile] = Field(default_factory=list)
 
-from pydantic import BaseModel, Field, field_validator
+
+
+
 
 ### Pydantic Models for Validation & Planning ###
 class StrategyQuestion(BaseModel):
     question: str = Field(description="The strategy question text.")
-    options: List[str] = Field(description="Exactly 3 distinct options.")
-    consequences: Optional[Any] = Field(default=None, description="Consequences of each option.")
-    answer: Optional[str] = Field(default=None, description="The user's selected option/answer.")
+    options: list[str] = Field(description="Exactly 3 distinct options.")
+    consequences: Any | None = Field(default=None, description="Consequences of each option.")
+    answer: str | None = Field(default=None, description="The user's selected option/answer.")
+
 
 class InsightQuestion(BaseModel):
     question: str = Field(description="The insight question text.")
     insight: str = Field(description="The semantic insight revealed.")
     confirm: str = Field(description="The yes/no confirmation ask.")
-    answer: Optional[str] = Field(default=None, description="The user's answer ('yes', 'no', or comment).")
+    answer: str | None = Field(
+        default=None, description="The user's answer ('yes', 'no', or comment)."
+    )
+
 
 class NullClarifications(BaseModel):
-    Q1_strategy: Optional[StrategyQuestion] = None
-    Q2_semantic_insight: Optional[InsightQuestion] = None
-    Q3_semantic_insight: Optional[InsightQuestion] = None
+    Q1_strategy: StrategyQuestion | None = None
+    Q2_semantic_insight: InsightQuestion | None = None
+    Q3_semantic_insight: InsightQuestion | None = None
+
 
 class DuplicateClarifications(BaseModel):
-    Q1_strategy: Optional[StrategyQuestion] = None
-    Q2_semantic_insight: Optional[InsightQuestion] = None
-    Q3_semantic_insight: Optional[InsightQuestion] = None
+    Q1_strategy: StrategyQuestion | None = None
+    Q2_semantic_insight: InsightQuestion | None = None
+    Q3_semantic_insight: InsightQuestion | None = None
+
 
 class TypecastClarifications(BaseModel):
-    Q1_semantic_insight: Optional[InsightQuestion] = None
-    Q2_semantic_insight: Optional[InsightQuestion] = None
-    Q3_semantic_insight: Optional[InsightQuestion] = None
+    Q1_semantic_insight: InsightQuestion | None = None
+    Q2_semantic_insight: InsightQuestion | None = None
+    Q3_semantic_insight: InsightQuestion | None = None
+
 
 class ClarificationIssues(BaseModel):
-    null: Optional[NullClarifications] = None
-    duplicate: Optional[DuplicateClarifications] = None
-    typecast: Optional[TypecastClarifications] = None
+    null: NullClarifications | None = None
+    duplicate: DuplicateClarifications | None = None
+    typecast: TypecastClarifications | None = None
+
 
 class ActionPlan(BaseModel):
-    null: Optional[str] = None
-    duplicate: Optional[str] = None
-    typecast: Optional[str] = None
+    null: str | None = None
+    duplicate: str | None = None
+    typecast: str | None = None
 
     @field_validator("null", "duplicate", "typecast", mode="before")
     @classmethod
-    def convert_to_string(cls, v: Any) -> Optional[str]:
+    def convert_to_string(cls, v: Any) -> str | None:  # noqa: ANN401
         if v is None:
             return None
         if isinstance(v, str):
@@ -95,99 +111,161 @@ class ActionPlan(BaseModel):
             return ", ".join(str(item) for item in v)
         return str(v)
 
+
 class InputValidationResult(BaseModel):
     """Structured output expected from the Input Validator LLM."""
+
     status: Literal["ready", "needs_clarification"] = Field(
         description="The status of the validation. 'ready' or 'needs_clarification'."
     )
-    reasoning: str = Field(
-        description="Brief reasoning explaining the status."
-    )
-    resolved_by_user: List[str] = Field(
+    reasoning: str = Field(description="Brief reasoning explaining the status.")
+    resolved_by_user: list[str] = Field(
         default_factory=list,
-        description="List of issues and columns resolved by the user's request."
+        description="List of issues and columns resolved by the user's request.",
     )
-    action_plan: Optional[ActionPlan] = Field(
+    action_plan: ActionPlan | None = Field(
+        default=None, description="The plan for each issue if status is 'ready'."
+    )
+    clarifications: ClarificationIssues | None = Field(
         default=None,
-        description="The plan for each issue if status is 'ready'."
+        description="Clarifications needed per active issue if status is 'needs_clarification'.",
     )
-    clarifications: Optional[ClarificationIssues] = Field(
-        default=None,
-        description="Clarifications needed per active issue if status is 'needs_clarification'."
-    )
+
 
 class PlanMetadata(BaseModel):
     plan_id: str
     plan_version: int = 1
     created_at: str
 
+
 class GlobalConstraints(BaseModel):
     max_retries_per_task: int = 3
-    preserve_columns: List[str] = Field(default_factory=list)
+    preserve_columns: list[str] = Field(default_factory=list)
+
+
+class DedupStrategy(BaseModel):
+    dedup_scope: Literal["row_level", "key_level", "entity_level"]
+    duplicate_types: list[Literal["exact_row", "duplicate_key", "fuzzy_entity"]]
+    primary_keys: list[str] = Field(default_factory=list)
+    exact_match: dict[str, Any] = Field(default_factory=dict)
+    key_based: dict[str, Any] = Field(default_factory=dict)
+    normalization: dict[str, list[str]] = Field(default_factory=dict)
+    fuzzy_matching: dict[str, Any] = Field(default_factory=dict)
+    llm_review: dict[str, Any] = Field(default_factory=dict)
+    output_artifacts: dict[str, Any] = Field(default_factory=dict)
+
+
+class NullStrategy(BaseModel):
+    per_column: dict[str, dict[str, Any]] = Field(default_factory=dict)
+
+
+class TypeStrategy(BaseModel):
+    per_column: dict[str, dict[str, Any]] = Field(default_factory=dict)
+
+
+class ClarificationRequirement(BaseModel):
+    question: str
+    user_answer: str
+
 
 class ColumnTaskContext(BaseModel):
-    statistical: Dict[str, Any]
-    semantic: Dict[str, Any]
+    statistical: dict[str, Any]
+    semantic: dict[str, Any]
+
 
 class TaskInputs(BaseModel):
     read_path_key: str = "physical_dataframe_path"
-    column_context: Dict[str, ColumnTaskContext] = Field(default_factory=dict)
+    column_context: dict[str, ColumnTaskContext] = Field(default_factory=dict)
+    relevant_clarifications: list[ClarificationRequirement] = Field(default_factory=list)
+    relevant_action_plan: str | None = None
+
 
 class TaskOutputs(BaseModel):
     write_path_key: str = "physical_dataframe_path"
-    expected_artifacts: List[str] = Field(default_factory=list)
+    expected_artifacts: list[str] = Field(default_factory=list)
     must_preserve_row_count: bool = False
 
+
+class ValidationCheck(BaseModel):
+    type: str
+    column: str | None = None
+    columns: Any | None = None
+    expected: Any | None = None
+    threshold: float | None = None
+    severity: Literal["error", "warning"] = "error"
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
 class TaskVerification(BaseModel):
-    pandera_checks: List[str] = Field(default_factory=list)
-    success_metrics: Optional[Dict[str, Any]] = None
+    validation_scope: Literal["post_task"] = "post_task"
+    validator_mode: Literal["pandera", "custom", "pandera_plus_custom"] = "pandera"
+    baseline_metrics: dict[str, Any] = Field(default_factory=dict)
+    pandera_checks: list[ValidationCheck] = Field(default_factory=list)
+    custom_checks: list[ValidationCheck] = Field(default_factory=list)
+    success_metrics: dict[str, Any] = Field(default_factory=dict)
+    failure_policy: dict[str, str] = Field(default_factory=dict)
+    evidence_required: list[str] = Field(default_factory=list)
+
 
 class TaskDetail(BaseModel):
     task_id: str
     agent: AgentRole
     skip: bool
-    skip_reason: Optional[str] = None
-    columns: List[str] = Field(default_factory=list)
-    rationale: Optional[str] = None
-    execution_mode: Optional[Literal["tools_only", "tools_then_llm", "llm_assist"]] = None
-    tool_sequence_hint: Optional[List[str]] = None
-    inputs: Optional[TaskInputs] = None
-    outputs: Optional[TaskOutputs] = None
-    verification: Optional[TaskVerification] = None
-    strategy: Optional[Dict[str, Any]] = None
+    skip_reason: str | None = None
+    columns: list[str] = Field(default_factory=list)
+    rationale: str | None = None
+    execution_mode: Literal["tools_only", "tools_then_llm", "llm_assist"] | None = None
+    tool_sequence_hint: list[str] | None = None
+    inputs: TaskInputs | None = None
+    outputs: TaskOutputs | None = None
+    verification: TaskVerification | None = None
+    strategy: DedupStrategy | NullStrategy | TypeStrategy | dict[str, Any] | None = None
+
 
 class TaskDetailWrapper(BaseModel):
     work_order: TaskDetail
 
+
 class ExecutionPlan(BaseModel):
     metadata: PlanMetadata
     plan_summary: str
-    assumptions: List[str] = Field(default_factory=list)
+    assumptions: list[str] = Field(default_factory=list)
     global_constraints: GlobalConstraints
-    task_list: List[TaskDetailWrapper] = Field(default_factory=list)
+    task_list: list[TaskDetailWrapper] = Field(default_factory=list)
+
 
 ### Pydantic Models for Workers & Checkpoints ###
 class WorkerStateDetail(BaseModel):
     status: Literal["pending", "running", "done", "failed"]
     retries: int = 0
-    error_log: List[str] = Field(default_factory=list)
+    error_log: list[str] = Field(default_factory=list)
+
 
 class WorkerStates(BaseModel):
-    last_completed_agent: Optional[str] = None
+    last_completed_agent: str | None = None
     dedup_agent: WorkerStateDetail
     null_agent: WorkerStateDetail
     typecast_agent: WorkerStateDetail
+
 
 class ValidationResultItem(BaseModel):
     agent: str
     task_id: str
     passed: bool
-    failed_rules: List[str] = Field(default_factory=list)
+    failed_rules: list[str] = Field(default_factory=list)
+    metrics_observed: dict[str, Any] = Field(default_factory=dict)
+    expected_metrics: dict[str, Any] = Field(default_factory=dict)
+    artifact_errors: list[str] = Field(default_factory=list)
+    recommended_next_action: Literal[
+        "pass", "retry_worker", "retry_worker_with_modified_params", "replan", "hitl"
+    ] = "pass"
+    replan_hints: dict[str, Any] = Field(default_factory=dict)
     timestamp: str
 
+
 class DeduplicationResult(BaseModel):
-    applied_modes: List[Literal["exact_full_row", "exact_key"]] = Field(default_factory=list)
-    key_columns: List[str] = Field(default_factory=list)
+    applied_modes: list[Literal["exact_full_row", "exact_key"]] = Field(default_factory=list)
+    key_columns: list[str] = Field(default_factory=list)
     keep_strategy: str = "first"
     source_path: str
     output_path: str
@@ -197,81 +275,122 @@ class DeduplicationResult(BaseModel):
     full_row_duplicate_count: int = 0
     key_duplicate_count: int = 0
     duplicate_group_count: int = 0
-    notes: List[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
 
 class ColumnSemanticProfileDetail(BaseModel):
     description: str = Field(description="A clear business description of the column.")
-    logical_group: str = Field(description="The logical group this column belongs to (e.g. Identity, Pricing, Address).")
-    relationships: List[str] = Field(default_factory=list, description="Cross-column relationships or functional dependencies (e.g. 'zip_code -> city').")
-    allow_missing: bool = Field(description="True if missing/null values are acceptable from a business standpoint.")
+    logical_group: str = Field(
+        description="The logical group this column belongs to (e.g. Identity, Pricing, Address)."
+    )
+    relationships: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Cross-column relationships or functional dependencies "
+            "(e.g., 'zip_code -> city')."
+        ),
+    )
+    allow_missing: bool = Field(
+        description="True if missing/null values are acceptable from a business standpoint."
+    )
     allow_missing_reason: str = Field(default="", description="Reasoning explaining allow_missing.")
-    expected_type: str = Field(description="Ideal semantic type: int | float | str | bool | date | datetime.")
+    expected_type: str = Field(
+        description="Ideal semantic type: int | float | str | bool | date | datetime."
+    )
     expected_type_reason: str = Field(default="", description="Reasoning explaining expected_type.")
-    potential_dmv: List[str] = Field(default_factory=list, description="List of common disguised missing values detected.")
+    potential_dmv: list[str] = Field(
+        default_factory=list, description="List of common disguised missing values detected."
+    )
     potential_dmv_reason: str = Field(default="", description="Reasoning explaining potential_dmv.")
-    expected_str_pattern: Optional[str] = Field(default=None, description="Expected regex or string format pattern.")
-    expected_str_pattern_reason: Optional[str] = Field(default=None, description="Reasoning explaining expected_str_pattern.")
-    
+    expected_str_pattern: str | None = Field(
+        default=None, description="Expected regex or string format pattern."
+    )
+    expected_str_pattern_reason: str | None = Field(
+        default=None, description="Reasoning explaining expected_str_pattern."
+    )
+
     # Combined Semantic Review / Quality Audit
-    is_error: bool = Field(description="True if statistical reality deviates from business rules or has other anomalies.")
-    error_types: List[str] = Field(default_factory=list, description="Subset of 'missing' | 'type_mismatch' | 'dmv' | 'string_outlier' | 'numeric_outlier'.")
-    error_reason: Optional[str] = Field(default=None, description="Detailed explanation of the error if is_error is True.")
+    is_error: bool = Field(
+        description=(
+            "True if statistical reality deviates from business rules "
+            "or has other anomalies."
+        )
+    )
+    error_types: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Subset of 'missing' | 'type_mismatch' | 'dmv' | "
+            "'string_outlier' | 'numeric_outlier'."
+        ),
+    )
+    error_reason: str | None = Field(
+        default=None, description="Detailed explanation of the error if is_error is True."
+    )
+
 
 class SemanticProfile(BaseModel):
-    table_summary: str = Field(description="Concise description of the overall business purpose of the dataset.")
-    thinking: str = Field(default="", description="Chain of thought thinking behind the semantic profile.")
-    columns: Dict[str, ColumnSemanticProfileDetail] = Field(default_factory=dict, description="Detailed semantic profile per column.")
+    table_summary: str = Field(
+        description="Concise description of the overall business purpose of the dataset."
+    )
+    thinking: str = Field(
+        default="", description="Chain of thought thinking behind the semantic profile."
+    )
+    columns: dict[str, ColumnSemanticProfileDetail] = Field(
+        default_factory=dict, description="Detailed semantic profile per column."
+    )
+
 
 ### TypedDict for the LangGraph State ###
 class GlobalState(TypedDict):
     # Core Routing & Messages
     messages: Annotated[list[AnyMessage], add_messages]
-    next_node: Optional[str]
+    next_node: str | None
 
     # Project Context
-    project_id: Optional[str]
-    session_id: Optional[str]
-    dataset_path: Optional[str]
-    user_prompt: Optional[str]
+    project_id: str | None
+    session_id: str | None
+    dataset_path: str | None
+    user_prompt: str | None
 
     # Data Schema and Requirements
-    dataset_schema: Optional[Dict[str, Any]]
-    dataset_version: Optional[str]
-    raw_requirement_input: Optional[str]
+    dataset_schema: dict[str, Any] | None
+    dataset_version: str | None
+    raw_requirement_input: str | None
 
     # Data References & Progress
-    current_dataset_version: Optional[str]
-    physical_dataframe_path: Optional[str]
-    current_step: Optional[str]
-    completed_steps: Annotated[List[str], append_list]
+    current_dataset_version: str | None
+    physical_dataframe_path: str | None
+    current_step: str | None
+    completed_steps: Annotated[list[str], append_list]
 
     # Intelligence & Validation
-    statistical_profile: Optional[StatisticalProfile]
-    semantic_profile: Optional[SemanticProfile]
-    input_validation_result: Optional[InputValidationResult]
-    
+    statistical_profile: StatisticalProfile | None
+    semantic_profile: SemanticProfile | None
+    input_validation_result: InputValidationResult | None
+
     # Execution & Routing
-    task_list: Optional[List[str]]
-    execution_plan: Optional[ExecutionPlan]
-    task_list: List[str]
-    worker_states: Optional[WorkerStates]
-    validation_results: Annotated[List[ValidationResultItem], append_list]
-    deduplication_result: Optional[DeduplicationResult]
-    
+    execution_plan: ExecutionPlan | None
+    task_list: list[str]
+    worker_states: WorkerStates | None
+    worker_outputs: dict[str, Any] | None
+    validation_results: Annotated[list[ValidationResultItem], append_list]
+    deduplication_result: DeduplicationResult | None
+
     # Control flow variables
-    current_task_idx: Optional[int]
-    retry_count: Optional[int]
-    last_validation_error: Optional[str]
-    failed_task_id: Optional[str]
-    replan_reason: Optional[str]
+    current_task_idx: int | None
+    retry_count: int | None
+    last_validation_error: str | None
+    failed_task_id: str | None
+    replan_reason: str | None
 
     # HITL Fields
-    hitl_checkpoint: Optional[int]
-    hitl_status: Optional[Literal["pending", "approved", "rejected"]]
-    hitl_feedback: Optional[str]
+    hitl_checkpoint: int | None
+    hitl_status: Literal["pending", "approved", "rejected"] | None
+    hitl_feedback: str | None
 
     # Global Shared Errors
-    global_errors: Annotated[List[str], append_list]
+    global_errors: Annotated[list[str], append_list]
+
 
 class AgentStatus:
     IDLE = "idle"
@@ -279,22 +398,24 @@ class AgentStatus:
     COMPLETED = "completed"
     ERRORED = "errored"
 
+
 class AgentState(TypedDict):
     """State for an individual agent in the workflow.
-    
+
     Captures individual progress, memory, task status, and operational metrics.
     """
+
     # agent identification
     agent_id: str
-    
+
     # local memory
     agent_messages: Annotated[list[AnyMessage], add_messages]
-    
+
     # task execution
-    current_task: Optional[str]
+    current_task: str | None
     status: AgentStatus
 
     # Operational metrics & outputs
-    local_result: Optional[Dict[str, Any]]
-    metrics: Optional[Dict[str, Any]]
-    agent_errors: Annotated[List[str], append_list]
+    local_result: dict[str, Any] | None
+    metrics: dict[str, Any] | None
+    agent_errors: Annotated[list[str], append_list]

@@ -202,7 +202,8 @@ class DeduplicationAgent(BaseAgent):
         if not execution_plan:
             return None
         plan = ExecutionPlan.model_validate(execution_plan)
-        for task in plan.task_list:
+        for wrapper in plan.task_list:
+            task = wrapper.work_order
             if task.task_id == "deduplication" or task.agent == AgentRole.DEDUP_AGENT:
                 return task
         return None
@@ -229,7 +230,16 @@ class DeduplicationAgent(BaseAgent):
         planner_task = dedup_input.planner_task
 
         if planner_task:
-            strategy = planner_task.strategy or {}
+            val = planner_task.strategy
+            if val is None:
+                strategy = {}
+            elif hasattr(val, "model_dump"):
+                strategy = val.model_dump()
+            elif hasattr(val, "dict"):
+                strategy = val.dict()
+            else:
+                strategy = val if isinstance(val, dict) else {}
+
             primary_keys = strategy.get("primary_keys") or []
             if primary_keys and all(col in df.columns for col in primary_keys):
                 return list(primary_keys), "execution_plan.strategy.primary_keys"

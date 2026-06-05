@@ -12,6 +12,7 @@ from app.graphs.states.global_state import (
     StrategyQuestion,
     NullClarifications,
     ClarificationIssues,
+    GlobalState,
 )
 
 logger = logging.getLogger(__name__)
@@ -31,7 +32,7 @@ class InputValidatorAgent(BaseAgent):
     description = "Validates dataset quality against user intent and asks for clarification if needed."
     tools = []  # pure LLM reasoning
 
-    async def run(self, state: dict) -> dict[str, Any]:
+    async def run(self, state: GlobalState) -> dict[str, Any]:
         """Invoke the LLM with structured output."""
         data_profile = state.get("statistical_profile")
         semantic_profile = state.get("semantic_profile")

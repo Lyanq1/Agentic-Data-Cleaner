@@ -9,7 +9,7 @@ from app.agents.deduplication.agent import DeduplicationAgent
 from app.agents.roles import AgentRole
 from app.graphs.graph import build_graph
 from app.graphs.checkpointer import get_checkpointer_manager
-from app.graphs.states.global_state import ExecutionPlan, TaskDetail
+from app.graphs.states.global_state import ExecutionPlan, TaskDetail, TaskDetailWrapper, PlanMetadata, GlobalConstraints, GlobalState
 
 logger = logging.getLogger(__name__)
 
@@ -137,7 +137,7 @@ async def get_pipeline_state(run_id: str) -> dict[str, Any] | None:
     }
 
 
-async def get_pipeline_raw_state(run_id: str) -> dict[str, Any] | None:
+async def get_pipeline_raw_state(run_id: str) -> GlobalState | None:
     """Retrieve the raw checkpointed state snapshot for a run."""
     config = {"configurable": {"thread_id": run_id}}
 
@@ -148,10 +148,10 @@ async def get_pipeline_raw_state(run_id: str) -> dict[str, Any] | None:
     if not snapshot or not snapshot.values:
         return None
 
-    return dict(snapshot.values)
+    return snapshot.values  # type: ignore
 
 
-def _inject_dedup_key_columns(state: dict[str, Any], key_columns: list[str]) -> dict[str, Any]:
+def _inject_dedup_key_columns(state: GlobalState, key_columns: list[str]) -> GlobalState:
     """Inject requested key columns into the working execution plan for dedup."""
     if not key_columns:
         return state
@@ -161,7 +161,19 @@ def _inject_dedup_key_columns(state: dict[str, Any], key_columns: list[str]) -> 
     if existing_plan:
         plan = ExecutionPlan.model_validate(existing_plan)
     else:
-        plan = ExecutionPlan(task_list=[], plan_summary="Debug dedup execution plan.")
+        plan = ExecutionPlan(
+            metadata=PlanMetadata(
+                plan_id="debug",
+                plan_version=1,
+                created_at="2026-06-06T00:00:00"
+            ),
+            global_constraints=GlobalConstraints(
+                max_retries_per_task=3,
+                preserve_columns=[]
+            ),
+            task_list=[],
+            plan_summary="Debug dedup execution plan."
+        )
 
     dedup_task = TaskDetail(
         task_id="deduplication",
@@ -173,11 +185,13 @@ def _inject_dedup_key_columns(state: dict[str, Any], key_columns: list[str]) -> 
     updated_tasks = [
         task
         for task in plan.task_list
-        if task.task_id != "deduplication" and task.agent != AgentRole.DEDUP_AGENT
+        if task.work_order.task_id != "deduplication" and task.work_order.agent != AgentRole.DEDUP_AGENT
     ]
-    updated_tasks.insert(0, dedup_task)
+    updated_tasks.insert(0, TaskDetailWrapper(work_order=dedup_task))
 
     working_state["execution_plan"] = ExecutionPlan(
+        metadata=plan.metadata,
+        global_constraints=plan.global_constraints,
         task_list=updated_tasks,
         plan_summary=plan.plan_summary or "Debug dedup execution plan.",
     )

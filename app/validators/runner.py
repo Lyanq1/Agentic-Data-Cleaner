@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pandas as pd
 import pandera.pandas as pa
@@ -81,7 +81,9 @@ def _resolve_active_task(state: GlobalState) -> TaskDetail | None:
 
     current_idx = state.get("current_task_idx") or 0
     active_task_names = state.get("task_list") or []
-    active_task_name = active_task_names[current_idx] if current_idx < len(active_task_names) else None
+    active_task_name = (
+        active_task_names[current_idx] if current_idx < len(active_task_names) else None
+    )
 
     if active_task_name:
         for wrapper in plan.task_list:
@@ -155,7 +157,10 @@ def _failure_cases(exc: pa.errors.SchemaErrors) -> list[dict[str, Any]]:
     failure_cases = exc.failure_cases
     if failure_cases is None:
         return []
-    return failure_cases.where(pd.notna(failure_cases), None).to_dict(orient="records")
+    return cast(
+        "list[dict[str, Any]]",
+        failure_cases.where(pd.notna(failure_cases), None).to_dict(orient="records"),
+    )
 
 
 def _failed_rules_from_schema_errors(
@@ -164,11 +169,7 @@ def _failed_rules_from_schema_errors(
 ) -> list[str]:
     cases = _failure_cases(exc)
     checks = sorted(
-        {
-            str(case.get("check"))
-            for case in cases
-            if case.get("check") not in {None, ""}
-        }
+        {str(case.get("check")) for case in cases if case.get("check") not in {None, ""}}
     )
     if checks:
         return checks
@@ -186,6 +187,12 @@ def _failed_rules_from_schema_error(
 
 
 def _planned_rules(task: TaskDetail) -> list[str]:
-    if task.verification:
-        return task.verification.pandera_checks.copy()
+    if task.verification and task.verification.pandera_checks:
+        rules = []
+        for check in task.verification.pandera_checks:
+            if isinstance(check, dict):
+                rules.append(check.get("type", "unknown"))
+            else:
+                rules.append(check.type)
+        return rules
     return []
