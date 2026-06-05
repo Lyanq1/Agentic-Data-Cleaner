@@ -2,7 +2,8 @@
 import logging
 from datetime import datetime, timezone
 from typing import Any
-
+from app.agents.deduplication.agent import DeduplicationAgent
+from app.graphs.states.global_state import GlobalState, StatisticalProfile
 from app.agents.input_validator.agent import InputValidatorAgent
 from app.agents.semantic_analyzer.profiler_agent import SemanticProfilerAgent
 from app.graphs.states.global_state import GlobalState, StatisticalProfile, ValidationResultItem
@@ -88,11 +89,35 @@ async def planner_node(state: GlobalState) -> dict[str, Any]:
         "completed_steps": "planning",
     }
 
+# Supervisor node (Điều phối luồng chạy của các Worker)
+async def supervisor_node(state: GlobalState) -> dict[str, Any]:
+    """Skeletal Supervisor Node — increments indices and coordinates task steps."""
+    current_idx = state.get("current_task_idx", 0)
+    task_list = state.get("task_list", [])
+    
+    if current_idx < len(task_list):
+        active_task = task_list[current_idx]
+        logger.info(f"supervisor_node: Active task is '{active_task}' (index {current_idx}/{len(task_list)})")
+    else:
+        logger.info("supervisor_node: All tasks in DAG completed successfully.")
+        
+    return {
+        "current_step": "supervisor",
+        "completed_steps": "supervisor",
+    }
+
 # Deduplication Worker stub node
 async def dedup_agent_node(state: GlobalState) -> dict[str, Any]:
-    """Skeletal Deduplication Worker."""
+    """Run the deterministic simple-case deduplication worker."""
     logger.info("dedup_agent_node: Executing dataset deduplication checks...")
-    return _persist_passthrough_worker_version(state, "dedup_agent", "deduplication")
+    agent = DeduplicationAgent()
+    result = await agent.run(state)
+
+    return {
+        **result,
+        "current_step": "deduplication",
+        "completed_steps": "deduplication",
+    }
 
 # Null Handling Worker stub node
 async def null_agent_node(state: GlobalState) -> dict[str, Any]:

@@ -185,6 +185,20 @@ class ValidationResultItem(BaseModel):
     failed_rules: List[str] = Field(default_factory=list)
     timestamp: str
 
+class DeduplicationResult(BaseModel):
+    applied_modes: List[Literal["exact_full_row", "exact_key"]] = Field(default_factory=list)
+    key_columns: List[str] = Field(default_factory=list)
+    keep_strategy: str = "first"
+    source_path: str
+    output_path: str
+    before_row_count: int
+    after_row_count: int
+    dropped_row_count: int
+    full_row_duplicate_count: int = 0
+    key_duplicate_count: int = 0
+    duplicate_group_count: int = 0
+    notes: List[str] = Field(default_factory=list)
+
 class ColumnSemanticProfileDetail(BaseModel):
     description: str = Field(description="A clear business description of the column.")
     logical_group: str = Field(description="The logical group this column belongs to (e.g. Identity, Pricing, Address).")
@@ -237,10 +251,12 @@ class GlobalState(TypedDict):
     input_validation_result: Optional[InputValidationResult]
     
     # Execution & Routing
+    task_list: Optional[List[str]]
     execution_plan: Optional[ExecutionPlan]
     task_list: List[str]
     worker_states: Optional[WorkerStates]
     validation_results: Annotated[List[ValidationResultItem], append_list]
+    deduplication_result: Optional[DeduplicationResult]
     
     # Control flow variables
     current_task_idx: Optional[int]
