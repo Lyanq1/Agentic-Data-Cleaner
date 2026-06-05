@@ -68,12 +68,6 @@ def ingest_to_canonical(
     if df.empty:
         raise IngestionError(f"File '{file_path.name}' produced an empty DataFrame.")
 
-    # Ensure there is an ID column for reliable tracking/deduplication
-    col_names_lower = [str(c).lower() for c in df.columns]
-    has_id = any(c in {"id", "uuid", "guid", "pk", "key"} or c.endswith("_id") for c in col_names_lower)
-    if not has_id:
-        logger.info("No ID column detected in ingested dataset. Injecting sequential 'id' column.")
-        df.insert(0, "id", range(1, len(df) + 1))
 
     settings = get_settings()
     out_dir = output_dir or Path(settings.upload_dir)
