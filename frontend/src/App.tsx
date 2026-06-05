@@ -39,10 +39,23 @@ function App() {
   }, []);
 
   const resetSession = useCallback(() => {
+    // Clear React Query cache
     if (runId) {
       queryClient.removeQueries({ queryKey: ['pipeline-state', runId] });
       queryClient.removeQueries({ queryKey: ['hitl-checkpoint', runId] });
     }
+    queryClient.clear();
+
+    // Clear all HITL answers and submissions from local storage to prevent conflicts
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && (key.startsWith('hitl_answers_') || key.startsWith('hitl_submitted_'))) {
+        keysToRemove.push(key);
+      }
+    }
+    keysToRemove.forEach((key) => localStorage.removeItem(key));
+
     setRunId(null);
     setCurrentStep('upload');
     setSessionKey((k) => k + 1);

@@ -42,17 +42,105 @@ class StatisticalProfile(BaseModel):
     duplicate_rows: int = 0
     columns: List[ColumnStatProfile] = Field(default_factory=list)
 
+from pydantic import BaseModel, Field, field_validator
+
 ### Pydantic Models for Validation & Planning ###
-class ValidationIssue(BaseModel):
-    requirement: str
-    column: Optional[str] = None
-    status: Literal["feasible", "infeasible", "warning"]
-    reason: str
+class StrategyQuestion(BaseModel):
+    question: str = Field(description="The strategy question text.")
+    options: List[str] = Field(description="Exactly 3 distinct options.")
+    consequences: Optional[Any] = Field(default=None, description="Consequences of each option.")
+    answer: Optional[str] = Field(default=None, description="The user's selected option/answer.")
+
+class InsightQuestion(BaseModel):
+    question: str = Field(description="The insight question text.")
+    insight: str = Field(description="The semantic insight revealed.")
+    confirm: str = Field(description="The yes/no confirmation ask.")
+    answer: Optional[str] = Field(default=None, description="The user's answer ('yes', 'no', or comment).")
+
+class NullClarifications(BaseModel):
+    Q1_strategy: Optional[StrategyQuestion] = None
+    Q2_semantic_insight: Optional[InsightQuestion] = None
+    Q3_semantic_insight: Optional[InsightQuestion] = None
+
+class DuplicateClarifications(BaseModel):
+    Q1_strategy: Optional[StrategyQuestion] = None
+    Q2_semantic_insight: Optional[InsightQuestion] = None
+    Q3_semantic_insight: Optional[InsightQuestion] = None
+
+class TypecastClarifications(BaseModel):
+    Q1_semantic_insight: Optional[InsightQuestion] = None
+    Q2_semantic_insight: Optional[InsightQuestion] = None
+    Q3_semantic_insight: Optional[InsightQuestion] = None
+
+class ClarificationIssues(BaseModel):
+    null: Optional[NullClarifications] = None
+    duplicate: Optional[DuplicateClarifications] = None
+    typecast: Optional[TypecastClarifications] = None
+
+class ActionPlan(BaseModel):
+    null: Optional[str] = None
+    duplicate: Optional[str] = None
+    typecast: Optional[str] = None
+
+    @field_validator("null", "duplicate", "typecast", mode="before")
+    @classmethod
+    def convert_to_string(cls, v: Any) -> Optional[str]:
+        if v is None:
+            return None
+        if isinstance(v, str):
+            return v
+        if isinstance(v, dict):
+            return " | ".join(f"{k}: {val}" for k, val in v.items())
+        if isinstance(v, list):
+            return ", ".join(str(item) for item in v)
+        return str(v)
 
 class InputValidationResult(BaseModel):
-    passed: bool
-    issues: List[ValidationIssue] = Field(default_factory=list)
-    summary: str
+    """Structured output expected from the Input Validator LLM."""
+    status: Literal["ready", "needs_clarification"] = Field(
+        description="The status of the validation. 'ready' or 'needs_clarification'."
+    )
+    reasoning: str = Field(
+        description="Brief reasoning explaining the status."
+    )
+    resolved_by_user: List[str] = Field(
+        default_factory=list,
+        description="List of issues and columns resolved by the user's request."
+    )
+    action_plan: Optional[ActionPlan] = Field(
+        default=None,
+        description="The plan for each issue if status is 'ready'."
+    )
+    clarifications: Optional[ClarificationIssues] = Field(
+        default=None,
+        description="Clarifications needed per active issue if status is 'needs_clarification'."
+    )
+
+class PlanMetadata(BaseModel):
+    plan_id: str
+    plan_version: int = 1
+    created_at: str
+
+class GlobalConstraints(BaseModel):
+    max_retries_per_task: int = 3
+    preserve_columns: List[str] = Field(default_factory=list)
+
+class ColumnTaskContext(BaseModel):
+    statistical: Dict[str, Any]
+    semantic: Dict[str, Any]
+
+class TaskInputs(BaseModel):
+    read_path_key: str = "physical_dataframe_path"
+    column_context: Dict[str, ColumnTaskContext] = Field(default_factory=dict)
+
+class TaskOutputs(BaseModel):
+    write_path_key: str = "physical_dataframe_path"
+    expected_artifacts: List[str] = Field(default_factory=list)
+    must_preserve_row_count: bool = False
+
+class TaskVerification(BaseModel):
+    pandera_checks: List[str] = Field(default_factory=list)
+    success_metrics: Optional[Dict[str, Any]] = None
 
 class TaskDetail(BaseModel):
     task_id: str
@@ -60,11 +148,23 @@ class TaskDetail(BaseModel):
     skip: bool
     skip_reason: Optional[str] = None
     columns: List[str] = Field(default_factory=list)
-    strategy: Dict[str, Any] = Field(default_factory=dict)
+    rationale: Optional[str] = None
+    execution_mode: Optional[Literal["tools_only", "tools_then_llm", "llm_assist"]] = None
+    tool_sequence_hint: Optional[List[str]] = None
+    inputs: Optional[TaskInputs] = None
+    outputs: Optional[TaskOutputs] = None
+    verification: Optional[TaskVerification] = None
+    strategy: Optional[Dict[str, Any]] = None
+
+class TaskDetailWrapper(BaseModel):
+    work_order: TaskDetail
 
 class ExecutionPlan(BaseModel):
-    task_list: List[TaskDetail] = Field(default_factory=list)
+    metadata: PlanMetadata
     plan_summary: str
+    assumptions: List[str] = Field(default_factory=list)
+    global_constraints: GlobalConstraints
+    task_list: List[TaskDetailWrapper] = Field(default_factory=list)
 
 ### Pydantic Models for Workers & Checkpoints ###
 class WorkerStateDetail(BaseModel):
@@ -130,6 +230,7 @@ class GlobalState(TypedDict):
 
     # Project Context
     project_id: Optional[str]
+    session_id: Optional[str]
     dataset_path: Optional[str]
     user_prompt: Optional[str]
 
@@ -152,6 +253,7 @@ class GlobalState(TypedDict):
     # Execution & Routing
     task_list: Optional[List[str]]
     execution_plan: Optional[ExecutionPlan]
+    task_list: List[str]
     worker_states: Optional[WorkerStates]
     validation_results: Annotated[List[ValidationResultItem], append_list]
     deduplication_result: Optional[DeduplicationResult]
@@ -159,6 +261,9 @@ class GlobalState(TypedDict):
     # Control flow variables
     current_task_idx: Optional[int]
     retry_count: Optional[int]
+    last_validation_error: Optional[str]
+    failed_task_id: Optional[str]
+    replan_reason: Optional[str]
 
     # HITL Fields
     hitl_checkpoint: Optional[int]

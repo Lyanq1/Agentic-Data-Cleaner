@@ -14,7 +14,7 @@ class AgentOutput:
     agent_name: str
     success: bool
     data: dict[str, Any] = field(default_factory=dict)
-    next_agent: str | None = None  # routing hint for the supervisor
+    next_agent: str | None = None  # optional routing hint for graph edges
     error: str | None = None
 
 

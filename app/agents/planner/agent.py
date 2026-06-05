@@ -7,7 +7,8 @@ from langchain_core.messages import AIMessage, SystemMessage, HumanMessage
 from app.agents.base import BaseAgent
 from app.agents.registry import AgentRegistry
 from app.agents.planner.prompts import PLANNER_SYSTEM_PROMPT
-from app.graphs.states.global_state import ExecutionPlan, TaskDetail
+from datetime import datetime
+from app.graphs.states.global_state import ExecutionPlan, TaskDetail, TaskDetailWrapper, PlanMetadata, GlobalConstraints
 
 logger = logging.getLogger(__name__)
 
@@ -106,30 +107,45 @@ class PlannerAgent(BaseAgent):
             logger.error(f"PlannerAgent failed to parse LLM JSON output: {e}")
             # Fallback to a safe execution plan where we skip all and log the error
             response = ExecutionPlan(
+                metadata=PlanMetadata(
+                    plan_id="fallback",
+                    plan_version=1,
+                    created_at=datetime.now().isoformat()
+                ),
+                global_constraints=GlobalConstraints(
+                    max_retries_per_task=3,
+                    preserve_columns=[]
+                ),
                 task_list=[
-                  TaskDetail(
-                      task_id="deduplication",
-                      agent="dedup_agent",
-                      skip=True,
-                      skip_reason=f"Failed to generate plan due to error: {e}",
-                      columns=[],
-                      strategy={}
+                  TaskDetailWrapper(
+                      work_order=TaskDetail(
+                          task_id="deduplication",
+                          agent="dedup_agent",
+                          skip=True,
+                          skip_reason=f"Failed to generate plan due to error: {e}",
+                          columns=[],
+                          strategy={}
+                      )
                   ),
-                  TaskDetail(
-                      task_id="null_handling",
-                      agent="null_agent",
-                      skip=True,
-                      skip_reason=f"Failed to generate plan due to error: {e}",
-                      columns=[],
-                      strategy={}
+                  TaskDetailWrapper(
+                      work_order=TaskDetail(
+                          task_id="null_handling",
+                          agent="null_agent",
+                          skip=True,
+                          skip_reason=f"Failed to generate plan due to error: {e}",
+                          columns=[],
+                          strategy={}
+                      )
                   ),
-                  TaskDetail(
-                      task_id="type_casting",
-                      agent="typecast_agent",
-                      skip=True,
-                      skip_reason=f"Failed to generate plan due to error: {e}",
-                      columns=[],
-                      strategy={}
+                  TaskDetailWrapper(
+                      work_order=TaskDetail(
+                          task_id="type_casting",
+                          agent="typecast_agent",
+                          skip=True,
+                          skip_reason=f"Failed to generate plan due to error: {e}",
+                          columns=[],
+                          strategy={}
+                      )
                   )
                 ],
                 plan_summary=f"Fallback execution plan created because LLM plan parsing failed: {e}."
@@ -145,8 +161,8 @@ class PlannerAgent(BaseAgent):
         }
         active_task_names = []
         for task in response.task_list:
-            if not task.skip:
-                mapped_name = task_mapping.get(task.task_id)
+            if not task.work_order.skip:
+                mapped_name = task_mapping.get(task.work_order.task_id)
                 if mapped_name:
                     active_task_names.append(mapped_name)
 
