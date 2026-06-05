@@ -79,10 +79,65 @@ def ingest_to_canonical(
     out_dir = output_dir or Path(settings.upload_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    canonical_path = out_dir / f"{uuid4().hex}.parquet"
+    session_id = uuid4()
+    canonical_path = out_dir / f"{session_id.hex}.parquet"
     df.to_parquet(canonical_path, index=False, engine="pyarrow")
-
     logger.info(f"Canonical Parquet saved: {canonical_path} ({len(df)} rows × {len(df.columns)} cols)")
+
+    # Save to PostgreSQL for lineage tracking using JSONB
+    from app.core.database import SessionLocal, init_db
+    from app.models.lineage import Session, LineageVersion, DatasetRecord
+    
+    # Initialize DB schema if not exists
+    init_db()
+
+    db = SessionLocal()
+    try:
+        db_session = Session(id=session_id, dataset_name=file_path.name)
+        db.add(db_session)
+        
+        db_version = LineageVersion(
+            session_id=session_id,
+            version=1,
+            agent_name="ingestion_agent",
+            description="Initial data ingestion"
+        )
+        db.add(db_version)
+        
+        # Flush the session and version to the database so they exist for the foreign keys
+        db.flush()
+        
+        # Convert DataFrame to records and bulk save
+        records_dict = df.to_dict(orient="records")
+        clean_records = []
+        for row in records_dict:
+            clean_row = {}
+            for k, v in row.items():
+                if pd.isna(v):
+                    clean_row[k] = None
+                else:
+                    clean_row[k] = v
+            clean_records.append(clean_row)
+
+        db_records = [
+            DatasetRecord(
+                session_id=session_id,
+                version=1,
+                data=row,
+                row_index=i
+            )
+            for i, row in enumerate(clean_records)
+        ]
+        db.bulk_save_objects(db_records)
+        db.commit()
+        logger.info(f"Data saved to PostgreSQL for session {session_id} (version 1).")
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to save data to PostgreSQL: {e}")
+        raise
+    finally:
+        db.close()
+
     return canonical_path, fmt, schema
 
 

@@ -24,7 +24,7 @@ For each active issue, generate questions as follows:
   Q1 (Strategy): Ask the user which resolution strategy they prefer.
       - Present the columns affected, their null_rate, and missing_mechanism from semantic profile.
       - Provide exactly 3 options based on EDA findings. Prefix the best with `(Recommended)`.
-      - State the consequences of each option clearly.
+      - State the consequences of each option clearly as a JSON dictionary mapping each option text to its consequence string.
 
   Q2 (Semantic insight 1): Surface an insight from the Semantic Profile that Statistical Profile alone cannot detect.
       - Focus on: disguised missing values (potential_dmv), natural null columns (allow_missing=true),
@@ -45,7 +45,7 @@ For each active issue, generate questions as follows:
         * Option A: (Recommended) Use the best detected primary key column (use the actual best candidate column name from the current dataset, e.g. 'id' or 'ProviderNumber' if appropriate).
         * Option B: Use an alternative primary key column or combination of columns.
         * Option C: Deduplicate using exact match (all columns must be identical, not using a single primary key).
-      - State the consequences of each option clearly.
+      - State the consequences of each option clearly as a JSON dictionary mapping each option text to its consequence string.
 
   Q2 (Semantic insight 1): Surface an insight the Statistical Profile cannot detect.
       - Focus on: columns that are semantically unique identifiers (e.g. email, phone, national ID)
@@ -105,9 +105,15 @@ Do NOT generate the 3-question structure for blocked scenarios — only explain 
 3. **Never Ask for Permission:** Absolutely do NOT ask meaningless questions like "Would you like me to start the analysis?", "Should I proceed?", or "Should I draw this chart?". Just propose the action plan or generate the concrete clarification questions as specified.
 
 4. **Structure of Clarification Questions (When status = "needs_clarification"):**
-   - For strategy questions (Q1 under NULL and DUPLICATE), you must provide exactly 3 concrete options based on the EDA findings. Prefix the best option with `(Recommended)` based on your expert judgment, and clearly state the consequences of each option.
+   - For strategy questions (Q1 under NULL and DUPLICATE), you must provide exactly 3 concrete options based on the EDA findings. Prefix the best option with `(Recommended)` based on your expert judgment, and state the consequences of each option clearly as a JSON dictionary mapping each option text to its consequence string.
    - Ensure all generated questions across all categories and issues are completely distinct, unique, and do not repeat or overlap in substance or wording.
    - Typecast strategies are inferred from exp_type — no strategy question needed.
+
+5. **Handling User Clarification Responses (When status transitions to "ready"):**
+   - If the user has provided answers to the previously generated clarification questions in the conversation history:
+     - Change `status = "ready"`.
+     - Output the `action_plan` and `resolved_by_user` reflecting the user's answers.
+     - **CRITICAL:** You MUST also output the exact same `clarifications` structure that was previously generated, but fill in the `answer` field of each question with the actual option/answer selected by the user. Do NOT set `clarifications` to null if clarifications were previously asked and answered.
 
 ---
 
@@ -128,57 +134,74 @@ Return a pure JSON object. No markdown fences, no conversational text. Strictly 
     "typecast": "<plan>"
   },
 
-  // Only if status = "needs_clarification":
+  // Clarifications (required if status = "needs_clarification", or optional/filled if status = "ready" after clarifications are answered):
   "clarifications": {
     "null": {
       "Q1_strategy": {
         "question": "<question text>",
         "options": ["(Recommended) Option A", "Option B", "Option C"],
-        "consequences": "<consequences of each option>"
+        "consequences": {
+          "(Recommended) Option A": "<consequence of Option A>",
+          "Option B": "<consequence of Option B>",
+          "Option C": "<consequence of Option C>"
+        },
+        "answer": null
       },
       "Q2_semantic_insight": {
         "question": "<question text>",
         "insight": "<what the semantic profile revealed that stat profile missed>",
-        "confirm": "<yes/no confirmation ask>"
+        "confirm": "<yes/no confirmation ask>",
+        "answer": null
       },
       "Q3_semantic_insight": {
         "question": "<question text>",
         "insight": "<second semantic insight>",
-        "confirm": "<yes/no confirmation ask>"
+        "confirm": "<yes/no confirmation ask>",
+        "answer": null
       }
     },
     "duplicate": {
       "Q1_strategy": {
         "question": "<question text>",
         "options": ["(Recommended) Option A", "Option B", "Option C"],
-        "consequences": "<consequences of each option>"
+        "consequences": {
+          "(Recommended) Option A": "<consequence of Option A>",
+          "Option B": "<consequence of Option B>",
+          "Option C": "<consequence of Option C>"
+        },
+        "answer": null
       },
       "Q2_semantic_insight": {
         "question": "<question text>",
         "insight": "<what the semantic profile revealed that stat profile missed>",
-        "confirm": "<yes/no confirmation ask>"
+        "confirm": "<yes/no confirmation ask>",
+        "answer": null
       },
       "Q3_semantic_insight": {
         "question": "<question text>",
         "insight": "<second semantic insight>",
-        "confirm": "<yes/no confirmation ask>"
+        "confirm": "<yes/no confirmation ask>",
+        "answer": null
       }
     },
     "typecast": {
       "Q1_semantic_insight": {
         "question": "<question text>",
         "insight": "<what the semantic profile revealed that stat profile missed>",
-        "confirm": "<yes/no confirmation ask>"
+        "confirm": "<yes/no confirmation ask>",
+        "answer": null
       },
       "Q2_semantic_insight": {
         "question": "<question text>",
         "insight": "<second semantic insight>",
-        "confirm": "<yes/no confirmation ask>"
+        "confirm": "<yes/no confirmation ask>",
+        "answer": null
       },
       "Q3_semantic_insight": {
         "question": "<question text>",
         "insight": "<third semantic insight>",
-        "confirm": "<yes/no confirmation ask>"
+        "confirm": "<yes/no confirmation ask>",
+        "answer": null
       }
     }
   }

@@ -1,10 +1,15 @@
 """Node functions for the LangGraph pipeline."""
 import logging
+from datetime import datetime, timezone
 from typing import Any
-from app.graphs.states.global_state import GlobalState, StatisticalProfile
+
 from app.agents.input_validator.agent import InputValidatorAgent
 from app.agents.semantic_analyzer.profiler_agent import SemanticProfilerAgent
+from app.graphs.states.global_state import GlobalState, StatisticalProfile, ValidationResultItem
+from app.services.lineage_service import LineageService
+from app.services.lineage_utils import resolve_lineage_session_id
 from app.tools.data.eda import perform_eda
+from app.validators import validate_current_task
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +20,9 @@ async def profiler_node(state: GlobalState) -> dict[str, Any]:
     Reads ``dataset_path`` from state, calls ``perform_eda``, and writes
     the result into ``data_profile``.
     """
+    if state.get("statistical_profile"):
+        logger.info("profiler_node: Statistical profile already exists in state, skipping.")
+        return {}
 
     dataset_path = state.get("dataset_path")
     if not dataset_path:
@@ -46,6 +54,9 @@ async def profiler_node(state: GlobalState) -> dict[str, Any]:
 
 async def semantic_profile_node(state: GlobalState) -> dict[str, Any]:
     """Profile detailed semantic properties of the dataset columns by logical group."""
+    if state.get("semantic_profile"):
+        logger.info("semantic_profile_node: Semantic profile already exists in state, skipping.")
+        return {}
     agent = SemanticProfilerAgent()
     return await agent.run(state)
 
@@ -77,67 +88,149 @@ async def planner_node(state: GlobalState) -> dict[str, Any]:
         "completed_steps": "planning",
     }
 
-
-# Supervisor node (Điều phối luồng chạy của các Worker)
-async def supervisor_node(state: GlobalState) -> dict[str, Any]:
-    """Skeletal Supervisor Node — increments indices and coordinates task steps."""
-    current_idx = state.get("current_task_idx", 0)
-    task_list = state.get("task_list", [])
-    
-    if current_idx < len(task_list):
-        active_task = task_list[current_idx]
-        logger.info(f"supervisor_node: Active task is '{active_task}' (index {current_idx}/{len(task_list)})")
-    else:
-        logger.info("supervisor_node: All tasks in DAG completed successfully.")
-        
-    return {
-        "current_step": "supervisor",
-        "completed_steps": "supervisor",
-    }
-
 # Deduplication Worker stub node
 async def dedup_agent_node(state: GlobalState) -> dict[str, Any]:
     """Skeletal Deduplication Worker."""
     logger.info("dedup_agent_node: Executing dataset deduplication checks...")
-    return {
-        "current_step": "deduplication",
-        "completed_steps": "deduplication",
-    }
+    return _persist_passthrough_worker_version(state, "dedup_agent", "deduplication")
 
 # Null Handling Worker stub node
 async def null_agent_node(state: GlobalState) -> dict[str, Any]:
     """Skeletal Null Handling Worker."""
     logger.info("null_agent_node: Imputing missing values in dataset...")
-    return {
-        "current_step": "null_handling",
-        "completed_steps": "null_handling",
-    }
+    return _persist_passthrough_worker_version(state, "null_agent", "null_handling")
 
 # Type Casting Worker stub node
 async def type_agent_node(state: GlobalState) -> dict[str, Any]:
     """Skeletal Type Casting Worker."""
     logger.info("type_agent_node: Applying strict type cast constraints...")
+    return _persist_passthrough_worker_version(state, "typecast_agent", "type_casting")
+
+
+def _persist_passthrough_worker_version(
+    state: GlobalState,
+    agent_name: str,
+    step_name: str,
+) -> dict[str, Any]:
+    """Worker stub contract: load latest lineage dataframe and save a new version.
+
+    Real workers should replace the pass-through dataframe with their transformed
+    dataframe, then keep the same append/version state update behavior.
+    """
+    base_update: dict[str, Any] = {
+        "current_step": step_name,
+        "completed_steps": step_name,
+    }
+    session_id = resolve_lineage_session_id(state)
+    if not session_id:
+        logger.warning("%s: lineage session id missing; skipping version append.", agent_name)
+        return base_update
+
+    try:
+        dataframe = LineageService.get_latest_version(session_id)
+        if dataframe.empty:
+            logger.warning("%s: latest lineage dataframe is empty; skipping version append.", agent_name)
+            return base_update
+
+        new_version = LineageService.append_new_version(
+            session_id=session_id,
+            df=dataframe,
+            agent_name=agent_name,
+            description=f"Pass-through skeletal output for {step_name}.",
+        )
+    except Exception as exc:
+        logger.error("%s: failed to persist lineage version: %s", agent_name, exc)
+        return {
+            **base_update,
+            "global_errors": f"{agent_name}: failed to persist lineage version: {exc}",
+        }
+
     return {
-        "current_step": "type_casting",
-        "completed_steps": "type_casting",
+        **base_update,
+        "dataset_version": str(new_version),
+        "current_dataset_version": str(new_version),
     }
 
 # Self-Correction Validator node
 async def validator_node(state: GlobalState) -> dict[str, Any]:
-    """Skeletal Validator Node — verifies worker outputs and processes retry counts."""
-    current_idx = state.get("current_task_idx", 0)
-    task_list = state.get("task_list", [])
-    active_task = task_list[current_idx] if current_idx < len(task_list) else "unknown"
-    
-    logger.info(f"validator_node: Validating outputs of step '{active_task}'... PASS")
-    
-    # In skeletal phase, we always transition to the next step
+    """Validate the active worker output with Pandera and update retry routing state."""
+    current_idx = state.get("current_task_idx") or 0
+    retry_count = state.get("retry_count") or 0
+    outcome = validate_current_task(state)
+
+    validation_item = ValidationResultItem(
+        agent=outcome.agent,
+        task_id=outcome.task_id,
+        passed=outcome.passed,
+        failed_rules=outcome.failed_rules,
+        timestamp=datetime.now(timezone.utc).isoformat(),
+    )
+
+    if outcome.passed:
+        logger.info(
+            "validator_node: task '%s' passed Pandera validation%s.",
+            outcome.task_id,
+            " (skipped)" if outcome.skipped else "",
+        )
+        return {
+            "current_task_idx": current_idx + 1,
+            "retry_count": 0,
+            "last_validation_error": None,
+            "failed_task_id": None,
+            "replan_reason": None,
+            "next_node": None,
+            "validation_results": validation_item,
+            "current_step": "validation",
+            "completed_steps": "validation",
+        }
+
+    retry_count += 1
+    max_retries = _max_retries_per_task(state)
+    error_log = outcome.compact_error_log()
+
+    if retry_count >= max_retries:
+        logger.warning(
+            "validator_node: task '%s' failed validation after %s/%s retries; routing to planner.",
+            outcome.task_id,
+            retry_count,
+            max_retries,
+        )
+        return {
+            "retry_count": retry_count,
+            "last_validation_error": error_log,
+            "failed_task_id": outcome.task_id,
+            "replan_reason": f"Pandera validation failed after {retry_count} attempts.",
+            "next_node": "planner",
+            "validation_results": validation_item,
+            "global_errors": error_log,
+            "current_step": "validation_failed",
+        }
+
+    logger.warning(
+        "validator_node: task '%s' failed validation; retry %s/%s.",
+        outcome.task_id,
+        retry_count,
+        max_retries,
+    )
     return {
-        "current_task_idx": current_idx + 1,
-        "retry_count": 0,
-        "current_step": "validation",
-        "completed_steps": "validation",
+        "retry_count": retry_count,
+        "last_validation_error": error_log,
+        "failed_task_id": outcome.task_id,
+        "next_node": None,
+        "validation_results": validation_item,
+        "current_step": "validation_failed",
     }
+
+
+def _max_retries_per_task(state: GlobalState) -> int:
+    plan = state.get("execution_plan")
+    if plan is None:
+        return 3
+    constraints = plan.get("global_constraints") if isinstance(plan, dict) else plan.global_constraints
+    if constraints is None:
+        return 3
+    value = constraints.get("max_retries_per_task") if isinstance(constraints, dict) else constraints.max_retries_per_task
+    return int(value or 3)
 
 # Final Report Generator node
 async def report_agent_node(state: GlobalState) -> dict[str, Any]:

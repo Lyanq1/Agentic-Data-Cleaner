@@ -64,8 +64,17 @@ export const pipelineApi = {
 
     // Map LangGraph backend state to frontend UI expectations
     const hasErrors = data.errors && data.errors.length > 0;
-    const isCompleted = !data.next_node || data.next_node.length === 0 || data.next_node.includes('__end__');
-    const status = hasErrors ? 'failed' : (isCompleted ? 'completed' : 'running');
+    const isValidationClarification = data.input_validation_result?.status === 'needs_clarification';
+    const hasAnswers = localStorage.getItem(`hitl_submitted_${runId}`) === 'true';
+    const awaiting_hitl = isValidationClarification && !hasAnswers;
+
+    const isCompleted = awaiting_hitl 
+      ? false 
+      : (!data.next_node || data.next_node.length === 0 || data.next_node.includes('__end__'));
+      
+    const status = hasErrors 
+      ? 'failed' 
+      : (awaiting_hitl ? 'awaiting_hitl' : (isCompleted ? 'completed' : 'running'));
 
     // Dynamic generation of rich logs to visualize the agent workflow
     const agent_logs: any[] = [];
@@ -77,11 +86,11 @@ export const pipelineApi = {
           message: `Dataset profiling completed. Analyzed ${data.data_profile?.total_rows || 0} rows and ${data.data_profile?.total_columns || 0} columns.`,
         });
       }
-      if (data.completed_steps.includes('input_validation') || data.validation_result) {
+      if (data.completed_steps.includes('input_validation') || data.input_validation_result) {
         agent_logs.push({
           timestamp: Date.now() / 1000 - 5,
           agent: 'input_validator',
-          message: `Data quality and user intent validation complete: "${data.validation_result?.intent_description || 'No description provided'}"`,
+          message: `Data quality and user intent validation complete: "${data.input_validation_result?.reasoning || 'No description provided'}"`,
         });
       }
     }
@@ -100,16 +109,18 @@ export const pipelineApi = {
       });
     }
 
+    const valResult = data.input_validation_result;
+
     return {
       run_id: data.run_id,
       status,
-      awaiting_hitl: false,
-      current_checkpoint_id: null,
+      awaiting_hitl,
+      current_checkpoint_id: awaiting_hitl ? runId : null,
       error_message: hasErrors ? data.errors[0] : null,
       user_requirements: {
         raw_text: data.user_prompt || '',
       },
-      structured_cleaning_spec: data.validation_result ? {
+      structured_cleaning_spec: valResult ? {
         dataset_name: data.original_filename || 'dataset.parquet',
         spec_version: '1.0.0',
         columns_mapping: Object.keys(data.data_profile?.columns || {}).map(col => ({
@@ -125,26 +136,63 @@ export const pipelineApi = {
           imputation: { strategy: 'none' },
         })),
         deduplication: null,
-        open_questions: (data.validation_result?.clarification_questions || []).map((q: any) => q.question),
+        open_questions: valResult.clarifications ? 
+          [
+            ...(valResult.clarifications.null ? Object.values(valResult.clarifications.null).map((q: any) => q.question) : []),
+            ...(valResult.clarifications.duplicate ? Object.values(valResult.clarifications.duplicate).map((q: any) => q.question) : []),
+            ...(valResult.clarifications.typecast ? Object.values(valResult.clarifications.typecast).map((q: any) => q.question) : []),
+          ] : [],
         conflicts_detected_by_parser: [],
       } : null,
-      requirement_validation: data.validation_result ? {
-        is_valid: true,
-        blocking: false,
+      requirement_validation: valResult ? {
+        is_valid: valResult.status === 'ready',
+        blocking: valResult.status === 'needs_clarification',
       } : null,
       agent_logs,
       data_profile: data.data_profile,
       semantic_profile: data.semantic_profile,
+      input_validation_result: valResult,
+      execution_plan: data.execution_plan,
     };
   },
 
-  getCheckpoint: async (_runId: string): Promise<HITLCheckpointResponse | null> => {
-    // Current backend doesn't implement HITL checkpoints, return null
+  getCheckpoint: async (runId: string): Promise<HITLCheckpointResponse | null> => {
+    const state = await pipelineApi.getFullState(runId);
+    const hasAnswers = localStorage.getItem(`hitl_submitted_${runId}`) === 'true';
+    const valResult = state.input_validation_result;
+    
+    if (valResult?.status === 'needs_clarification' && !hasAnswers) {
+      return {
+        checkpoint_id: runId,
+        checkpoint_type: 'input_validation_clarification',
+        message_to_user: valResult.reasoning || 'Clarifications required.',
+        payload: valResult,
+      };
+    }
     return null;
   },
 
-  submitDecision: async (_runId: string, _data: HITLDecisionRequest): Promise<{ message: string }> => {
+  submitDecision: async (runId: string, data: HITLDecisionRequest): Promise<{ message: string }> => {
+    localStorage.setItem(`hitl_answers_${runId}`, JSON.stringify({
+      answers: data.disambiguation_answers,
+      submittedAt: new Date().toISOString()
+    }));
+    localStorage.setItem(`hitl_submitted_${runId}`, 'true');
+
+    // Call the backend resolve API if we are submitting clarification answers
+    if (data.decision === 'approve' && data.disambiguation_answers) {
+      const response = await apiClient.post<{ message: string }>(`/pipeline/${runId}/resolve`, {
+        answers: data.disambiguation_answers,
+      });
+      return response.data;
+    }
+
     return { message: 'Decision submitted successfully' };
+  },
+
+  approvePlan: async (runId: string): Promise<{ message: string }> => {
+    const response = await apiClient.post<{ message: string }>(`/pipeline/${runId}/approve_plan`);
+    return response.data;
   },
 
   getReport: async (runId: string): Promise<any> => {
