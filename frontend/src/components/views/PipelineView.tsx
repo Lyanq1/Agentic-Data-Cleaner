@@ -161,7 +161,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({ runId, onComplete })
     </span>
   );
 
-  const activeCheckpoint = checkpoint || lastCheckpoint;
+  const activeCheckpoint = checkpoint || (state?.awaiting_hitl || isTransitioning ? lastCheckpoint : null);
   const hasHitl = Boolean(activeCheckpoint);
   const isValidationReady = state?.input_validation_result?.status === 'ready';
  

@@ -1033,19 +1033,26 @@ export const ResolvedValidationPlanPanel: React.FC<{
   const actionPlan = validationResult.action_plan || {};
   const resolvedByUser = validationResult.resolved_by_user || [];
 
-  // Read saved answers from localStorage if available
-  const savedAnswers = useMemo(() => {
+  // Read saved answers data from localStorage if available
+  const savedAnswersData = useMemo(() => {
     const saved = localStorage.getItem(`hitl_answers_${runId}`);
     if (saved) {
       try {
-        const parsed = JSON.parse(saved);
-        return parsed.answers || {};
+        return JSON.parse(saved);
       } catch (e) {
         return null;
       }
     }
     return null;
   }, [runId]);
+
+  const answers = savedAnswersData?.answers || {};
+  const clarifications = validationResult.clarifications || savedAnswersData?.questions || {};
+
+  const getQuestionText = (cat: string, qKey: string): string => {
+    const qObj = clarifications[cat]?.[qKey];
+    return qObj?.question || `${cat.toUpperCase()} - ${qKey}`;
+  };
 
   return (
     <div className="mb-8 rounded-2xl border-2 border-emerald-400/40 bg-gradient-to-br from-emerald-50/80 via-white to-teal-50/40 shadow-lg overflow-hidden text-left animate-fadeIn">
@@ -1087,9 +1094,6 @@ export const ResolvedValidationPlanPanel: React.FC<{
 
               return (
                 <div key={issue} className="flex gap-4 p-4 rounded-xl border bg-card/60 backdrop-blur-md shadow-sm">
-                  <div className={`w-8 h-8 rounded-lg border flex items-center justify-center shrink-0 ${iconColor}`}>
-                    <Zap className="w-4 h-4" />
-                  </div>
                   <div>
                     <h5 className="text-sm font-bold text-foreground mb-1">{title}</h5>
                     <p className="text-xs text-muted-foreground leading-relaxed whitespace-pre-line">
@@ -1117,22 +1121,50 @@ export const ResolvedValidationPlanPanel: React.FC<{
         )}
 
         {/* User answers summary */}
-        {savedAnswers && Object.keys(savedAnswers).length > 0 && (
+        {answers && Object.keys(answers).length > 0 && (
           <details className="mt-4 text-xs">
             <summary className="cursor-pointer text-muted-foreground hover:text-foreground font-medium select-none transition-colors">
               View your submitted answers
             </summary>
-            <div className="mt-2.5 rounded-xl border bg-muted/30 p-4 space-y-2.5 divide-y divide-border/40">
-              {Object.entries(savedAnswers).map(([key, value]: [string, any]) => {
+            <div className="mt-2.5 rounded-xl border bg-muted/30 p-4 space-y-3 divide-y divide-border/40">
+              {Object.entries(answers).map(([key, value]: [string, any]) => {
                 const parts = key.split('.');
                 const cat = parts[0];
                 const qKey = parts[1];
+                const questionText = getQuestionText(cat, qKey);
+                const qObj = clarifications[cat]?.[qKey];
+                const consequence = qObj ? getOptionConsequence(qObj.consequences, value) : null;
                 return (
-                  <div key={key} className="pt-2 first:pt-0">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/60 block mb-0.5">
-                      {cat} - {qKey}
-                    </span>
-                    <p className="text-xs text-foreground font-medium">{value}</p>
+                  <div key={key} className="pt-3 first:pt-0">
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 mb-1.5">
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border shrink-0 text-center w-fit ${
+                        cat === 'null'
+                          ? 'bg-sky-50 text-sky-700 border-sky-200'
+                          : cat === 'duplicate'
+                            ? 'bg-violet-50 text-violet-700 border-violet-200'
+                            : 'bg-amber-50 text-amber-700 border-amber-200'
+                      }`}>
+                        {cat}
+                      </span>
+                      <span className="text-xs font-bold text-foreground leading-snug">
+                        {questionText}
+                      </span>
+                    </div>
+                    <div className="pl-3 border-l-2 border-emerald-400 ml-2 py-0.5 space-y-1">
+                      <div>
+                        <p className="text-xs text-muted-foreground/80 font-medium">Your answer:</p>
+                        <p className="text-xs text-emerald-700 font-bold leading-normal">{value}</p>
+                      </div>
+                      {consequence && (
+                        <div className="mt-1.5 p-2 rounded-lg bg-indigo-50/40 border border-indigo-100/30 text-[11px] text-indigo-900/90 leading-relaxed flex items-start gap-1.5 animate-fadeIn">
+                          <AlertCircle className="w-3.5 h-3.5 text-indigo-500 shrink-0 mt-0.5" />
+                          <div>
+                            <span className="font-bold text-indigo-950 block">Consequence:</span>
+                            {consequence}
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 );
               })}
