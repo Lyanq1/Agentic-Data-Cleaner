@@ -1,6 +1,7 @@
 """Node functions for the LangGraph pipeline."""
 import logging
 from typing import Any
+from app.agents.deduplication.agent import DeduplicationAgent
 from app.graphs.states.global_state import GlobalState, StatisticalProfile
 from app.agents.input_validator.agent import InputValidatorAgent
 from app.agents.semantic_analyzer.profiler_agent import SemanticProfilerAgent
@@ -95,11 +96,14 @@ async def supervisor_node(state: GlobalState) -> dict[str, Any]:
         "completed_steps": "supervisor",
     }
 
-# Deduplication Worker stub node
 async def dedup_agent_node(state: GlobalState) -> dict[str, Any]:
-    """Skeletal Deduplication Worker."""
+    """Run the deterministic simple-case deduplication worker."""
     logger.info("dedup_agent_node: Executing dataset deduplication checks...")
+    agent = DeduplicationAgent()
+    result = await agent.run(state)
+
     return {
+        **result,
         "current_step": "deduplication",
         "completed_steps": "deduplication",
     }
