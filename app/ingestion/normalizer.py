@@ -109,6 +109,16 @@ def ingest_to_canonical(
         
         # Convert DataFrame to records and bulk save
         records_dict = df.to_dict(orient="records")
+        clean_records = []
+        for row in records_dict:
+            clean_row = {}
+            for k, v in row.items():
+                if pd.isna(v):
+                    clean_row[k] = None
+                else:
+                    clean_row[k] = v
+            clean_records.append(clean_row)
+
         db_records = [
             DatasetRecord(
                 session_id=session_id,
@@ -116,7 +126,7 @@ def ingest_to_canonical(
                 data=row,
                 row_index=i
             )
-            for i, row in enumerate(records_dict)
+            for i, row in enumerate(clean_records)
         ]
         db.bulk_save_objects(db_records)
         db.commit()

@@ -3,82 +3,21 @@ import json
 import logging
 from typing import Any, Literal
 from langchain_core.messages import AIMessage, SystemMessage, HumanMessage
-from pydantic import BaseModel, Field, field_validator
+
 
 from app.agents.base import BaseAgent
 from app.agents.input_validator.prompts import INPUT_VALIDATOR_SYSTEM_PROMPT
+from app.graphs.states.global_state import (
+    InputValidationResult as ValidationResult,
+    StrategyQuestion,
+    NullClarifications,
+    ClarificationIssues,
+)
 
 logger = logging.getLogger(__name__)
 
 
-class StrategyQuestion(BaseModel):
-    question: str = Field(description="The strategy question text.")
-    options: list[str] = Field(description="Exactly 3 distinct options.")
-    consequences: str | None = Field(default=None, description="Consequences of each option.")
 
-class InsightQuestion(BaseModel):
-    question: str = Field(description="The insight question text.")
-    insight: str = Field(description="The semantic insight revealed.")
-    confirm: str = Field(description="The yes/no confirmation ask.")
-
-class NullClarifications(BaseModel):
-    Q1_strategy: StrategyQuestion | None = None
-    Q2_semantic_insight: InsightQuestion | None = None
-    Q3_semantic_insight: InsightQuestion | None = None
-
-class DuplicateClarifications(BaseModel):
-    Q1_strategy: StrategyQuestion | None = None
-    Q2_semantic_insight: InsightQuestion | None = None
-    Q3_semantic_insight: InsightQuestion | None = None
-
-class TypecastClarifications(BaseModel):
-    Q1_semantic_insight: InsightQuestion | None = None
-    Q2_semantic_insight: InsightQuestion | None = None
-    Q3_semantic_insight: InsightQuestion | None = None
-
-class ClarificationIssues(BaseModel):
-    null: NullClarifications | None = None
-    duplicate: DuplicateClarifications | None = None
-    typecast: TypecastClarifications | None = None
-
-class ActionPlan(BaseModel):
-    null: str | None = None
-    duplicate: str | None = None
-    typecast: str | None = None
-
-    @field_validator("null", "duplicate", "typecast", mode="before")
-    @classmethod
-    def convert_to_string(cls, v: Any) -> str | None:
-        if v is None:
-            return None
-        if isinstance(v, str):
-            return v
-        if isinstance(v, dict):
-            return " | ".join(f"{k}: {val}" for k, val in v.items())
-        if isinstance(v, list):
-            return ", ".join(str(item) for item in v)
-        return str(v)
-
-class ValidationResult(BaseModel):
-    """Structured output expected from the Input Validator LLM."""
-    status: Literal["ready", "needs_clarification"] = Field(
-        description="The status of the validation. 'ready' or 'needs_clarification'."
-    )
-    reasoning: str = Field(
-        description="Brief reasoning explaining the status."
-    )
-    resolved_by_user: list[str] = Field(
-        default_factory=list,
-        description="List of issues and columns resolved by the user's request."
-    )
-    action_plan: ActionPlan | None = Field(
-        default=None,
-        description="The plan for each issue if status is 'ready'."
-    )
-    clarifications: ClarificationIssues | None = Field(
-        default=None,
-        description="Clarifications needed per active issue if status is 'needs_clarification'."
-    )
 
 
 class InputValidatorAgent(BaseAgent):
@@ -146,11 +85,50 @@ class InputValidatorAgent(BaseAgent):
             if isinstance(msg, (HumanMessage, AIMessage)):
                 messages.append(msg)
 
+        # Check if the user has already provided answers to the clarifications
+        is_answered = False
+        val_result = state.get("input_validation_result")
+        if val_result:
+            clarifications = val_result.get("clarifications") if isinstance(val_result, dict) else getattr(val_result, "clarifications", None)
+            if clarifications:
+                if hasattr(clarifications, "model_dump"):
+                    clar_dict = clarifications.model_dump()
+                elif hasattr(clarifications, "dict"):
+                    clar_dict = clarifications.dict()
+                else:
+                    clar_dict = clarifications
+
+                has_questions = False
+                all_filled = True
+                for cat in ["null", "duplicate", "typecast"]:
+                    cat_data = clar_dict.get(cat) if clar_dict else None
+                    if cat_data:
+                        for q_key, q in cat_data.items():
+                            if q:
+                                has_questions = True
+                                if q.get("answer") is None:
+                                    all_filled = False
+                if has_questions and all_filled:
+                    is_answered = True
+
+        if is_answered:
+            messages.append(SystemMessage(content=(
+                "USER HAS PROVIDED ANSWERS to the clarification questions. "
+                "You must now read the user's answers in the chat history, "
+                "convert them into metadata cleaning rules, combine them with the semantic and statistical profiles, "
+                "and output the final JSON matching the InputValidationResult schema with status = 'ready'. "
+                "Do NOT set status to 'needs_clarification'. You must set status to 'ready'. "
+                "Make sure to populate the 'action_plan' dictionary with the cleaning plans for 'null', 'duplicate', and 'typecast'. "
+                "Populate 'resolved_by_user' list with the resolved issue/column descriptions. "
+                "Also, keep the exact same 'clarifications' structure but fill in the 'answer' field of each question with the user's actual selected answer."
+            )))
+
         logger.info("InputValidatorAgent: invoking LLM for structured dataset validation...")
         
         # Use JSON mode instead of structured function calling to strictly follow Prompt-based design
         messages.append(SystemMessage(content="CRITICAL: You must output ONLY a valid JSON object matching the requested schema. Do NOT wrap the response in markdown code blocks like ```json ... ```, and do NOT add any trailing characters or conversational text."))
         
+        content_clean = None
         try:
             # Bind response_format to enforce JSON output
             json_llm = self.llm.bind(response_format={"type": "json_object"})
@@ -187,7 +165,11 @@ class InputValidatorAgent(BaseAgent):
                         Q1_strategy=StrategyQuestion(
                             question="The AI failed to format its response correctly. Would you like to retry or abort?",
                             options=["(Recommended) Retry analysis", "Abort analysis", "Provide new instructions"],
-                            consequences="Retrying might succeed if it was a transient formatting issue."
+                            consequences={
+                                "(Recommended) Retry analysis": "Retrying might succeed if it was a transient formatting issue.",
+                                "Abort analysis": "The current run will stop.",
+                                "Provide new instructions": "You can modify your instructions and retry."
+                            }
                         )
                     )
                 )

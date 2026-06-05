@@ -35,6 +35,40 @@ def route_from_supervisor(state: GlobalState):
     return "report_agent"
 
 
+def route_from_input_validator(state: GlobalState):
+    """Determine whether to proceed to planning or end the run to await human answers."""
+    val_result = state.get("input_validation_result")
+    if not val_result:
+        return "planner"
+    
+    # Extract status safely (could be a dict or a Pydantic object)
+    status = val_result.get("status") if isinstance(val_result, dict) else getattr(val_result, "status", None)
+    if status == "needs_clarification":
+        clarifications = val_result.get("clarifications") if isinstance(val_result, dict) else getattr(val_result, "clarifications", None)
+        if clarifications:
+            # Convert to dict if it is a Pydantic model
+            if hasattr(clarifications, "model_dump"):
+                clar_dict = clarifications.model_dump()
+            elif hasattr(clarifications, "dict"):
+                clar_dict = clarifications.dict()
+            else:
+                clar_dict = clarifications
+
+            has_unanswered = False
+            for cat in ["null", "duplicate", "typecast"]:
+                cat_data = clar_dict.get(cat) if clar_dict else None
+                if cat_data:
+                    for q_key, q in cat_data.items():
+                        if q and q.get("answer") is None:
+                            has_unanswered = True
+                            break
+            if has_unanswered:
+                logger.info("route_from_input_validator: Clarifications required, stopping run to await user responses.")
+                return "end"
+                
+    return "planner"
+
+
 class GraphBuilder:
     """Assembles the multi-agent ETL pipeline graph."""
 
@@ -43,12 +77,12 @@ class GraphBuilder:
 
         Flow::
 
-            START --> profiler --> semantic_profile --> input_validator --> planner --> [HITL 1]
+            START --> profiler --> semantic_profile --> input_validator --> planner
                   --> supervisor (Dynamic routing loop)
                       --> deduplication --> validator --> supervisor
                       --> null_handling --> validator --> supervisor
                       --> type_casting  --> validator --> supervisor
-                  --> [HITL 2] --> report_agent --> END
+                  --> report_agent --> END
         """
         builder = StateGraph(GlobalState)
 
@@ -68,7 +102,16 @@ class GraphBuilder:
         builder.set_entry_point("profiler")
         builder.add_edge("profiler", "semantic_profile")
         builder.add_edge("semantic_profile", "input_validator")
-        builder.add_edge("input_validator", "planner")
+        
+        # Route input_validator conditionally to either planner or END
+        builder.add_conditional_edges(
+            "input_validator",
+            route_from_input_validator,
+            {
+                "planner": "planner",
+                "end": END
+            }
+        )
         builder.add_edge("planner", "supervisor")
 
         # Dynamic routing loop from supervisor
@@ -94,10 +137,10 @@ class GraphBuilder:
         # Final endpoint
         builder.add_edge("report_agent", END)
 
-        # Compile graph with HITL interrupts before Supervisor (Checkpoint 1) and Report Agent (Checkpoint 2)
+        # Compile graph with HITL interrupt before Report Agent only (no supervisor interrupt)
         return builder.compile(
             checkpointer=checkpointer,
-            interrupt_before=["supervisor", "report_agent"]
+            interrupt_before=["report_agent"]
         )
 
 

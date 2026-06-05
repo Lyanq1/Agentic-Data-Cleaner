@@ -15,6 +15,9 @@ async def profiler_node(state: GlobalState) -> dict[str, Any]:
     Reads ``dataset_path`` from state, calls ``perform_eda``, and writes
     the result into ``data_profile``.
     """
+    if state.get("statistical_profile"):
+        logger.info("profiler_node: Statistical profile already exists in state, skipping.")
+        return {}
 
     dataset_path = state.get("dataset_path")
     if not dataset_path:
@@ -46,6 +49,9 @@ async def profiler_node(state: GlobalState) -> dict[str, Any]:
 
 async def semantic_profile_node(state: GlobalState) -> dict[str, Any]:
     """Profile detailed semantic properties of the dataset columns by logical group."""
+    if state.get("semantic_profile"):
+        logger.info("semantic_profile_node: Semantic profile already exists in state, skipping.")
+        return {}
     agent = SemanticProfilerAgent()
     return await agent.run(state)
 

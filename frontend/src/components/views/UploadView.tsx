@@ -198,7 +198,26 @@ export const UploadView: React.FC<UploadViewProps> = ({
         console.warn('Skipping client-side table preview for this format:', parseErr);
       }
       
-      const profile = await pipelineApi.getProfile(response.run_id);
+      // Poll getProfile until it is available (since the pipeline runs asynchronously in the background)
+      let profile = null;
+      for (let i = 0; i < 20; i++) {
+        try {
+          profile = await pipelineApi.getProfile(response.run_id);
+          if (profile) break;
+        } catch (err: any) {
+          // If it is 404, wait and retry
+          if (err.response?.status === 404) {
+            await new Promise(resolve => setTimeout(resolve, 1500));
+            continue;
+          }
+          throw err; // For other errors, throw immediately
+        }
+      }
+      
+      if (!profile) {
+        throw new Error('Statistical profile generation timed out. Please check the backend logs.');
+      }
+
       setProfileData(profile);
       setActiveTab('profile');
       if (onProfileLoaded) {

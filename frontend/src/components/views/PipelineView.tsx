@@ -19,7 +19,7 @@ interface PipelineViewProps {
   onComplete: () => void;
 }
 
-import { HITLCheckpointPanel } from './PipelineHitlPanel';
+import { HITLCheckpointPanel, ResolvedValidationPlanPanel } from './PipelineHitlPanel';
 import { RequirementSummaryPanel } from './RequirementSummaryPanel';
 
 /* ── Status Badge ───────────────────────────────────────────────────────── */
@@ -56,6 +56,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({ runId, onComplete })
   const [showHitl, setShowHitl] = useState(true);
   const [showLogs, setShowLogs] = useState(true);
   const [lastCheckpoint, setLastCheckpoint] = useState<any>(null);
+  const [showSpecDetails, setShowSpecDetails] = useState(false);
 
   // Fetch full state periodically or when invalidated
   const { data: state } = useQuery({
@@ -162,10 +163,13 @@ export const PipelineView: React.FC<PipelineViewProps> = ({ runId, onComplete })
 
   const activeCheckpoint = checkpoint || lastCheckpoint;
   const hasHitl = Boolean(activeCheckpoint);
-
-  // Auto-expand logs if no HITL is present and user hasn't explicitly hidden it
+  const isValidationReady = state?.input_validation_result?.status === 'ready';
+ 
   const displayHitl = hasHitl && showHitl;
-  const displayLogs = showLogs || !displayHitl; // Force logs to show if HITL is hidden
+  const displayResolvedPlan = isValidationReady && showHitl && !hasHitl;
+  const showLeftPanel = displayHitl || displayResolvedPlan;
+  const displayLogs = showLogs || !showLeftPanel; 
+  
   const isRequirementHitl =
     displayHitl && activeCheckpoint?.checkpoint_type === 'requirement_approval';
   const showRequirementSummaryBar =
@@ -187,17 +191,17 @@ export const PipelineView: React.FC<PipelineViewProps> = ({ runId, onComplete })
           <div className="flex items-center gap-1 border bg-muted/30 p-1 rounded-lg">
             <button
               onClick={() => setShowHitl(!showHitl)}
-              disabled={!hasHitl}
+              disabled={!hasHitl && !isValidationReady}
               className={`p-1.5 rounded text-sm flex items-center gap-2 transition-colors ${
-                displayHitl 
+                showLeftPanel 
                   ? 'bg-white shadow-sm text-foreground' 
-                  : hasHitl 
+                  : (hasHitl || isValidationReady)
                     ? 'text-muted-foreground hover:bg-muted/50' 
                     : 'text-muted-foreground/30 cursor-not-allowed'
               }`}
               title="Toggle Review Panel"
             >
-              {displayHitl ? <PanelLeftClose className="w-4 h-4" /> : <PanelLeft className="w-4 h-4" />}
+              {showLeftPanel ? <PanelLeftClose className="w-4 h-4" /> : <PanelLeft className="w-4 h-4" />}
               <span className="hidden sm:inline text-xs font-medium">Review</span>
             </button>
             <button
@@ -219,33 +223,56 @@ export const PipelineView: React.FC<PipelineViewProps> = ({ runId, onComplete })
       </div>
 
       {showRequirementSummaryBar && (
-        <div className="flex-none mb-4 max-h-[42vh] overflow-y-auto custom-scrollbar">
-          <RequirementSummaryPanel
-            userRequirementsText={state?.user_requirements?.raw_text}
-            spec={state?.structured_cleaning_spec}
-            validation={state?.requirement_validation}
-          />
+        <div className="flex-none mb-4 bg-card border rounded-xl shadow-sm overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setShowSpecDetails(!showSpecDetails)}
+            className="w-full px-4 py-3 flex items-center justify-between text-xs font-semibold hover:bg-muted/40 transition-colors"
+          >
+            <span className="flex items-center gap-2">
+              📋 Dataset Specification Mapping & Validation Summary
+            </span>
+            <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">
+              {showSpecDetails ? 'Hide details' : 'Show details'}
+            </span>
+          </button>
+          {showSpecDetails && (
+            <div className="border-t max-h-[35vh] overflow-y-auto p-4 custom-scrollbar bg-muted/10">
+              <RequirementSummaryPanel
+                userRequirementsText={state?.user_requirements?.raw_text}
+                spec={state?.structured_cleaning_spec}
+                validation={state?.requirement_validation}
+              />
+            </div>
+          )}
         </div>
       )}
 
       {/* Split View Container */}
       <div className="flex-1 min-h-0 flex gap-6 overflow-hidden">
         
-        {/* Left Column: HITL Review Panel */}
-        {displayHitl && (
+        {/* Left Column: HITL Review Panel or Action Plan Summary */}
+        {showLeftPanel && (
           <div className={`flex flex-col min-h-0 min-w-0 transition-all duration-300 ${displayLogs ? 'w-1/2' : 'w-full'}`}>
             <div className="flex-1 min-h-0 overflow-y-auto pr-2 pb-4 custom-scrollbar">
-              <HITLCheckpointPanel
-                checkpoint={activeCheckpoint}
-                userRequirementsText={state?.user_requirements?.raw_text}
-                feedback={feedback}
-                onFeedbackChange={setFeedback}
-                onDecision={(decision, fb, disambiguation_answers) =>
-                  submitDecisionMutation.mutate({ decision, feedback: fb, disambiguation_answers })
-                }
-                isPending={submitDecisionMutation.isPending || isTransitioning}
-                isAwaiting={Boolean(state?.awaiting_hitl && checkpoint)}
-              />
+              {displayHitl ? (
+                <HITLCheckpointPanel
+                  checkpoint={activeCheckpoint}
+                  userRequirementsText={state?.user_requirements?.raw_text}
+                  feedback={feedback}
+                  onFeedbackChange={setFeedback}
+                  onDecision={(decision, fb, disambiguation_answers) =>
+                    submitDecisionMutation.mutate({ decision, feedback: fb, disambiguation_answers })
+                  }
+                  isPending={submitDecisionMutation.isPending || isTransitioning}
+                  isAwaiting={Boolean(state?.awaiting_hitl && checkpoint)}
+                />
+              ) : (
+                <ResolvedValidationPlanPanel
+                  validationResult={state.input_validation_result}
+                  runId={runId}
+                />
+              )}
               
               {/* Mutation error feedback */}
               {submitDecisionMutation.isError && (

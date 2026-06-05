@@ -42,17 +42,79 @@ class StatisticalProfile(BaseModel):
     duplicate_rows: int = 0
     columns: List[ColumnStatProfile] = Field(default_factory=list)
 
+from pydantic import BaseModel, Field, field_validator
+
 ### Pydantic Models for Validation & Planning ###
-class ValidationIssue(BaseModel):
-    requirement: str
-    column: Optional[str] = None
-    status: Literal["feasible", "infeasible", "warning"]
-    reason: str
+class StrategyQuestion(BaseModel):
+    question: str = Field(description="The strategy question text.")
+    options: List[str] = Field(description="Exactly 3 distinct options.")
+    consequences: Optional[Any] = Field(default=None, description="Consequences of each option.")
+    answer: Optional[str] = Field(default=None, description="The user's selected option/answer.")
+
+class InsightQuestion(BaseModel):
+    question: str = Field(description="The insight question text.")
+    insight: str = Field(description="The semantic insight revealed.")
+    confirm: str = Field(description="The yes/no confirmation ask.")
+    answer: Optional[str] = Field(default=None, description="The user's answer ('yes', 'no', or comment).")
+
+class NullClarifications(BaseModel):
+    Q1_strategy: Optional[StrategyQuestion] = None
+    Q2_semantic_insight: Optional[InsightQuestion] = None
+    Q3_semantic_insight: Optional[InsightQuestion] = None
+
+class DuplicateClarifications(BaseModel):
+    Q1_strategy: Optional[StrategyQuestion] = None
+    Q2_semantic_insight: Optional[InsightQuestion] = None
+    Q3_semantic_insight: Optional[InsightQuestion] = None
+
+class TypecastClarifications(BaseModel):
+    Q1_semantic_insight: Optional[InsightQuestion] = None
+    Q2_semantic_insight: Optional[InsightQuestion] = None
+    Q3_semantic_insight: Optional[InsightQuestion] = None
+
+class ClarificationIssues(BaseModel):
+    null: Optional[NullClarifications] = None
+    duplicate: Optional[DuplicateClarifications] = None
+    typecast: Optional[TypecastClarifications] = None
+
+class ActionPlan(BaseModel):
+    null: Optional[str] = None
+    duplicate: Optional[str] = None
+    typecast: Optional[str] = None
+
+    @field_validator("null", "duplicate", "typecast", mode="before")
+    @classmethod
+    def convert_to_string(cls, v: Any) -> Optional[str]:
+        if v is None:
+            return None
+        if isinstance(v, str):
+            return v
+        if isinstance(v, dict):
+            return " | ".join(f"{k}: {val}" for k, val in v.items())
+        if isinstance(v, list):
+            return ", ".join(str(item) for item in v)
+        return str(v)
 
 class InputValidationResult(BaseModel):
-    passed: bool
-    issues: List[ValidationIssue] = Field(default_factory=list)
-    summary: str
+    """Structured output expected from the Input Validator LLM."""
+    status: Literal["ready", "needs_clarification"] = Field(
+        description="The status of the validation. 'ready' or 'needs_clarification'."
+    )
+    reasoning: str = Field(
+        description="Brief reasoning explaining the status."
+    )
+    resolved_by_user: List[str] = Field(
+        default_factory=list,
+        description="List of issues and columns resolved by the user's request."
+    )
+    action_plan: Optional[ActionPlan] = Field(
+        default=None,
+        description="The plan for each issue if status is 'ready'."
+    )
+    clarifications: Optional[ClarificationIssues] = Field(
+        default=None,
+        description="Clarifications needed per active issue if status is 'needs_clarification'."
+    )
 
 class TaskDetail(BaseModel):
     task_id: str
@@ -60,7 +122,7 @@ class TaskDetail(BaseModel):
     skip: bool
     skip_reason: Optional[str] = None
     columns: List[str] = Field(default_factory=list)
-    strategy: Dict[str, Any] = Field(default_factory=dict)
+    strategy: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
 class ExecutionPlan(BaseModel):
     task_list: List[TaskDetail] = Field(default_factory=list)

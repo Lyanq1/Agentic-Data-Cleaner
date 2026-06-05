@@ -27,6 +27,44 @@ export function roleMeta(role: string) {
   return ROLE_META[role] ?? { label: role, color: 'bg-gray-100 text-gray-600 border-gray-200', icon: <Zap className="w-4 h-4" /> };
 }
 
+function getOptionConsequence(consequences: any, optionText: string): string | null {
+  if (!consequences) return null;
+
+  // Case 1: consequences is a dictionary
+  if (typeof consequences === 'object' && !Array.isArray(consequences)) {
+    // Exact match
+    if (consequences[optionText]) {
+      return consequences[optionText];
+    }
+    // Case-insensitive key check
+    const lowerOpt = optionText.toLowerCase();
+    for (const key of Object.keys(consequences)) {
+      if (key.toLowerCase() === lowerOpt) {
+        return consequences[key];
+      }
+      // Substring check (e.g. if key is "Option A" and optionText contains "Option A" or vice versa)
+      if (lowerOpt.includes(key.toLowerCase()) || key.toLowerCase().includes(lowerOpt)) {
+        return consequences[key];
+      }
+    }
+  }
+
+  // Case 2: consequences is a string
+  if (typeof consequences === 'string') {
+    const lines = consequences.split('\n');
+    const cleanOpt = optionText.replace(/^\([^)]+\)\s*/, '').toLowerCase().trim(); // strip (Recommended) etc
+    
+    for (const line of lines) {
+      if (line.toLowerCase().includes(cleanOpt) || cleanOpt.includes(line.toLowerCase())) {
+        return line.trim();
+      }
+    }
+    return consequences;
+  }
+
+  return null;
+}
+
 const ERROR_TYPE_LABELS: Record<string, string> = {
   duplicate: 'Duplicate rows',
   null: 'Null values',
@@ -93,6 +131,229 @@ const SEVERITY_STYLES: Record<string, string> = {
   info: 'bg-blue-100 text-blue-700 border-blue-200',
 };
 
+/* ── Input Validation Clarification Content Component ─────────────────── */
+
+export const InputValidationClarificationContent: React.FC<{
+  payload: any;
+  isAwaiting: boolean;
+  onDecision: (
+    d: 'approve' | 'reject' | 'modify',
+    fb?: string,
+    disambiguationAnswers?: Record<string, string | string[]>
+  ) => void;
+  isPending: boolean;
+  runId: string;
+}> = ({ payload, isAwaiting, onDecision, isPending, runId }) => {
+  const clarifications = payload.clarifications || {};
+  const categories = ['null', 'duplicate', 'typecast'] as const;
+
+  // Initialize answers from localStorage if present
+  const [answers, setAnswers] = useState<Record<string, string>>(() => {
+    const saved = localStorage.getItem(`hitl_answers_${runId}`);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        return parsed.answers || {};
+      } catch (e) {
+        return {};
+      }
+    }
+    return {};
+  });
+
+  const handleSelectAnswer = (key: string, val: string) => {
+    setAnswers((prev) => ({ ...prev, [key]: val }));
+  };
+
+  // Check if all questions are answered
+  const totalQuestions = useMemo(() => {
+    let count = 0;
+    categories.forEach((cat) => {
+      const catData = clarifications[cat];
+      if (catData) {
+        count += Object.keys(catData).length;
+      }
+    });
+    return count;
+  }, [clarifications]);
+
+  const answeredCount = useMemo(() => {
+    let count = 0;
+    categories.forEach((cat) => {
+      const catData = clarifications[cat];
+      if (catData) {
+        Object.keys(catData).forEach((qKey) => {
+          if (answers[`${cat}.${qKey}`]) {
+            count += 1;
+          }
+        });
+      }
+    });
+    return count;
+  }, [clarifications, answers]);
+
+  const allAnswered = answeredCount === totalQuestions;
+
+  const handleSubmit = () => {
+    // Save full questions + answers under run ID
+    const fullLog = {
+      runId,
+      submittedAt: new Date().toISOString(),
+      questions: clarifications,
+      answers: answers,
+    };
+    localStorage.setItem(`hitl_answers_${runId}`, JSON.stringify(fullLog));
+    localStorage.setItem(`hitl_submitted_${runId}`, 'true');
+
+    // Notify parent view to mutate/decision
+    onDecision('approve', 'User resolved all clarifications', answers);
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Reasoning summary from agent */}
+      {payload.reasoning && (
+        <div className="rounded-xl border bg-muted/30 p-4 text-sm leading-relaxed text-muted-foreground">
+          <strong className="text-foreground block mb-1">Reasoning:</strong>
+          {payload.reasoning}
+        </div>
+      )}
+
+      {/* Questions list */}
+      <div className="space-y-6">
+        {categories.map((cat) => {
+          const catData = clarifications[cat];
+          if (!catData || Object.keys(catData).length === 0) return null;
+
+          const title = cat === 'null' ? 'Null Value Resolutions' : cat === 'duplicate' ? 'Duplicate Row Resolutions' : 'Type Casting Resolutions';
+          const badgeColor = cat === 'null' ? 'bg-sky-50 text-sky-700 border-sky-200' : cat === 'duplicate' ? 'bg-violet-50 text-violet-700 border-violet-200' : 'bg-amber-50 text-amber-700 border-amber-200';
+
+          return (
+            <div key={cat} className="rounded-xl border bg-card/60 backdrop-blur-md shadow-sm overflow-hidden text-left">
+              <div className={`px-4 py-3 border-b flex items-center justify-between bg-muted/20`}>
+                <h4 className="text-sm font-semibold flex items-center gap-2">
+                  <span className={`px-2 py-0.5 rounded text-xs border ${badgeColor}`}>
+                    {cat.toUpperCase()}
+                  </span>
+                  {title}
+                </h4>
+              </div>
+              <div className="p-4 space-y-6 divide-y divide-border/40">
+                {Object.keys(catData).sort().map((qKey, qi) => {
+                  const q = catData[qKey];
+                  const key = `${cat}.${qKey}`;
+                  const selectedVal = answers[key] || '';
+                  const isStrategy = 'options' in q;
+
+                  return (
+                    <div key={qKey} className={`pt-4 ${qi === 0 ? 'pt-0' : ''} text-left`}>
+                      <p className="text-sm font-medium text-foreground mb-3 leading-snug">
+                        {qi + 1}. {q.question}
+                      </p>
+
+                      {isStrategy ? (
+                        /* Strategy MCQ */
+                        <div className="space-y-3">
+                          <div className="space-y-3 pl-2">
+                            {(q.options || []).map((opt: string) => {
+                              const isSelected = selectedVal === opt;
+                              const optConsequence = getOptionConsequence(q.consequences, opt);
+                              return (
+                                <div key={opt} className="space-y-2">
+                                  <label
+                                    className={`flex items-start gap-2.5 text-sm cursor-pointer rounded-lg px-3 py-2.5 border transition-all ${
+                                      isSelected
+                                        ? 'bg-primary/5 border-primary/40 shadow-sm'
+                                        : 'bg-transparent border-border/60 hover:bg-muted/30'
+                                    }`}
+                                  >
+                                    <input
+                                      type="radio"
+                                      name={key}
+                                      value={opt}
+                                      checked={isSelected}
+                                      onChange={() => handleSelectAnswer(key, opt)}
+                                      disabled={!isAwaiting}
+                                      className="text-primary mt-0.5 shrink-0"
+                                    />
+                                    <span className="leading-snug">{opt}</span>
+                                  </label>
+                                  {isSelected && optConsequence && (
+                                    <div className="ml-6 p-3 rounded-lg bg-indigo-50/40 border border-indigo-100/50 text-xs text-indigo-950/90 leading-relaxed flex items-start gap-2 animate-fadeIn">
+                                      <AlertCircle className="w-4 h-4 text-indigo-500 shrink-0 mt-0.5" />
+                                      <div>
+                                        <strong className="font-semibold text-indigo-900 block mb-0.5">Consequence:</strong>
+                                        {optConsequence}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ) : (
+                        /* Insight YES/NO */
+                        <div className="space-y-3">
+                          {q.insight && (
+                            <div className="text-xs bg-muted/40 p-2.5 rounded border border-border/40 text-muted-foreground italic mb-2 leading-relaxed">
+                              💡 {q.insight}
+                            </div>
+                          )}
+                          <div className="flex gap-4 pl-2">
+                            {['Yes', 'No'].map((opt) => (
+                              <label
+                                key={opt}
+                                className={`flex items-center gap-2 text-sm cursor-pointer rounded-lg px-4 py-2 border transition-all ${
+                                  selectedVal === opt
+                                    ? 'bg-primary/5 border-primary/40 shadow-sm'
+                                    : 'bg-transparent border-border/60 hover:bg-muted/30'
+                                }`}
+                              >
+                                <input
+                                  type="radio"
+                                  name={key}
+                                  value={opt}
+                                  checked={selectedVal === opt}
+                                  onChange={() => handleSelectAnswer(key, opt)}
+                                  disabled={!isAwaiting}
+                                  className="text-primary"
+                                />
+                                {opt}
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Progress & Submission */}
+      {isAwaiting && (
+        <div className="sticky bottom-0 z-[5] -mx-6 px-6 py-4 bg-gradient-to-t from-background via-background to-background/90 border-t flex flex-col sm:flex-row items-center gap-4 justify-between">
+          <div className="text-xs text-muted-foreground font-medium">
+            Answered {answeredCount} of {totalQuestions} questions
+          </div>
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={isPending || !allAnswered}
+            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white px-6 py-2.5 rounded-lg text-sm font-semibold transition-all shadow-sm shadow-emerald-500/10 hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Confirm Answers
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
 export const HITLCheckpointPanel: React.FC<{
   checkpoint: any;
   userRequirementsText?: string;
@@ -109,6 +370,7 @@ export const HITLCheckpointPanel: React.FC<{
   const payload = checkpoint.payload || {};
   const isRequirementApproval = checkpoint.checkpoint_type === 'requirement_approval';
   const isPlanApproval = checkpoint.checkpoint_type === 'plan_approval';
+  const isInputValidationClarification = checkpoint.checkpoint_type === 'input_validation_clarification';
   const modifyCount = isRequirementApproval
     ? (payload.requirement_modify_count ?? 0)
     : (payload.modify_count ?? 0);
@@ -277,7 +539,9 @@ export const HITLCheckpointPanel: React.FC<{
   const requirementConfirmDisabled =
     isRequirementApproval && disambiguationQuestions.length > 0 && !allMcqAnswered;
 
-  const headerConfig = isRequirementApproval
+  const headerConfig = isInputValidationClarification
+    ? { title: 'Input Validator Clarifications', subtitle: 'Please answer the following clarification questions about your dataset', gradient: 'from-purple-500 to-indigo-500', border: 'border-purple-400/40', bg: 'from-purple-50/80 via-white to-indigo-50/40' }
+    : isRequirementApproval
     ? { title: 'Confirm requirements', subtitle: 'Review the interpretation below, answer any prompts, then confirm or cancel', gradient: 'from-indigo-500 to-violet-500', border: 'border-indigo-400/40', bg: 'from-indigo-50/80 via-white to-violet-50/40' }
     : isPlanApproval
     ? { title: 'Plan Review Required', subtitle: 'The AI has generated a cleaning plan for your approval', gradient: 'from-amber-500 to-orange-500', border: 'border-amber-400/40', bg: 'from-amber-50/80 via-white to-orange-50/40' }
@@ -312,6 +576,17 @@ export const HITLCheckpointPanel: React.FC<{
             <div className="text-base font-bold text-foreground">Processing your decision...</div>
             <div className="text-sm text-muted-foreground mt-1">Please wait while the agents resume...</div>
           </div>
+        )}
+
+        {/* ── Input Validation Clarification Content ───────────────────── */}
+        {isInputValidationClarification && (
+          <InputValidationClarificationContent
+            payload={payload}
+            isAwaiting={isAwaiting}
+            onDecision={onDecision}
+            isPending={isPending}
+            runId={checkpoint.checkpoint_id}
+          />
         )}
 
         {/* ── Requirement Approval Content ───────────────────────────── */}
@@ -681,7 +956,7 @@ export const HITLCheckpointPanel: React.FC<{
         )}
 
         {/* Feedback + Actions (plan / result checkpoints only) */}
-        {!isRequirementApproval && (
+        {!isRequirementApproval && !isInputValidationClarification && (
         <div className="rounded-xl bg-white border p-5 shadow-sm space-y-4">
           <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
             <MessageSquare className="w-4 h-4" />
@@ -749,3 +1024,123 @@ export const HITLCheckpointPanel: React.FC<{
     </div>
   );
 };
+
+export const ResolvedValidationPlanPanel: React.FC<{
+  validationResult: any;
+  runId: string;
+}> = ({ validationResult, runId }) => {
+  const reasoning = validationResult.reasoning || '';
+  const actionPlan = validationResult.action_plan || {};
+  const resolvedByUser = validationResult.resolved_by_user || [];
+
+  // Read saved answers from localStorage if available
+  const savedAnswers = useMemo(() => {
+    const saved = localStorage.getItem(`hitl_answers_${runId}`);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        return parsed.answers || {};
+      } catch (e) {
+        return null;
+      }
+    }
+    return null;
+  }, [runId]);
+
+  return (
+    <div className="mb-8 rounded-2xl border-2 border-emerald-400/40 bg-gradient-to-br from-emerald-50/80 via-white to-teal-50/40 shadow-lg overflow-hidden text-left animate-fadeIn">
+      {/* Header */}
+      <div className="bg-gradient-to-r from-emerald-500 to-teal-600 px-6 py-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center">
+            <CheckCircle2 className="w-5 h-5 text-white" />
+          </div>
+          <div>
+            <h3 className="text-lg font-bold text-white">Validation Resolution Plan</h3>
+            <p className="text-white/80 text-sm">The AI Agent has integrated your answers and compiled the cleaning rules</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="p-6 space-y-6">
+        {/* Reasoning */}
+        {reasoning && (
+          <div className="rounded-xl border bg-muted/40 p-4 text-sm leading-relaxed text-muted-foreground">
+            <strong className="text-foreground block mb-1.5">Decision Reasoning:</strong>
+            {reasoning}
+          </div>
+        )}
+
+        {/* Action Plan */}
+        <div className="space-y-4">
+          <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+            Generated Cleaning Instructions
+          </h4>
+          
+          <div className="grid grid-cols-1 gap-4">
+            {['null', 'duplicate', 'typecast'].map((issue) => {
+              const planText = actionPlan[issue];
+              if (!planText) return null;
+
+              const title = issue === 'null' ? 'Null Handling Plan' : issue === 'duplicate' ? 'Deduplication Plan' : 'Type Casting Plan';
+              const iconColor = issue === 'null' ? 'text-sky-500 bg-sky-50 border-sky-100' : issue === 'duplicate' ? 'text-violet-500 bg-violet-50 border-violet-100' : 'text-amber-500 bg-amber-50 border-amber-100';
+
+              return (
+                <div key={issue} className="flex gap-4 p-4 rounded-xl border bg-card/60 backdrop-blur-md shadow-sm">
+                  <div className={`w-8 h-8 rounded-lg border flex items-center justify-center shrink-0 ${iconColor}`}>
+                    <Zap className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h5 className="text-sm font-bold text-foreground mb-1">{title}</h5>
+                    <p className="text-xs text-muted-foreground leading-relaxed whitespace-pre-line">
+                      {planText}
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Resolved issues */}
+        {resolvedByUser.length > 0 && (
+          <div className="rounded-xl border p-4 bg-white shadow-sm">
+            <h4 className="text-sm font-semibold text-muted-foreground mb-3">Resolved Column Issues</h4>
+            <div className="flex flex-wrap gap-2">
+              {resolvedByUser.map((item: string, i: number) => (
+                <span key={i} className="inline-block px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  {item}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* User answers summary */}
+        {savedAnswers && Object.keys(savedAnswers).length > 0 && (
+          <details className="mt-4 text-xs">
+            <summary className="cursor-pointer text-muted-foreground hover:text-foreground font-medium select-none transition-colors">
+              View your submitted answers
+            </summary>
+            <div className="mt-2.5 rounded-xl border bg-muted/30 p-4 space-y-2.5 divide-y divide-border/40">
+              {Object.entries(savedAnswers).map(([key, value]: [string, any]) => {
+                const parts = key.split('.');
+                const cat = parts[0];
+                const qKey = parts[1];
+                return (
+                  <div key={key} className="pt-2 first:pt-0">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/60 block mb-0.5">
+                      {cat} - {qKey}
+                    </span>
+                    <p className="text-xs text-foreground font-medium">{value}</p>
+                  </div>
+                );
+              })}
+            </div>
+          </details>
+        )}
+      </div>
+    </div>
+  );
+};
+
