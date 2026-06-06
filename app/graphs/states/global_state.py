@@ -198,10 +198,9 @@ class ValidationCheck(BaseModel):
 
 class TaskVerification(BaseModel):
     validation_scope: Literal["post_task"] = "post_task"
-    validator_mode: Literal["pandera", "custom", "pandera_plus_custom"] = "pandera"
+    validator_mode: Literal["pandas_custom"] = "pandas_custom"
     baseline_metrics: dict[str, Any] = Field(default_factory=dict)
-    pandera_checks: list[ValidationCheck] = Field(default_factory=list)
-    custom_checks: list[ValidationCheck] = Field(default_factory=list)
+    checks: list[ValidationCheck] = Field(default_factory=list)
     success_metrics: dict[str, Any] = Field(default_factory=dict)
     failure_policy: dict[str, str] = Field(default_factory=dict)
     evidence_required: list[str] = Field(default_factory=list)

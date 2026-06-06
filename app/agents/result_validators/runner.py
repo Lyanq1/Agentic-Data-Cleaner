@@ -1,4 +1,4 @@
-"""Runtime entrypoints for validating the active planner task with Pandera."""
+"""Runtime entrypoints for validating the active planner task with Pandas."""
 
 from __future__ import annotations
 
@@ -6,13 +6,12 @@ from pathlib import Path
 from typing import Any, cast
 
 import pandas as pd
-import pandera.pandas as pa
 
 from app.graphs.states.global_state import ExecutionPlan, GlobalState, TaskDetail
 from app.services.lineage_service import LineageService
 from app.services.lineage_utils import resolve_lineage_session_id
-from app.validators.models import ValidationOutcome
-from app.validators.schema_builder import build_pandera_schema
+from app.agents.result_validators.models import ValidationOutcome
+from app.agents.result_validators.pandas_validator import validate_dataframe, PandasValidationErrors
 
 
 def validate_current_task(state: GlobalState) -> ValidationOutcome:
@@ -42,22 +41,14 @@ def validate_current_task(state: GlobalState) -> ValidationOutcome:
         )
 
     try:
-        schema = build_pandera_schema(task, state.get("semantic_profile"))
-        schema.validate(dataframe, lazy=True)
-    except pa.errors.SchemaErrors as exc:
+        validate_dataframe(dataframe, task, state.get("semantic_profile"))
+    except PandasValidationErrors as exc:
         return ValidationOutcome(
             task=task,
             passed=False,
-            failed_rules=_failed_rules_from_schema_errors(exc, task),
-            message=exc.message,
-            failure_cases=_failure_cases(exc),
-        )
-    except pa.errors.SchemaError as exc:
-        return ValidationOutcome(
-            task=task,
-            passed=False,
-            failed_rules=_failed_rules_from_schema_error(exc, task),
+            failed_rules=[err.check for err in exc.errors],
             message=str(exc),
+            failure_cases=exc.failure_cases,
         )
     except Exception as exc:
         return ValidationOutcome(
@@ -153,43 +144,10 @@ def _load_dataframe(dataset_path: str) -> pd.DataFrame:
     raise ValueError(f"Unsupported dataset format for validation: {path.suffix or '<none>'}")
 
 
-def _failure_cases(exc: pa.errors.SchemaErrors) -> list[dict[str, Any]]:
-    failure_cases = exc.failure_cases
-    if failure_cases is None:
-        return []
-    return cast(
-        "list[dict[str, Any]]",
-        failure_cases.where(pd.notna(failure_cases), None).to_dict(orient="records"),
-    )
-
-
-def _failed_rules_from_schema_errors(
-    exc: pa.errors.SchemaErrors,
-    task: TaskDetail,
-) -> list[str]:
-    cases = _failure_cases(exc)
-    checks = sorted(
-        {str(case.get("check")) for case in cases if case.get("check") not in {None, ""}}
-    )
-    if checks:
-        return checks
-    return _planned_rules(task) or ["pandera.schema_errors"]
-
-
-def _failed_rules_from_schema_error(
-    exc: pa.errors.SchemaError,
-    task: TaskDetail,
-) -> list[str]:
-    check = getattr(exc, "check", None)
-    if check:
-        return [str(check)]
-    return _planned_rules(task) or ["pandera.schema_error"]
-
-
 def _planned_rules(task: TaskDetail) -> list[str]:
-    if task.verification and task.verification.pandera_checks:
+    if task.verification and task.verification.checks:
         rules = []
-        for check in task.verification.pandera_checks:
+        for check in task.verification.checks:
             if isinstance(check, dict):
                 rules.append(check.get("type", "unknown"))
             else:

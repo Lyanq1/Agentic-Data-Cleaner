@@ -11,8 +11,8 @@ from app.graphs.states.global_state import GlobalState, StatisticalProfile, Vali
 from app.services.lineage_service import LineageService
 from app.services.lineage_utils import resolve_lineage_session_id
 from app.tools.data.eda import perform_eda
-from app.validators import validate_current_task
-from app.validators.runner import _resolve_active_task
+from app.agents.result_validators import validate_current_task
+from app.agents.result_validators.runner import _resolve_active_task
 
 logger = logging.getLogger(__name__)
 
@@ -94,31 +94,6 @@ async def planner_node(state: GlobalState) -> dict[str, Any]:
         "current_step": "planning",
         "completed_steps": "planning",
     }
-
-
-# Supervisor node (Điều phối luồng chạy của các Worker)
-async def supervisor_node(state: GlobalState) -> dict[str, Any]:
-    """Skeletal Supervisor Node — increments indices and coordinates task steps."""
-    current_idx_val = state.get("current_task_idx")
-    current_idx = current_idx_val if current_idx_val is not None else 0
-    task_list = state.get("task_list") or []
-
-    if current_idx < len(task_list):
-        active_task = task_list[current_idx]
-        logger.info(
-            "supervisor_node: Active task is '%s' (index %s/%s)",
-            active_task,
-            current_idx,
-            len(task_list),
-        )
-    else:
-        logger.info("supervisor_node: All tasks in DAG completed successfully.")
-
-    return {
-        "current_step": "supervisor",
-        "completed_steps": "supervisor",
-    }
-
 
 # Deduplication Worker stub node
 async def dedup_agent_node(state: GlobalState) -> dict[str, Any]:
