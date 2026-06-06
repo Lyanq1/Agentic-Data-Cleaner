@@ -1,43 +1,30 @@
-"""Models used by the deterministic Pandera validator."""
+"""Models used by the ReAct Validator Agent."""
 
-from dataclasses import dataclass, field
-from typing import Any
-
-from app.graphs.states.global_state import TaskDetail
+from typing import Any, List, Dict
+from pydantic import BaseModel, Field
 
 
-@dataclass(slots=True)
-class ValidationOutcome:
-    """Normalized result returned by the Pandera validation runner."""
+class ValidatorOutput(BaseModel):
+    """Structured output expected from the Validator LLM."""
 
-    task: TaskDetail | None
-    passed: bool
-    skipped: bool = False
-    failed_rules: list[str] = field(default_factory=list)
-    message: dict[str, Any] | str | None = None
-    failure_cases: list[dict[str, Any]] = field(default_factory=list)
-
-    @property
-    def task_id(self) -> str:
-        """Return a stable task id for logging."""
-        return self.task.task_id if self.task else "unknown"
-
-    @property
-    def agent(self) -> str:
-        """Return a stable agent name for logging."""
-        if self.task is None:
-            return "unknown"
-        return getattr(self.task.agent, "value", str(self.task.agent))
-
-    def compact_error_log(self) -> str:
-        """Return a concise error payload suitable for worker retry logs."""
-        if self.passed:
-            return ""
-        return str(
-            {
-                "task_id": self.task_id,
-                "failed_rules": self.failed_rules,
-                "message": self.message,
-                "failure_cases": self.failure_cases[:20],
-            }
-        )
+    passed: bool = Field(
+        description="True if the dataset passes validation, False if it needs rework."
+    )
+    quality_score: int = Field(
+        description="A score from 0 to 100 representing the quality of the dataset."
+    )
+    score_breakdown: Dict[str, int] = Field(
+        description="A breakdown of how the score was calculated (e.g. {'nulls': -20, 'duplicates': -10}).",
+        default_factory=dict
+    )
+    failed_rules: List[str] = Field(
+        description="A list of rule names that failed, if any.",
+        default_factory=list
+    )
+    replan_hints: Dict[str, Any] = Field(
+        description="Hints or suggestions to pass to the planner/worker on how to fix the issues.",
+        default_factory=dict
+    )
+    reasoning: str = Field(
+        description="Brief reasoning explaining the validation decision."
+    )
