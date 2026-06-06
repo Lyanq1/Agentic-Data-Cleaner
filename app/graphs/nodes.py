@@ -11,7 +11,6 @@ from app.graphs.states.global_state import GlobalState, StatisticalProfile, Vali
 from app.services.lineage_service import LineageService
 from app.services.lineage_utils import resolve_lineage_session_id
 from app.tools.data.eda import perform_eda
-from app.agents.result_validators import validate_current_task
 from app.agents.result_validators.runner import _resolve_active_task
 
 logger = logging.getLogger(__name__)

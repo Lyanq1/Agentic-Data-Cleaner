@@ -1,64 +1,14 @@
-"""Runtime entrypoints for validating the active planner task with Pandas."""
+"""Runtime entrypoints for validating the active planner task."""
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, cast
 
 import pandas as pd
 
 from app.graphs.states.global_state import ExecutionPlan, GlobalState, TaskDetail
 from app.services.lineage_service import LineageService
 from app.services.lineage_utils import resolve_lineage_session_id
-from app.agents.result_validators.models import ValidationOutcome
-from app.agents.result_validators.pandas_validator import validate_dataframe, PandasValidationErrors
-
-
-def validate_current_task(state: GlobalState) -> ValidationOutcome:
-    """Validate the active worker task against the latest dataframe version."""
-    task = _resolve_active_task(state)
-    if task is None:
-        return ValidationOutcome(
-            task=None,
-            passed=False,
-            failed_rules=["validator.execution_plan_missing"],
-            message="No active work_order could be resolved from execution_plan.",
-        )
-
-    if task.skip:
-        return ValidationOutcome(task=task, passed=True, skipped=True)
-
-    dataframe = _load_latest_dataframe(state, task)
-    if dataframe is None:
-        return ValidationOutcome(
-            task=task,
-            passed=False,
-            failed_rules=["validator.dataframe_missing"],
-            message=(
-                "No dataframe found from latest lineage version or fallback dataset path. "
-                "Expected a lineage session id or a readable dataset path."
-            ),
-        )
-
-    try:
-        validate_dataframe(dataframe, task, state.get("semantic_profile"))
-    except PandasValidationErrors as exc:
-        return ValidationOutcome(
-            task=task,
-            passed=False,
-            failed_rules=[err.check for err in exc.errors],
-            message=str(exc),
-            failure_cases=exc.failure_cases,
-        )
-    except Exception as exc:
-        return ValidationOutcome(
-            task=task,
-            passed=False,
-            failed_rules=["validator.runtime_error"],
-            message=str(exc),
-        )
-
-    return ValidationOutcome(task=task, passed=True)
 
 
 def _resolve_active_task(state: GlobalState) -> TaskDetail | None:
