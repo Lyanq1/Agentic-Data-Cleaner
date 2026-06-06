@@ -1,15 +1,21 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
-import { Header } from './components/layout/Header';
-import { UploadView } from './components/views/UploadView';
-import { PipelineView } from './components/views/PipelineView';
-import { ResultView } from './components/views/ResultView';
-import type { AppStep } from './lib/pipelineSession';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useState,
+} from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { Header } from "./components/layout/Header";
+import { UploadView } from "./components/views/UploadView";
+import { PipelineView } from "./components/views/PipelineView";
+import { ResultView } from "./components/views/ResultView";
+import type { AppStep } from "./lib/pipelineSession";
 import {
   applyPipelineRoute,
   getInitialRouteState,
   parsePipelineSearch,
-} from './lib/pipelineSession';
+} from "./lib/pipelineSession";
 
 function App() {
   const queryClient = useQueryClient();
@@ -21,9 +27,9 @@ function App() {
   // Bare "/" with restored session: mirror ?step=&run= into the address bar without adding a history entry.
   useLayoutEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    if (!params.has('step')) {
-      if (initialRoute.runId || initialRoute.step !== 'upload') {
-        applyPipelineRoute(initialRoute.step, initialRoute.runId, 'replace');
+    if (!params.has("step")) {
+      if (initialRoute.runId || initialRoute.step !== "upload") {
+        applyPipelineRoute(initialRoute.step, initialRoute.runId, "replace");
       }
     }
   }, [initialRoute.step, initialRoute.runId]);
@@ -34,51 +40,41 @@ function App() {
       setCurrentStep(step);
       setRunId(r);
     };
-    window.addEventListener('popstate', onPop);
-    return () => window.removeEventListener('popstate', onPop);
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
   }, []);
 
   const resetSession = useCallback(() => {
     // Clear React Query cache
     if (runId) {
-      queryClient.removeQueries({ queryKey: ['pipeline-state', runId] });
-      queryClient.removeQueries({ queryKey: ['hitl-checkpoint', runId] });
+      queryClient.removeQueries({ queryKey: ["pipeline-state", runId] });
+      queryClient.removeQueries({ queryKey: ["hitl-checkpoint", runId] });
     }
     queryClient.clear();
 
-    // Clear all HITL answers and submissions from local storage to prevent conflicts
-    const keysToRemove: string[] = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key && (key.startsWith('hitl_answers_') || key.startsWith('hitl_submitted_'))) {
-        keysToRemove.push(key);
-      }
-    }
-    keysToRemove.forEach((key) => localStorage.removeItem(key));
-
     setRunId(null);
-    setCurrentStep('upload');
+    setCurrentStep("upload");
     setSessionKey((k) => k + 1);
-    applyPipelineRoute('upload', null, 'replace');
+    applyPipelineRoute("upload", null, "replace");
   }, [queryClient, runId]);
 
   const handleNavigateStep = useCallback(
     (step: AppStep) => {
-      if (step === 'upload') {
+      if (step === "upload") {
         resetSession();
         return;
       }
       if (!runId) return;
       setCurrentStep(step);
-      applyPipelineRoute(step, runId, 'push');
+      applyPipelineRoute(step, runId, "push");
     },
-    [runId, resetSession]
+    [runId, resetSession],
   );
 
   const handleProfileLoaded = useCallback((loadedRunId: string) => {
     setRunId(loadedRunId);
-    setCurrentStep('profile');
-    applyPipelineRoute('profile', loadedRunId, 'replace');
+    setCurrentStep("profile");
+    applyPipelineRoute("profile", loadedRunId, "replace");
   }, []);
 
   const handleClearProfile = useCallback(() => {
@@ -87,14 +83,14 @@ function App() {
 
   const handleUploadSuccess = (newRunId: string) => {
     setRunId(newRunId);
-    setCurrentStep('pipeline');
-    applyPipelineRoute('pipeline', newRunId, 'push');
+    setCurrentStep("pipeline");
+    applyPipelineRoute("pipeline", newRunId, "push");
   };
 
   const handlePipelineComplete = () => {
     if (!runId) return;
-    setCurrentStep('result');
-    applyPipelineRoute('result', runId, 'push');
+    setCurrentStep("result");
+    applyPipelineRoute("result", runId, "push");
   };
 
   const handleStartOver = () => {
@@ -114,20 +110,20 @@ function App() {
         onNavigateStep={handleNavigateStep}
         onHomeReset={handleHomeReset}
       />
-      <main className="flex-1 min-h-0 overflow-hidden w-full max-w-[1400px] px-6 py-6 flex flex-col">
-        {(currentStep === 'upload' || currentStep === 'profile') && (
+      <main className="flex-1 min-h-0 overflow-hidden w-full max-w-350 px-6 py-6 flex flex-col">
+        {(currentStep === "upload" || currentStep === "profile") && (
           <UploadView
             key={sessionKey}
             onUploadSuccess={handleUploadSuccess}
             onProfileLoaded={handleProfileLoaded}
             onClearProfile={handleClearProfile}
-            initialRunId={currentStep === 'profile' ? runId : null}
+            initialRunId={currentStep === "profile" ? runId : null}
           />
         )}
-        {currentStep === 'pipeline' && runId && (
+        {currentStep === "pipeline" && runId && (
           <PipelineView runId={runId} onComplete={handlePipelineComplete} />
         )}
-        {currentStep === 'result' && runId && (
+        {currentStep === "result" && runId && (
           <ResultView runId={runId} onStartOver={handleStartOver} />
         )}
       </main>
@@ -136,4 +132,4 @@ function App() {
 }
 
 export default App;
-export type { AppStep } from './lib/pipelineSession';
+export type { AppStep } from "./lib/pipelineSession";

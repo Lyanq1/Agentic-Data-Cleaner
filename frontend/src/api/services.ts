@@ -28,6 +28,24 @@ export interface HITLDecisionRequest {
   disambiguation_answers?: Record<string, string | string[]>;
 }
 
+const getClarificationEntries = (clarifications: any): any[] => {
+  if (!clarifications) return [];
+  return ['null', 'duplicate', 'typecast'].flatMap((category) =>
+    Object.values(clarifications[category] || {}).filter(Boolean)
+  );
+};
+
+const hasUnansweredClarifications = (valResult: any): boolean => {
+  if (valResult?.status !== 'needs_clarification') return false;
+  const questions = getClarificationEntries(valResult.clarifications);
+  return questions.some((question: any) => question.answer == null || question.answer === '');
+};
+
+const hasAnsweredClarifications = (valResult: any): boolean => {
+  const questions = getClarificationEntries(valResult?.clarifications);
+  return questions.length > 0 && questions.every((question: any) => question.answer != null && question.answer !== '');
+};
+
 export const pipelineApi = {
   uploadFile: async (file: File, requirements: string): Promise<UploadResponse> => {
     const formData = new FormData();
@@ -64,13 +82,19 @@ export const pipelineApi = {
 
     // Map LangGraph backend state to frontend UI expectations
     const hasErrors = data.errors && data.errors.length > 0;
-    const isValidationClarification = data.input_validation_result?.status === 'needs_clarification';
-    const hasAnswers = localStorage.getItem(`hitl_submitted_${runId}`) === 'true';
-    const awaiting_hitl = isValidationClarification && !hasAnswers;
+    const valResult = data.input_validation_result;
+    const isValidationClarification = valResult?.status === 'needs_clarification';
+    const awaiting_hitl = hasUnansweredClarifications(valResult);
+    const isResolvingClarification =
+      isValidationClarification &&
+      hasAnsweredClarifications(valResult) &&
+      !data.execution_plan;
 
     const isCompleted = awaiting_hitl 
       ? false 
-      : (!data.next_node || data.next_node.length === 0 || data.next_node.includes('__end__'));
+      : isResolvingClarification
+        ? false
+        : (!data.next_node || data.next_node.length === 0 || data.next_node.includes('__end__'));
       
     const status = hasErrors 
       ? 'failed' 
@@ -109,12 +133,11 @@ export const pipelineApi = {
       });
     }
 
-    const valResult = data.input_validation_result;
-
     return {
       run_id: data.run_id,
       status,
       awaiting_hitl,
+      resolving_hitl: isResolvingClarification,
       current_checkpoint_id: awaiting_hitl ? runId : null,
       error_message: hasErrors ? data.errors[0] : null,
       user_requirements: {
@@ -158,10 +181,9 @@ export const pipelineApi = {
 
   getCheckpoint: async (runId: string): Promise<HITLCheckpointResponse | null> => {
     const state = await pipelineApi.getFullState(runId);
-    const hasAnswers = localStorage.getItem(`hitl_submitted_${runId}`) === 'true';
     const valResult = state.input_validation_result;
     
-    if (valResult?.status === 'needs_clarification' && !hasAnswers) {
+    if (hasUnansweredClarifications(valResult)) {
       return {
         checkpoint_id: runId,
         checkpoint_type: 'input_validation_clarification',
@@ -173,12 +195,6 @@ export const pipelineApi = {
   },
 
   submitDecision: async (runId: string, data: HITLDecisionRequest): Promise<{ message: string }> => {
-    localStorage.setItem(`hitl_answers_${runId}`, JSON.stringify({
-      answers: data.disambiguation_answers,
-      submittedAt: new Date().toISOString()
-    }));
-    localStorage.setItem(`hitl_submitted_${runId}`, 'true');
-
     // Call the backend resolve API if we are submitting clarification answers
     if (data.decision === 'approve' && data.disambiguation_answers) {
       const response = await apiClient.post<{ message: string }>(`/pipeline/${runId}/resolve`, {
