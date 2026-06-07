@@ -35,13 +35,13 @@ class ValidatorAgent(BaseAgent):
         active_task = _resolve_active_task(state)
         task_plan_str = active_task.model_dump_json() if active_task else "No specific task plan."
         
-        # The worker saved the output to physical_dataframe_path
-        file_path = state.get("physical_dataframe_path")
+        # The worker saved the output to path_file_to_validate
+        file_path = state.get("path_file_to_validate")
         if not file_path:
-            logger.error("ValidatorAgent: No physical_dataframe_path found to validate.")
+            logger.error("ValidatorAgent: No path_file_to_validate found to validate.")
             return {
                 "validator_agent_result": None,
-                "error": "No physical_dataframe_path found.",
+                "error": "No path_file_to_validate found.",
                 "success": False
             }
             
