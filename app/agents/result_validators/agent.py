@@ -10,25 +10,9 @@ from app.graphs.states.global_state import GlobalState
 from app.agents.result_validators.models import ValidatorOutput
 from app.tools.data.quality_control.tool import perform_data_quality_check
 from app.agents.result_validators.runner import _resolve_active_task
+from app.agents.result_validators.prompts import SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
-
-SYSTEM_PROMPT = """You are the Output Validator Agent in a data cleaning pipeline.
-Your job is to evaluate the quality of the dataset after a worker agent has processed it.
-
-You MUST use the `perform_data_quality_check` tool on the provided `file_path` to get the Data Quality Control (QC) Report.
-
-Your workflow (ReAct & Scoring):
-1. THINK: Analyze the context and call the `perform_data_quality_check` tool to observe the dataset.
-2. OBSERVE: Read the QC report returned by the tool. Check for nulls, duplicates, disguised nulls, etc.
-3. SCORE & REFINE: Calculate a `quality_score` from 0 to 100.
-    - Start at 100.
-    - Deduct points for issues (e.g. -20 for high nulls, -30 for duplicates, -10 for disguised nulls).
-    - If score >= 80, it is PASS. If < 80, it is FAIL.
-4. OUTPUT: Provide the structured ValidatorOutput.
-
-Be strict but fair.
-"""
 
 class ValidatorAgent(BaseAgent):
     """Output Validator Agent that evaluates data quality using ReAct LLM loop."""
@@ -43,7 +27,7 @@ class ValidatorAgent(BaseAgent):
         self.structured_llm = create_llm().with_structured_output(ValidatorOutput)
 
     async def run(self, state: GlobalState) -> Dict[str, Any]:
-        logger.info("ValidatorAgent: Starting output validation via ReAct...")
+        logger.info("ValidatorAgent: Starting output validation...")
         
         user_prompt = state.get("user_prompt", "")
         raw_req = state.get("raw_requirement_input", "")

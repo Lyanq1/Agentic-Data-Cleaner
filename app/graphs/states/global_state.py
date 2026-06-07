@@ -44,6 +44,7 @@ class GlobalState(TypedDict):
     # Data References & Progress
     current_dataset_version: str | None
     physical_dataframe_path: str | None
+    path_file_to_validate: str | None
     current_step: str | None
     completed_steps: Annotated[list[str], append_list]
 

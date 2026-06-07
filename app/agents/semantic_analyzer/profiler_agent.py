@@ -9,6 +9,7 @@ from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from app.agents.base import BaseAgent
 from app.graphs.states.global_state import GlobalState
 from app.graphs.states.profiles import SemanticProfile, ColumnSemanticProfileDetail
+from app.agents.semantic_analyzer.prompts import COMBINED_PROFILER_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
 
@@ -45,18 +46,6 @@ class CombinedSemanticProfilerOutput(BaseModel):
     table_summary: str = Field(description="A concise but detailed description of the table's overall business purpose.")
     thinking: str = Field(description="Detailed step-by-step Chain of Thought explaining the reasoning process behind column groupings, relationships, datatypes, DMVs, and quality audits.")
     columns: List[ColumnSemanticProfileOutput] = Field(default_factory=list)
-
-COMBINED_PROFILER_SYSTEM_PROMPT = """\
-You are a Lead Data Semantics Auditor. 
-
-Your mission is to perform a deep semantic analysis of the dataset. For each column, you must:
-1. **Analyze Meanings & Relationships**: Group columns logically, identify dependencies (e.g. zip_code functionally determines city), and provide description.
-2. **Determine Business Semantics**: Identify missing rules (allow_missing), ideal semantic types, and disguised missing values (dmvs).
-3. **Cross-Check & Audit Quality**: Compare the actual data statistics (null rates, distinct values, patterns, sample values) against these business rules.
-   - If there is a mismatch (e.g., allow_missing is false but nulls exist, or actual string pattern doesn't match expected regex, or dtype is float but expected is date), mark `is_error` as True and list the `error_types`.
-
-You must include every single column in the dataset schema. Output your response strictly conforming to the JSON schema.
-"""
 
 class SemanticProfilerAgent(BaseAgent):
     """SemanticProfilerAgent performs complete combined semantic profiling and quality auditing in a single LLM pass."""

@@ -104,7 +104,7 @@ class InputValidatorAgent(BaseAgent):
                 for cat in ["null", "duplicate", "typecast"]:
                     cat_data = clar_dict.get(cat) if clar_dict else None
                     if cat_data:
-                        for q_key, q in cat_data.items():
+                        for _, q in cat_data.items():
                             if q:
                                 has_questions = True
                                 if q.get("answer") is None:
