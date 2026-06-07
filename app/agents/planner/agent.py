@@ -8,7 +8,8 @@ from app.agents.base import BaseAgent
 from app.agents.registry import AgentRegistry
 from app.agents.planner.prompts import PLANNER_SYSTEM_PROMPT
 from datetime import datetime
-from app.graphs.states.global_state import ExecutionPlan, TaskDetail, TaskDetailWrapper, PlanMetadata, GlobalConstraints, GlobalState
+from app.graphs.states.global_state import GlobalState
+from app.graphs.states.planning import ExecutionPlan, TaskDetail, TaskDetailWrapper, PlanMetadata, GlobalConstraints
 
 logger = logging.getLogger(__name__)
 

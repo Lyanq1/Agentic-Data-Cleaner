@@ -9,7 +9,8 @@ from app.agents.deduplication.agent import DeduplicationAgent
 from app.agents.roles import AgentRole
 from app.graphs.graph import build_graph
 from app.graphs.checkpointer import get_checkpointer_manager
-from app.graphs.states.global_state import ExecutionPlan, TaskDetail, TaskDetailWrapper, PlanMetadata, GlobalConstraints, GlobalState
+from app.graphs.states.global_state import GlobalState
+from app.graphs.states.planning import ExecutionPlan, TaskDetail, TaskDetailWrapper, PlanMetadata, GlobalConstraints
 
 logger = logging.getLogger(__name__)
 

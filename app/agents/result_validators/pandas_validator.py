@@ -6,7 +6,9 @@ from typing import Any
 
 import pandas as pd
 
-from app.graphs.states.global_state import SemanticProfile, TaskDetail, ValidationCheck
+from app.graphs.states.profiles import SemanticProfile
+from app.graphs.states.planning import TaskDetail
+from app.graphs.states.output_validation import ValidationCheck
 
 
 class PandasValidationError(Exception):

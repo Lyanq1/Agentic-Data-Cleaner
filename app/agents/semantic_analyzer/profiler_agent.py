@@ -7,11 +7,8 @@ from pydantic import BaseModel, Field
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
 from app.agents.base import BaseAgent
-from app.graphs.states.global_state import (
-    SemanticProfile,
-    ColumnSemanticProfileDetail,
-    GlobalState,
-)
+from app.graphs.states.global_state import GlobalState
+from app.graphs.states.profiles import SemanticProfile, ColumnSemanticProfileDetail
 
 logger = logging.getLogger(__name__)
 

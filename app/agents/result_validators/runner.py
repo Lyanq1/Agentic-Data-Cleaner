@@ -6,7 +6,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from app.graphs.states.global_state import ExecutionPlan, GlobalState, TaskDetail
+from app.graphs.states.global_state import GlobalState
+from app.graphs.states.planning import ExecutionPlan, TaskDetail
 from app.services.lineage_service import LineageService
 from app.services.lineage_utils import resolve_lineage_session_id
 
