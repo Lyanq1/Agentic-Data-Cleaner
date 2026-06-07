@@ -11,6 +11,7 @@ from app.agents.result_validators.models import ValidatorOutput
 from app.tools.data.quality_control.tool import perform_data_quality_check
 from app.graphs.utils import _resolve_active_task
 from app.agents.result_validators.prompts import SYSTEM_PROMPT
+from app.tools.data.quality_control.validator import run_pandas_validation
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +49,6 @@ class ValidatorAgent(BaseAgent):
         agent_name = getattr(active_task.agent, "value", str(active_task.agent)) if active_task else "Unknown Agent"
         
         # Run deterministic pandas validation
-        from app.tools.data.quality_control.validator import run_pandas_validation
         validation_result_str = run_pandas_validation(
             file_path=file_path,
             task=active_task,

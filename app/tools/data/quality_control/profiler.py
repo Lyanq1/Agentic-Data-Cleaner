@@ -24,9 +24,6 @@ class QualityProfiler:
             
         if path.suffix.lower() == ".parquet":
             df = pd.read_parquet(path)
-        elif path.suffix.lower() in {".csv", ".tsv"}:
-            sep = "\t" if path.suffix.lower() == ".tsv" else ","
-            df = pd.read_csv(path, sep=sep)
         else:
             raise ValueError(f"Unsupported file format: {path.suffix}")
             
