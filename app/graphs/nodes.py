@@ -10,7 +10,7 @@ from app.agents.semantic_analyzer.profiler_agent import SemanticProfilerAgent
 from app.graphs.states.global_state import GlobalState
 from app.graphs.states.output_validation import ValidationResultItem
 from app.tools.data.eda import perform_eda
-from app.agents.result_validators.runner import _resolve_active_task
+from app.graphs.utils import _resolve_active_task
 from app.graphs.states.profiler_state import StatisticalProfile
 
 logger = logging.getLogger(__name__)
@@ -134,7 +134,7 @@ def _persist_passthrough_worker_version(
     """
     import uuid
     from pathlib import Path
-    from app.agents.result_validators.runner import _load_latest_dataframe, _resolve_active_task
+    from app.graphs.utils import _load_latest_dataframe, _resolve_active_task
     
     base_update: dict[str, Any] = {
         "current_step": step_name,

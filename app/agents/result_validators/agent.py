@@ -9,7 +9,7 @@ from app.agents.base import BaseAgent
 from app.graphs.states.global_state import GlobalState
 from app.agents.result_validators.models import ValidatorOutput
 from app.tools.data.quality_control.tool import perform_data_quality_check
-from app.agents.result_validators.runner import _resolve_active_task
+from app.graphs.utils import _resolve_active_task
 from app.agents.result_validators.prompts import SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
@@ -44,12 +44,26 @@ class ValidatorAgent(BaseAgent):
                 "success": False
             }
             
+        # Resolve agent name
+        agent_name = getattr(active_task.agent, "value", str(active_task.agent)) if active_task else "Unknown Agent"
+        
+        # Run deterministic pandas validation
+        from app.tools.data.quality_control.validator import run_pandas_validation
+        validation_result_str = run_pandas_validation(
+            file_path=file_path,
+            task=active_task,
+            semantic_profile=state.get("semantic_profile")
+        )
+            
         human_content = (
             f"--- USER PROMPT ---\n{user_prompt}\n\n"
             f"--- CLARIFICATIONS ---\n{raw_req}\n\n"
             f"--- TASK PLAN ---\n{task_plan_str}\n\n"
+            f"--- AGENT NAME ---\n{agent_name}\n\n"
+            f"--- DETERMINISTIC VALIDATION RESULT ---\n{validation_result_str}\n\n"
             f"The dataset is located at: {file_path}\n"
-            "Please call `perform_data_quality_check` on this file_path, then provide your structured output."
+            "You may call `perform_data_quality_check` on this file_path if you need to observe the full profiling state, then provide your structured output. "
+            "Remember to ONLY penalize the data for issues that were within the scope of the Agent Name listed above."
         )
         
         messages: list[Any] = [

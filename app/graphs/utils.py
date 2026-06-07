@@ -1,4 +1,4 @@
-"""Runtime entrypoints for validating the active planner task."""
+"""Utility functions for LangGraph nodes and state management."""
 
 from __future__ import annotations
 
@@ -93,15 +93,3 @@ def _load_dataframe(dataset_path: str) -> pd.DataFrame:
         return pd.read_json(path, lines=suffix == ".jsonl")
 
     raise ValueError(f"Unsupported dataset format for validation: {path.suffix or '<none>'}")
-
-
-def _planned_rules(task: TaskDetail) -> list[str]:
-    if task.verification and task.verification.checks:
-        rules = []
-        for check in task.verification.checks:
-            if isinstance(check, dict):
-                rules.append(check.get("type", "unknown"))
-            else:
-                rules.append(check.type)
-        return rules
-    return []
