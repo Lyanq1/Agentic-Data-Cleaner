@@ -23,22 +23,44 @@ logger = logging.getLogger(__name__)
 
 
 def route_to_current_task(state: GlobalState) -> str:
-    """Route to the current worker task, or to the report when all tasks are done."""
+    """Determine the next worker task (deduplication, null_handling, or type_casting)
+    to execute based on current_task_idx, or route to report_agent when finished.
+    """
     current_idx_val = state.get("current_task_idx")
     current_idx = current_idx_val if current_idx_val is not None else 0
     task_list = state.get("task_list") or []
 
     if current_idx < len(task_list):
         next_task = task_list[current_idx]
-        # Map task keys to node names
-        if next_task in ["deduplication", "null_handling", "type_casting"]:
-            return next_task
+        # Route to worker node based on task name
+        if next_task == "deduplication":
+            return "deduplication"
+        elif next_task == "null_handling":
+            return "null_handling"
+        elif next_task == "type_casting":
+            return "type_casting"
+            
         logger.warning(
-            "route_to_current_task: Unrecognized task '%s'. Falling back to report.",
+            "route_to_current_task: Unrecognized task '%s'. Falling back to report_agent.",
             next_task,
         )
 
     return "report_agent"
+
+
+def route_from_validator(state: GlobalState) -> str:
+    """Route after validator node execution.
+    
+    Flow:
+      - If validation failed and requires replan: routes to 'planner'.
+      - If validation failed and retrying: routes back to the current worker (dedup or null).
+      - If validation passed: moves to the next worker (null_handling after dedup) or 'report_agent'.
+    """
+    next_node = state.get("next_node")
+    if next_node == "planner":
+        return "planner"
+        
+    return route_to_current_task(state)
 
 
 def route_from_input_validator(state: GlobalState) -> str:
@@ -84,13 +106,6 @@ def route_from_input_validator(state: GlobalState) -> str:
 
     return "planner"
 
-
-def route_from_validator(state: GlobalState) -> str:
-    """Route after Pandera validation based on retry/replan decision."""
-    next_node = state.get("next_node")
-    if next_node == "planner":
-        return "planner"
-    return route_to_current_task(state)
 
 
 class GraphBuilder:
