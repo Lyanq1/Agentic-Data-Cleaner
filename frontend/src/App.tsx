@@ -103,14 +103,14 @@ function App() {
   };
 
   return (
-    <div className="h-screen overflow-hidden bg-background font-sans antialiased flex flex-col items-center">
+    <div className="h-dvh overflow-hidden bg-background font-sans antialiased flex flex-col items-center">
       <Header
         step={currentStep}
         runId={runId}
         onNavigateStep={handleNavigateStep}
         onHomeReset={handleHomeReset}
       />
-      <main className="flex-1 min-h-0 overflow-hidden w-full max-w-350 px-6 py-6 flex flex-col">
+      <main className="flex-1 min-h-0 overflow-hidden w-full max-w-[1400px] px-3 py-4 sm:px-4 md:px-6 md:py-6 flex flex-col">
         {(currentStep === "upload" || currentStep === "profile") && (
           <UploadView
             key={sessionKey}

@@ -166,7 +166,7 @@ export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) =>
                 <AlertCircle className="w-8 h-8" />
               )}
             </div>
-            <h1 className="text-3xl font-bold tracking-tight mb-2">
+            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight mb-2">
               {validationPassed ? 'Pipeline Completed' : 'Pipeline Completed — Validation Notes'}
             </h1>
             <p className="text-muted-foreground max-w-lg">
@@ -189,14 +189,14 @@ export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) =>
           </div>
 
           <div className="rounded-xl border bg-card text-card-foreground shadow mb-6 overflow-hidden">
-            <div className="p-6 border-b bg-muted/20">
-              <h2 className="text-xl font-semibold flex items-center gap-2">
+            <div className="p-4 sm:p-6 border-b bg-muted/20">
+              <h2 className="text-lg sm:text-xl font-semibold flex items-center gap-2">
                 <Database className="w-5 h-5 text-muted-foreground" />
                 Processing Summary
               </h2>
             </div>
-            <div className="p-6 space-y-8">
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="p-4 sm:p-6 space-y-8">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 <div className="border rounded-lg p-4 bg-muted/20">
                   <div className="text-xs text-muted-foreground mb-1">Rows (input)</div>
                   <div className="text-2xl font-bold tabular-nums">
@@ -248,8 +248,8 @@ export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) =>
                   <div
                     className={`px-5 py-4 flex items-center gap-3 ${
                       validationPassed
-                        ? 'bg-gradient-to-r from-emerald-500 to-teal-600'
-                        : 'bg-gradient-to-r from-amber-500 to-orange-600'
+                        ? 'bg-emerald-600'
+                        : 'bg-amber-600'
                     }`}
                   >
                     <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center">

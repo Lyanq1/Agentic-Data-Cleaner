@@ -131,15 +131,12 @@ export const ResolvedValidationPlanPanel: React.FC<{
           </details>
         )}
 
-        <StepFooter
-          currentStep={2}
-          statusText="Review the generated cleaning plan"
-        >
+        <StepFooter currentStep={2} statusText="">
           <button
             type="button"
             onClick={onGeneratePlan}
             disabled={isGenerating}
-            className="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-semibold transition-all shadow-sm hover:shadow-md disabled:opacity-50"
+            className="inline-flex h-11 items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-emerald-600 px-5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-emerald-700 hover:shadow-md disabled:opacity-50"
           >
             {isGenerating ? <>Generating Plan...</> : <>Start Plan</>}
           </button>

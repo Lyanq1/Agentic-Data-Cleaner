@@ -80,12 +80,12 @@ export const RequirementSummaryPanel: React.FC<RequirementSummaryProps> = ({
 
   return (
     <div className="rounded-xl border bg-white shadow-sm overflow-hidden">
-      <div className="px-5 py-4 border-b bg-gradient-to-r from-slate-50 to-indigo-50/40 flex items-start justify-between gap-3">
-        <div className="flex items-start gap-3">
+      <div className="px-4 py-4 sm:px-5 border-b bg-slate-50 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex items-start gap-3 min-w-0">
           <div className="w-9 h-9 rounded-lg bg-indigo-100 flex items-center justify-center shrink-0">
             <ListChecks className="w-5 h-5 text-indigo-700" />
           </div>
-          <div>
+          <div className="min-w-0">
             <h3 className="text-base font-semibold text-foreground">LLM Requirement Summary</h3>
             <p className="text-xs text-muted-foreground mt-0.5">
               Structured interpretation (StructuredCleaningSpec) — what the system will plan against
@@ -107,7 +107,7 @@ export const RequirementSummaryPanel: React.FC<RequirementSummaryProps> = ({
         )}
       </div>
 
-      <div className={`p-5 space-y-5 ${compact ? 'text-sm' : ''}`}>
+      <div className={`p-4 sm:p-5 space-y-5 ${compact ? 'text-sm' : ''}`}>
         {userRequirementsText?.trim() && (
           <section>
             <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
@@ -122,7 +122,7 @@ export const RequirementSummaryPanel: React.FC<RequirementSummaryProps> = ({
 
         {summary && (
           <>
-            <section className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
               <Stat label="Columns mapped" value={String(summary.mappingCount)} />
               <Stat label="Column rules" value={String(summary.ruleCount)} />
               <Stat label="Columns touched" value={String(summary.touchedCount)} />
@@ -132,7 +132,7 @@ export const RequirementSummaryPanel: React.FC<RequirementSummaryProps> = ({
               />
             </section>
 
-            <section className="text-sm space-y-1">
+            <section className="text-sm space-y-2">
               <Row label="Dataset" value={summary.datasetName} mono />
               <Row label="Spec version" value={summary.specVersion} mono />
               <Row label="Deduplication" value={summary.dedupLabel} />
@@ -177,23 +177,23 @@ export const RequirementSummaryPanel: React.FC<RequirementSummaryProps> = ({
                 <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
                   Column mapping (physical → target)
                 </h4>
-                <div className="border rounded-lg overflow-hidden max-h-48 overflow-y-auto">
-                  <table className="w-full text-xs">
-                    <thead className="bg-muted/50 sticky top-0">
+                <div className="border rounded-lg max-h-48 overflow-auto custom-scrollbar">
+                  <table className="w-full min-w-[36rem] border-separate border-spacing-0 text-xs">
+                    <thead>
                       <tr>
-                        <th className="text-left p-2 font-semibold">Original</th>
-                        <th className="text-left p-2 font-semibold">Target</th>
-                        <th className="text-left p-2 font-semibold">Type</th>
-                        <th className="text-left p-2 font-semibold">Nullable</th>
+                        <th className="sticky top-0 z-10 bg-slate-50 text-left p-2 font-semibold border-b">Original</th>
+                        <th className="sticky top-0 z-10 bg-slate-50 text-left p-2 font-semibold border-b">Target</th>
+                        <th className="sticky top-0 z-10 bg-slate-50 text-left p-2 font-semibold border-b">Type</th>
+                        <th className="sticky top-0 z-10 bg-slate-50 text-left p-2 font-semibold border-b">Nullable</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y">
                       {summary.mappings.map((m: any, i: number) => (
                         <tr key={i} className="hover:bg-muted/30">
-                          <td className="p-2 font-mono">{m.original_name}</td>
-                          <td className="p-2 font-mono text-indigo-700">{m.target_name}</td>
-                          <td className="p-2">{m.target_type}</td>
-                          <td className="p-2">{m.nullable ? 'yes' : 'no'}</td>
+                          <td className="p-2 font-mono whitespace-nowrap">{m.original_name}</td>
+                          <td className="p-2 font-mono text-indigo-700 whitespace-nowrap">{m.target_name}</td>
+                          <td className="p-2 whitespace-nowrap">{m.target_type}</td>
+                          <td className="p-2 whitespace-nowrap">{m.nullable ? 'yes' : 'no'}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -207,25 +207,25 @@ export const RequirementSummaryPanel: React.FC<RequirementSummaryProps> = ({
                 <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
                   Per-column cleaning rules
                 </h4>
-                <div className="border rounded-lg overflow-hidden max-h-56 overflow-y-auto">
-                  <table className="w-full text-xs">
-                    <thead className="bg-muted/50 sticky top-0">
+                <div className="border rounded-lg max-h-56 overflow-auto custom-scrollbar">
+                  <table className="w-full min-w-[42rem] border-separate border-spacing-0 text-xs">
+                    <thead>
                       <tr>
-                        <th className="text-left p-2 font-semibold">Column</th>
-                        <th className="text-left p-2 font-semibold">Whitespace</th>
-                        <th className="text-left p-2 font-semibold">Case</th>
-                        <th className="text-left p-2 font-semibold">Imputation</th>
-                        <th className="text-left p-2 font-semibold">Outliers</th>
+                        <th className="sticky top-0 z-10 bg-slate-50 text-left p-2 font-semibold border-b">Column</th>
+                        <th className="sticky top-0 z-10 bg-slate-50 text-left p-2 font-semibold border-b">Whitespace</th>
+                        <th className="sticky top-0 z-10 bg-slate-50 text-left p-2 font-semibold border-b">Case</th>
+                        <th className="sticky top-0 z-10 bg-slate-50 text-left p-2 font-semibold border-b">Imputation</th>
+                        <th className="sticky top-0 z-10 bg-slate-50 text-left p-2 font-semibold border-b">Outliers</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y">
                       {summary.rules.map((r: any, i: number) => (
                         <tr key={i} className="hover:bg-muted/30">
-                          <td className="p-2 font-mono font-medium">{r.column_name}</td>
-                          <td className="p-2">{r.strip_whitespace ? 'trim' : '—'}</td>
-                          <td className="p-2">{CASE_LABELS[r.case_transformation] || r.case_transformation}</td>
-                          <td className="p-2">{formatImputation(r.imputation)}</td>
-                          <td className="p-2">
+                          <td className="p-2 font-mono font-medium whitespace-nowrap">{r.column_name}</td>
+                          <td className="p-2 whitespace-nowrap">{r.strip_whitespace ? 'trim' : '—'}</td>
+                          <td className="p-2 whitespace-nowrap">{CASE_LABELS[r.case_transformation] || r.case_transformation}</td>
+                          <td className="p-2 whitespace-nowrap">{formatImputation(r.imputation)}</td>
+                          <td className="p-2 whitespace-nowrap">
                             {r.outliers?.method && r.outliers.method !== 'none'
                               ? `${r.outliers.method} → ${r.outliers.action}`
                               : '—'}
@@ -277,8 +277,8 @@ const Row: React.FC<{ label: string; value: string; mono?: boolean }> = ({
   value,
   mono,
 }) => (
-  <div className="flex gap-2">
-    <span className="text-muted-foreground min-w-[7rem]">{label}:</span>
-    <span className={mono ? 'font-mono text-foreground' : 'text-foreground'}>{value}</span>
+  <div className="flex flex-col gap-0.5 sm:flex-row sm:gap-2">
+    <span className="text-muted-foreground sm:min-w-[7rem]">{label}:</span>
+    <span className={`${mono ? 'font-mono text-foreground' : 'text-foreground'} break-words`}>{value}</span>
   </div>
 );
