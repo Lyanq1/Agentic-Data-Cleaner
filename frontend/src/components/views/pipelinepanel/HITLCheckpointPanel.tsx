@@ -5,9 +5,11 @@ import { TextIcon } from "./TextIcon";
 import { TaskCard } from "./TaskCard";
 import { InputValidationClarificationContent } from "./InputValidationClarificationContent";
 import { SEVERITY_STYLES } from "./utils";
+import { ValidationReviewPanel } from "./ValidationReviewPanel";
 
 export const HITLCheckpointPanel: React.FC<{
   checkpoint: any;
+  pipelineState?: any;
   userRequirementsText?: string;
   feedback: string;
   onFeedbackChange: (v: string) => void;
@@ -20,6 +22,7 @@ export const HITLCheckpointPanel: React.FC<{
   isAwaiting: boolean;
 }> = ({
   checkpoint,
+  pipelineState,
   userRequirementsText,
   feedback,
   onFeedbackChange,
@@ -215,7 +218,7 @@ export const HITLCheckpointPanel: React.FC<{
 
   const issues: any[] =
     payload.issues || payload.validation_result?.issues || [];
-  const metrics = payload.metrics || payload.validation_result?.metrics || {};
+  // const metrics = payload.metrics || payload.validation_result?.metrics || {};
   const validationPassed = payload.validation_result?.passed;
 
   const spec = payload.structured_cleaning_spec || {};
@@ -631,99 +634,12 @@ export const HITLCheckpointPanel: React.FC<{
         {!isPlanApproval &&
           !isRequirementApproval &&
           !isInputValidationClarification && (
-            <>
-              <div className="rounded-xl bg-white border p-5 shadow-sm">
-                <div className="flex items-center justify-between mb-2">
-                  <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-                    Validation Summary
-                  </h4>
-                  {validationPassed !== undefined && (
-                    <span
-                      className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full uppercase ${validationPassed ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"}`}
-                    >
-                      {validationPassed ? (
-                        <TextIcon className="w-3 h-3">OK</TextIcon>
-                      ) : (
-                        <TextIcon className="w-3 h-3">X</TextIcon>
-                      )}
-                      {validationPassed ? "Passed" : "Failed"}
-                    </span>
-                  )}
-                </div>
-                <p className="text-foreground leading-relaxed whitespace-pre-line">
-                  {checkpoint.message_to_user}
-                </p>
-              </div>
-
-              {metrics.total_rows && (
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                  <div className="rounded-xl bg-white border p-4 shadow-sm text-center">
-                    <div className="text-2xl font-bold text-foreground">
-                      {metrics.total_rows?.toLocaleString()}
-                    </div>
-                    <div className="text-xs text-muted-foreground mt-1">
-                      Total Rows
-                    </div>
-                  </div>
-                  <div className="rounded-xl bg-white border p-4 shadow-sm text-center">
-                    <div className="text-2xl font-bold text-foreground">
-                      {metrics.target_columns_checked ?? 0}
-                    </div>
-                    <div className="text-xs text-muted-foreground mt-1">
-                      Columns Checked
-                    </div>
-                  </div>
-                  <div className="rounded-xl bg-white border p-4 shadow-sm text-center">
-                    <div className="text-2xl font-bold text-red-600">
-                      {issues.filter((i: any) => i.severity === "error").length}
-                    </div>
-                    <div className="text-xs text-muted-foreground mt-1">
-                      Errors Found
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {issues.length > 0 && (
-                <div className="rounded-xl bg-white border shadow-sm overflow-hidden">
-                  <div className="px-4 py-3 border-b bg-muted/30">
-                    <h4 className="text-sm font-semibold">
-                      Quality Issues ({issues.length})
-                    </h4>
-                  </div>
-                  <div className="divide-y max-h-[300px] overflow-auto">
-                    {issues.map((issue: any, i: number) => (
-                      <div key={i} className="px-4 py-3 flex items-start gap-3">
-                        <span
-                          className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase ${SEVERITY_STYLES[issue.severity] || SEVERITY_STYLES.info}`}
-                        >
-                          {issue.severity}
-                        </span>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <code className="text-xs font-mono bg-muted px-1.5 py-0.5 rounded">
-                              {issue.column}
-                            </code>
-                            <span className="text-xs text-muted-foreground">
-                              {issue.issue_type}
-                            </span>
-                          </div>
-                          <p className="text-sm text-foreground mt-1">
-                            {issue.description}
-                          </p>
-                          {issue.affected_rows > 0 && (
-                            <span className="text-xs text-muted-foreground">
-                              {issue.affected_rows.toLocaleString()} rows
-                              affected
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </>
+            <ValidationReviewPanel
+              checkpoint={checkpoint}
+              pipelineState={pipelineState}
+              validationPassed={validationPassed}
+              issues={issues}
+            />
           )}
 
         <button

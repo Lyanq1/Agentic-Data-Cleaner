@@ -1,12 +1,32 @@
 import React from "react";
 import { SpinnerIcon } from "./SpinnerIcon";
-import { TextIcon } from "./TextIcon";
+
+const formatToGmt7 = (dateStr: string) => {
+  if (!dateStr) return "";
+  try {
+    const normalizedStr =
+      dateStr.endsWith("Z") || dateStr.includes("+") || dateStr.includes("-")
+        ? dateStr
+        : dateStr + "Z";
+    const d = new Date(normalizedStr);
+    if (isNaN(d.getTime())) return dateStr;
+    return (
+      d.toLocaleString("en-GB", {
+        timeZone: "Asia/Bangkok",
+        hour12: false,
+      }) + " (GMT+7)"
+    );
+  } catch (e) {
+    return dateStr;
+  }
+};
 
 export const ExecutionPlanPanel: React.FC<{
   executionPlan: any;
+  runId: string;
   onApprove: () => void;
   isApproving: boolean;
-}> = ({ executionPlan, onApprove, isApproving }) => {
+}> = ({ executionPlan, runId, onApprove, isApproving }) => {
   const metadata = executionPlan.metadata || {};
   const assumptions = executionPlan.assumptions || [];
   const globalConstraints = executionPlan.global_constraints || {};
@@ -16,13 +36,10 @@ export const ExecutionPlanPanel: React.FC<{
     <div className="mb-8 rounded-2xl border-2 border-indigo-400/40 bg-indigo-50 shadow-lg overflow-hidden text-left animate-fadeIn">
       <div className="bg-indigo-600 px-6 py-4">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center">
-            <TextIcon className="w-5 h-5 text-white">|||</TextIcon>
-          </div>
           <div>
             <h3 className="text-lg font-bold text-white">Execution Plan</h3>
             <p className="text-white/80 text-sm">
-              Generated cleaning DAG and worker strategies
+              Generated strategies
             </p>
           </div>
         </div>
@@ -41,12 +58,18 @@ export const ExecutionPlanPanel: React.FC<{
               </code>
             </div>
             <div>
+              <span className="text-muted-foreground">Run ID:</span>{" "}
+              <code className="bg-muted px-1.5 py-0.5 rounded font-mono">
+                {runId}
+              </code>
+            </div>
+            <div>
               <span className="text-muted-foreground">Version:</span>{" "}
               {metadata.plan_version}
             </div>
             <div>
               <span className="text-muted-foreground">Created At:</span>{" "}
-              {metadata.created_at}
+              {formatToGmt7(metadata.created_at)}
             </div>
           </div>
           <div className="rounded-xl border bg-white p-4 shadow-sm text-xs space-y-2">
@@ -188,29 +211,54 @@ export const ExecutionPlanPanel: React.FC<{
                             Strategy Configuration
                           </span>
                           {task.task_id === "deduplication" && (
-                            <div className="space-y-1">
-                              <div>Tier level: {task.strategy.tier}</div>
-                              <div>
-                                Primary keys:{" "}
-                                {task.strategy.primary_keys?.join(", ")}
-                              </div>
-                              {task.strategy.fuzzy_columns &&
-                                Object.keys(task.strategy.fuzzy_columns)
-                                  .length > 0 && (
+                            <div className="space-y-2 text-xs">
+                              {task.strategy?.dedup_scope && (
+                                <div>
+                                  <span className="text-muted-foreground font-semibold">Dedup Scope:</span>{" "}
+                                  <span className="font-mono text-foreground">{task.strategy.dedup_scope}</span>
+                                </div>
+                              )}
+                              {task.strategy?.primary_keys?.length > 0 && (
+                                <div>
+                                  <span className="text-muted-foreground font-semibold">Primary Keys:</span>{" "}
+                                  <span className="font-mono text-foreground">
+                                    {task.strategy.primary_keys.join(", ")}
+                                  </span>
+                                </div>
+                              )}
+                              {task.strategy?.exact_match?.enabled && (
+                                <div>
+                                  <span className="text-muted-foreground font-semibold">Exact Match:</span>{" "}
+                                  <span className="text-foreground">Enabled (keep: {task.strategy.exact_match.keep || "first"})</span>
+                                </div>
+                              )}
+                              {task.strategy?.fuzzy_matching?.enabled && (
+                                <div className="mt-2 p-2.5 rounded-lg border bg-white shadow-sm space-y-1">
+                                  <span className="font-bold text-slate-700 block text-[11px] uppercase tracking-wider">
+                                    Fuzzy Matching Strategy
+                                  </span>
                                   <div>
-                                    Fuzzy matching:
-                                    <ul className="list-disc pl-4 mt-0.5">
-                                      {Object.entries(
-                                        task.strategy.fuzzy_columns,
-                                      ).map(([col, cfg]: [string, any]) => (
-                                        <li key={col}>
-                                          {col}: {cfg.method} (threshold{" "}
-                                          {cfg.threshold})
-                                        </li>
-                                      ))}
-                                    </ul>
+                                    <span className="text-muted-foreground">Method:</span>{" "}
+                                    <span className="font-semibold">{task.strategy.fuzzy_matching.method || "minhash_lsh"}</span>
                                   </div>
-                                )}
+                                  <div>
+                                    <span className="text-muted-foreground">Threshold:</span>{" "}
+                                    <span className="font-mono font-semibold">{task.strategy.fuzzy_matching.threshold}</span>
+                                  </div>
+                                  {task.strategy.fuzzy_matching.blocking_columns?.length > 0 && (
+                                    <div>
+                                      <span className="text-muted-foreground">Blocking Columns:</span>{" "}
+                                      <span className="font-mono">{task.strategy.fuzzy_matching.blocking_columns.join(", ")}</span>
+                                    </div>
+                                  )}
+                                  {task.strategy.fuzzy_matching.match_columns?.length > 0 && (
+                                    <div>
+                                      <span className="text-muted-foreground">Match Columns:</span>{" "}
+                                      <span className="font-mono">{task.strategy.fuzzy_matching.match_columns.join(", ")}</span>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
                             </div>
                           )}
                           {task.task_id === "null_handling" &&
@@ -269,14 +317,19 @@ export const ExecutionPlanPanel: React.FC<{
                           </span>
                           <div className="flex flex-wrap gap-1.5">
                             {task.verification.pandera_checks.map(
-                              (rule: string, ri: number) => (
-                                <span
-                                  key={ri}
-                                  className="px-2 py-0.5 bg-emerald-50 border border-emerald-100 rounded-md text-[10px] font-mono text-emerald-700"
-                                >
-                                  {rule}
-                                </span>
-                              ),
+                              (rule: any, ri: number) => {
+                                const label = typeof rule === "object" && rule !== null
+                                  ? (rule.column ? `${rule.column} (${rule.type})` : rule.type)
+                                  : String(rule);
+                                return (
+                                  <span
+                                    key={ri}
+                                    className="px-2 py-0.5 bg-emerald-50 border border-emerald-100 rounded-md text-[10px] font-mono text-emerald-700"
+                                  >
+                                    {label}
+                                  </span>
+                                );
+                              },
                             )}
                           </div>
                         </div>
@@ -303,7 +356,6 @@ export const ExecutionPlanPanel: React.FC<{
               </>
             ) : (
               <>
-                <TextIcon>OK</TextIcon>
                 Approve & Execute Cleaning
               </>
             )}

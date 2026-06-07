@@ -84,7 +84,7 @@ export const pipelineApi = {
     const hasErrors = data.errors && data.errors.length > 0;
     const valResult = data.input_validation_result;
     const isValidationClarification = valResult?.status === 'needs_clarification';
-    const awaiting_hitl = hasUnansweredClarifications(valResult);
+    const awaiting_hitl = hasUnansweredClarifications(valResult) || (data.next_node && data.next_node.includes('report_agent'));
     const isResolvingClarification =
       isValidationClarification &&
       hasAnsweredClarifications(valResult) &&
@@ -191,16 +191,51 @@ export const pipelineApi = {
         payload: valResult,
       };
     }
+
+    // Second HITL: validation review when interrupted before report_agent
+    if (state.next_node && state.next_node.includes('report_agent')) {
+      const issues = state.validation_results?.flatMap((item: any) => 
+        (item.failed_rules || []).map((rule: string) => ({
+          severity: 'error',
+          column: item.task_id || 'validation',
+          issue_type: 'Validation Failure',
+          description: `Rule '${rule}' failed validation on agent '${item.agent}'`,
+          affected_rows: item.metrics_observed?.failed_count || 0
+        }))
+      ) || [];
+
+      const passed = state.validation_results?.every((item: any) => item.passed) ?? true;
+
+      return {
+        checkpoint_id: runId + '_review',
+        checkpoint_type: 'validation_review',
+        message_to_user: 'Please review the execution outcomes and remaining data quality metrics below before accepting the finalized clean dataset.',
+        payload: {
+          issues,
+          validation_result: {
+            passed,
+            issues
+          },
+          worker_states: state.worker_states
+        }
+      };
+    }
+
     return null;
   },
 
   submitDecision: async (runId: string, data: HITLDecisionRequest): Promise<{ message: string }> => {
     // Call the backend resolve API if we are submitting clarification answers
-    if (data.decision === 'approve' && data.disambiguation_answers) {
-      const response = await apiClient.post<{ message: string }>(`/pipeline/${runId}/resolve`, {
-        answers: data.disambiguation_answers,
-      });
-      return response.data;
+    if (data.decision === 'approve') {
+      if (data.disambiguation_answers) {
+        const response = await apiClient.post<{ message: string }>(`/pipeline/${runId}/resolve`, {
+          answers: data.disambiguation_answers,
+        });
+        return response.data;
+      } else {
+        // Approve final validation results and resume pipeline to report_agent / end
+        return pipelineApi.approvePlan(runId);
+      }
     }
 
     return { message: 'Decision submitted successfully' };

@@ -375,6 +375,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
               {displayHitl ? (
                 <HITLCheckpointPanel
                   checkpoint={activeCheckpoint}
+                  pipelineState={state}
                   userRequirementsText={state?.user_requirements?.raw_text}
                   feedback={feedback}
                   onFeedbackChange={setFeedback}
@@ -395,6 +396,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
               ) : showExecutionPlan && state?.execution_plan ? (
                 <ExecutionPlanPanel
                   executionPlan={state.execution_plan}
+                  runId={runId}
                   onApprove={() => approvePlanMutation.mutate()}
                   isApproving={isApprovingPlan || approvePlanMutation.isPending}
                 />
