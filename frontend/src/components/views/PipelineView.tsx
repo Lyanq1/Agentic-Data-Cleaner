@@ -7,7 +7,7 @@ import {
   ResolvedValidationPlanPanel,
   ExecutionPlanPanel,
   ValidationResolutionPendingPanel,
-} from "./PipelineHitlPanel";
+} from "./PipelinePanel";
 import { RequirementSummaryPanel } from "./RequirementSummaryPanel";
 
 interface PipelineViewProps {
