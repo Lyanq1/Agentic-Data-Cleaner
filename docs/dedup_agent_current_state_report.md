@@ -106,7 +106,42 @@ Why this field is needed:
 - it does not describe what dedup logic was applied
 - dedup metrics need a stable home in state
 
-### 3. `task_list` audit
+### 3. `ExecutionPlan` schema change
+
+The plan schema is now richer than before.
+
+Current typed shape:
+
+```python
+class ExecutionPlan(BaseModel):
+    metadata: PlanMetadata
+    plan_summary: str
+    assumptions: List[str]
+    global_constraints: GlobalConstraints
+    task_list: List[TaskDetailWrapper]
+```
+
+Important change:
+
+- `task_list` is no longer `List[TaskDetail]`
+- it is now `List[TaskDetailWrapper]`
+- each item holds the real task under `work_order`
+
+Example:
+
+```python
+task_wrapper.work_order.task_id
+task_wrapper.work_order.columns
+```
+
+This affects dedup integration in two places:
+
+- planner-task extraction inside the dedup agent
+- debug injection of a temporary dedup task into `execution_plan`
+
+The current dedup code was updated to use the wrapped form.
+
+### 4. `task_list` audit
 
 Current `GlobalState` also contains:
 
@@ -240,6 +275,10 @@ Why they are needed:
 - `get_pipeline_state()` returns the public view, not the raw checkpoint payload
 - the dedup worker needs the real saved state
 - the debug endpoint needs a safe place to inject requested key columns without changing the public state schema
+- the injected debug task must now respect the richer `ExecutionPlan` schema:
+  - `metadata`
+  - `global_constraints`
+  - `task_list: List[TaskDetailWrapper]`
 
 ## Current Dedup Agent Behavior
 
