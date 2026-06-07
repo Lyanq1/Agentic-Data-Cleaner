@@ -203,14 +203,14 @@ def _inject_dedup_key_columns(state: GlobalState, key_columns: list[str]) -> Glo
 
 async def run_dedup_agent_for_run(
     run_id: str,
-    key_columns: list[str] | None = None,
+    debug_override_key_columns: list[str] | None = None,
 ) -> dict[str, Any] | None:
     """Load a checkpointed state by run_id and execute the dedup agent directly."""
     raw_state = await get_pipeline_raw_state(run_id)
     if raw_state is None:
         return None
 
-    requested_key_columns = key_columns or []
+    requested_key_columns = debug_override_key_columns or []
     dataset_schema = raw_state.get("dataset_schema") or {}
     missing_columns = [
         column for column in requested_key_columns if dataset_schema and column not in dataset_schema
@@ -230,6 +230,5 @@ async def run_dedup_agent_for_run(
     persisted_state = await get_pipeline_state(run_id)
     return {
         "run_id": run_id,
-        "requested_key_columns": requested_key_columns,
         "state": persisted_state,
     }

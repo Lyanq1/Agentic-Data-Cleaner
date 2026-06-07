@@ -2,7 +2,7 @@
 import logging
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from app.services.pipeline import run_dedup_agent_for_run
 
@@ -14,7 +14,6 @@ class DedupRunRequest(BaseModel):
     """Request body for direct dedup agent execution."""
 
     run_id: str
-    key_columns: list[str] = Field(default_factory=list)
 
 
 @router.post("/dedup/run", summary="Run the deduplication agent for an existing pipeline run")
@@ -23,7 +22,6 @@ async def api_run_dedup(request: DedupRunRequest):
     try:
         result = await run_dedup_agent_for_run(
             run_id=request.run_id,
-            key_columns=request.key_columns,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
