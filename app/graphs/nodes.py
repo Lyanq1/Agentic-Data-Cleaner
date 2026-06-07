@@ -6,6 +6,7 @@ from typing import Any, Literal, cast
 
 from app.agents.deduplication.agent import DeduplicationAgent
 from app.agents.input_validator.agent import InputValidatorAgent
+from app.agents.null_agent.agent import NullAgent
 from app.agents.semantic_analyzer.profiler_agent import SemanticProfilerAgent
 from app.graphs.states.global_state import GlobalState, StatisticalProfile, ValidationResultItem
 from app.services.lineage_service import LineageService
@@ -108,11 +109,18 @@ async def dedup_agent_node(state: GlobalState) -> dict[str, Any]:
     }
 
 
-# Null Handling Worker stub node
+# Null Handling Worker node
 async def null_agent_node(state: GlobalState) -> dict[str, Any]:
-    """Skeletal Null Handling Worker."""
-    logger.info("null_agent_node: Imputing missing values in dataset...")
-    return _persist_passthrough_worker_version(state, "null_agent", "null_handling")
+    """Run the Null Agent: drops rows with null in non-nullable columns (drop_row strategy)."""
+    logger.info("null_agent_node: Processing missing values in dataset...")
+    agent = NullAgent()
+    result = await agent.run(state)
+
+    return {
+        **result,
+        "current_step": "null_handling",
+        "completed_steps": "null_handling",
+    }
 
 
 # Type Casting Worker stub node

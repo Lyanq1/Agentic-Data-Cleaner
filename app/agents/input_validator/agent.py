@@ -11,7 +11,9 @@ from app.graphs.states.global_state import (
     InputValidationResult as ValidationResult,
     StrategyQuestion,
     NullClarifications,
+    AllowMissingConfirmationQuestion,
     ClarificationIssues,
+    SemanticProfile,
     GlobalState,
 )
 
@@ -121,8 +123,15 @@ class InputValidatorAgent(BaseAgent):
                 "Do NOT set status to 'needs_clarification'. You must set status to 'ready'. "
                 "Make sure to populate the 'action_plan' dictionary with the cleaning plans for 'null', 'duplicate', and 'typecast'. "
                 "Populate 'resolved_by_user' list with the resolved issue/column descriptions. "
-                "Also, keep the exact same 'clarifications' structure but fill in the 'answer' field of each question with the user's actual selected answer."
+                "Also, keep the exact same 'clarifications' structure but fill in the 'answer' field of each question with the user's actual selected answer. "
+                "CRITICAL for Q4_allow_missing_confirmation: populate its 'answer' field as a JSON object (dict) mapping "
+                "EVERY column name in the dataset to a boolean (true/false) reflecting the user's confirmed allow_missing decision. "
+                "Example: {\"TITLE\": false, \"CONTRIBUTORS\": true, \"BARCODE\": false, ...}. "
+                "If the user agreed with the AI's suggestion, preserve the original allow_missing values from the Semantic Profile. "
+                "If the user corrected any column, apply their correction. "
+                "Do NOT leave Q4_allow_missing_confirmation.answer as null."
             )))
+
 
         logger.info("InputValidatorAgent: invoking LLM for structured dataset validation...")
         
@@ -183,12 +192,78 @@ class InputValidatorAgent(BaseAgent):
         json_data = response.model_dump()
         final_message = json.dumps(json_data, ensure_ascii=False, indent=2)
 
+        # ------------------------------------------------------------------
+        # Apply Q4 allow_missing overrides to semantic_profile
+        # When user has confirmed/corrected which columns can be null,
+        # patch semantic_profile.columns[col].allow_missing with the answer.
+        # ------------------------------------------------------------------
+        semantic_profile_update: SemanticProfile | None = None
+        if is_answered:
+            semantic_profile_update = self._apply_allow_missing_overrides(
+                state.get("semantic_profile"), response
+            )
+
         # Update state based on decision
         next_node = "planner" if response.status == "ready" else "end"
         updates: dict[str, Any] = {
             "messages": [AIMessage(content=final_message, name=self.name)],
             "input_validation_result": json_data,
-            "next_node": next_node 
+            "next_node": next_node,
         }
+        if semantic_profile_update is not None:
+            updates["semantic_profile"] = semantic_profile_update
+            logger.info(
+                "InputValidatorAgent: semantic_profile.allow_missing updated from Q4 user answer."
+            )
 
         return updates
+
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _apply_allow_missing_overrides(
+        raw_semantic_profile: Any,
+        validation_result: "ValidationResult",  # noqa: F821
+    ) -> "SemanticProfile | None":  # noqa: F821
+        """Patch semantic_profile.columns[col].allow_missing from Q4 user answer.
+
+        Returns the updated SemanticProfile, or None if there is nothing to patch.
+        """
+        if raw_semantic_profile is None:
+            return None
+
+        # Coerce to SemanticProfile
+        try:
+            if hasattr(raw_semantic_profile, "model_dump"):
+                profile = SemanticProfile.model_validate(raw_semantic_profile.model_dump())
+            elif isinstance(raw_semantic_profile, dict):
+                profile = SemanticProfile.model_validate(raw_semantic_profile)
+            else:
+                return None
+        except Exception:
+            return None
+
+        # Locate Q4 answer inside clarifications.null
+        clarifications = validation_result.clarifications
+        if clarifications is None or clarifications.null is None:
+            return None
+
+        q4 = clarifications.null.Q4_allow_missing_confirmation
+        if q4 is None or q4.answer is None:
+            return None
+
+        # q4.answer is dict[str, bool]: {"TITLE": False, "CONTRIBUTORS": True, ...}
+        patched = False
+        for col_name, new_value in q4.answer.items():
+            if col_name in profile.columns:
+                profile.columns[col_name].allow_missing = bool(new_value)
+                logger.info(
+                    "InputValidatorAgent: %s.allow_missing overridden to %s by user.",
+                    col_name,
+                    new_value,
+                )
+                patched = True
+
+        return profile if patched else None

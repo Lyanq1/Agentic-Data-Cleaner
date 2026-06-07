@@ -69,10 +69,33 @@ class InsightQuestion(BaseModel):
     )
 
 
+class AllowMissingConfirmationQuestion(BaseModel):
+    """Question that lists allow_missing=True and allow_missing=False columns for user confirmation."""
+
+    question: str = Field(description="The confirmation question text.")
+    allow_missing_columns: list[str] = Field(
+        default_factory=list,
+        description="Columns the semantic profiler considers nullable (allow_missing=True).",
+    )
+    not_allow_missing_columns: list[str] = Field(
+        default_factory=list,
+        description="Columns the semantic profiler considers non-nullable (allow_missing=False).",
+    )
+    answer: dict[str, bool] | None = Field(
+        default=None,
+        description=(
+            "User-confirmed allow_missing value per column. "
+            "Mapping of column_name → true/false after user review. "
+            "None while unanswered."
+        ),
+    )
+
+
 class NullClarifications(BaseModel):
     Q1_strategy: StrategyQuestion | None = None
     Q2_semantic_insight: InsightQuestion | None = None
     Q3_semantic_insight: InsightQuestion | None = None
+    Q4_allow_missing_confirmation: AllowMissingConfirmationQuestion | None = None
 
 
 class DuplicateClarifications(BaseModel):
@@ -165,7 +188,7 @@ class TypeStrategy(BaseModel):
 
 class ClarificationRequirement(BaseModel):
     question: str
-    user_answer: str
+    user_answer: Any
 
 
 class ColumnTaskContext(BaseModel):

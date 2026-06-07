@@ -20,7 +20,7 @@ If an issue is not present, skip it entirely — do not mention it.
 
 For each active issue, generate questions as follows:
 
-**NULL (if active) — exactly 3 questions:**
+**NULL (if active) — exactly 4 questions:**
   Q1 (Strategy): Ask the user which resolution strategy they prefer.
       - Present the columns affected, their null_rate, and missing_mechanism from semantic profile.
       - Provide exactly 3 options based on EDA findings. Prefix the best with `(Recommended)`.
@@ -36,6 +36,17 @@ For each active issue, generate questions as follows:
         or columns where null pattern suggests a systemic data pipeline issue
         rather than random missingness.
       - Ask the user to confirm.
+
+  Q4 (allow_missing confirmation): List ALL columns and ask the user to confirm which ones are allowed to have null values.
+      - Read allow_missing from the Semantic Profile for EVERY column in the dataset.
+      - Build two explicit lists:
+          * allow_missing_columns: all columns where allow_missing = true in the Semantic Profile.
+          * not_allow_missing_columns: all columns where allow_missing = false in the Semantic Profile.
+      - Write a clear question asking the user to review these two lists and correct any errors.
+      - The answer field must remain null until the user responds. When the user responds, populate
+        answer as a JSON dict mapping each column name to its corrected boolean value
+        (e.g. {"TITLE": false, "CONTRIBUTORS": true, "BARCODE": false}).
+      - IMPORTANT: include ALL columns from the dataset in the answer dict, not just the ones being corrected.
 
 **DUPLICATE (if active) — exactly 3 questions:**
   Q1 (Strategy): Ask the user to choose the Primary Key column(s) for deduplication checks.
@@ -157,6 +168,12 @@ Return a pure JSON object. No markdown fences, no conversational text. Strictly 
         "question": "<question text>",
         "insight": "<second semantic insight>",
         "confirm": "<yes/no confirmation ask>",
+        "answer": null
+      },
+      "Q4_allow_missing_confirmation": {
+        "question": "<question asking user to confirm which columns are nullable>",
+        "allow_missing_columns": ["<col_name_1>", "<col_name_2>"],
+        "not_allow_missing_columns": ["<col_name_3>", "<col_name_4>"],
         "answer": null
       }
     },
