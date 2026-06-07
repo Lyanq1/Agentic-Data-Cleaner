@@ -25,7 +25,7 @@ class ValidatorAgent(BaseAgent):
 
     def __init__(self) -> None:
         super().__init__()
-        self.json_llm = create_llm().bind(response_format={"type": "json_object"})
+        self.json_llm = create_llm()
 
     async def run(self, state: GlobalState) -> dict[str, Any]:
         logger.info("ValidatorAgent: Starting output validation...")
