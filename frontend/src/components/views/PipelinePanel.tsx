@@ -7,3 +7,4 @@ export { InputValidationClarificationContent } from "./pipelinepanel/InputValida
 export { SpinnerIcon } from "./pipelinepanel/SpinnerIcon";
 export { TextIcon } from "./pipelinepanel/TextIcon";
 export { StepFooter } from "./pipelinepanel/StepFooter";
+export { ValidationReviewPanel } from "./pipelinepanel/ValidationReviewPanel";
