@@ -288,20 +288,20 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
   return (
     <div className="w-full h-full flex flex-col flex-1 min-h-0 text-left">
       {/* Header */}
-      <div className="flex-none flex flex-wrap items-center justify-between mb-4 gap-4 bg-card px-4 py-3 border rounded-xl shadow-sm">
-        <div>
+      <div className="flex-none flex flex-col gap-3 bg-card px-3 py-3 border rounded-xl shadow-sm sm:px-4 md:flex-row md:items-center md:justify-between mb-4">
+        <div className="min-w-0">
           <h2 className="text-xl font-bold tracking-tight">
             Pipeline Processing
           </h2>
-          <p className="text-xs text-muted-foreground mt-0.5">
+          <p className="text-xs text-muted-foreground mt-0.5 min-w-0">
             Run ID:{" "}
-            <code className="bg-muted px-1.5 py-0.5 rounded font-mono">
+            <code className="inline-block max-w-full bg-muted px-1.5 py-0.5 rounded font-mono align-bottom truncate">
               {runId}
             </code>
           </p>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center gap-3 sm:gap-4">
           <div className="flex items-center gap-1 border bg-muted/30 p-1 rounded-lg">
             <button
               onClick={() => setShowHitl(!showHitl)}
@@ -365,11 +365,11 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
       )}
 
       {/* Split View Container */}
-      <div className="flex-1 min-h-0 flex gap-6 overflow-hidden">
+      <div className="flex-1 min-h-0 flex flex-col lg:flex-row gap-4 lg:gap-6 overflow-y-auto lg:overflow-hidden custom-scrollbar">
         {/* Left Column: HITL Review Panel or Action Plan Summary */}
         {showLeftPanel && (
           <div
-            className={`flex flex-col min-h-0 min-w-0 transition-all duration-300 ${displayLogs ? "w-1/2" : "w-full"}`}
+            className={`flex flex-col min-h-0 min-w-0 transition-all duration-300 ${displayLogs ? "lg:w-1/2" : "w-full"} ${displayLogs ? "min-h-[320px] lg:min-h-0" : ""} lg:flex-1`}
           >
             <div className="flex-1 min-h-0 overflow-y-auto pr-2 pb-4 custom-scrollbar">
               {displayHitl ? (
@@ -423,7 +423,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
         {/* Right Column: Execution Logs */}
         {displayLogs && (
           <div
-            className={`flex flex-col min-h-0 min-w-0 transition-all duration-300 ${showLeftPanel ? "w-1/2" : "w-full"}`}
+            className={`flex flex-col min-h-0 min-w-0 transition-all duration-300 ${showLeftPanel ? "lg:w-1/2" : "w-full"} ${showLeftPanel ? "min-h-[320px] lg:min-h-0" : ""} lg:flex-1`}
           >
             <div className="flex-1 bg-card border rounded-xl shadow-sm flex flex-col min-h-[300px] overflow-hidden">
               <div className="border-b px-4 py-3 bg-muted/30 flex justify-between items-center flex-none">
