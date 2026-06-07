@@ -8,11 +8,11 @@ from app.agents.deduplication.agent import DeduplicationAgent
 from app.agents.input_validator.agent import InputValidatorAgent
 from app.agents.null_agent.agent import NullAgent
 from app.agents.semantic_analyzer.profiler_agent import SemanticProfilerAgent
-from app.graphs.states.global_state import GlobalState, StatisticalProfile, ValidationResultItem
-from app.services.lineage_service import LineageService
-from app.services.lineage_utils import resolve_lineage_session_id
+from app.graphs.states.global_state import GlobalState
+from app.graphs.states.output_validation import ValidationResultItem
 from app.tools.data.eda import perform_eda
-from app.agents.result_validators.runner import _resolve_active_task
+from app.graphs.utils import _resolve_active_task
+from app.graphs.states.profiler_state import StatisticalProfile
 
 logger = logging.getLogger(__name__)
 
@@ -142,7 +142,7 @@ def _persist_passthrough_worker_version(
     """
     import uuid
     from pathlib import Path
-    from app.agents.result_validators.runner import _load_latest_dataframe, _resolve_active_task
+    from app.graphs.utils import _load_latest_dataframe, _resolve_active_task
     
     base_update: dict[str, Any] = {
         "current_step": step_name,
@@ -201,7 +201,7 @@ async def validator_node(state: GlobalState) -> dict[str, Any]:
         return {"global_errors": "ValidatorAgent failed to execute."}
         
     validator_result = result.get("validator_agent_result")
-    df_validated = result.get("df_validated")
+    df_validated_path = result.get("df_validated_path")
     
     passed = validator_result.passed if validator_result else False
     
@@ -211,11 +211,11 @@ async def validator_node(state: GlobalState) -> dict[str, Any]:
         # Persist to LineageService since it passed
         session_id = resolve_lineage_session_id(state)
         new_version_str = state.get("current_dataset_version")
-        if session_id and df_validated is not None:
+        if session_id and df_validated_path is not None:
             try:
-                new_version = LineageService.append_new_version(
+                new_version = LineageService.append_new_version_from_file(
                     session_id=session_id,
-                    df=df_validated,
+                    file_path=df_validated_path,
                     agent_name=agent_name,
                     description=f"Output from {task_id} approved by ValidatorAgent."
                 )

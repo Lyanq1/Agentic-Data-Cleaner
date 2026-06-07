@@ -9,26 +9,11 @@ from app.agents.base import BaseAgent
 from app.graphs.states.global_state import GlobalState
 from app.agents.result_validators.models import ValidatorOutput
 from app.tools.data.quality_control.tool import perform_data_quality_check
-from app.agents.result_validators.runner import _resolve_active_task
+from app.graphs.utils import _resolve_active_task
+from app.agents.result_validators.prompts import SYSTEM_PROMPT
+from app.tools.data.quality_control.validator import run_pandas_validation
 
 logger = logging.getLogger(__name__)
-
-SYSTEM_PROMPT = """You are the Output Validator Agent in a data cleaning pipeline.
-Your job is to evaluate the quality of the dataset after a worker agent has processed it.
-
-You MUST use the `perform_data_quality_check` tool on the provided `file_path` to get the Data Quality Control (QC) Report.
-
-Your workflow (ReAct & Scoring):
-1. THINK: Analyze the context and call the `perform_data_quality_check` tool to observe the dataset.
-2. OBSERVE: Read the QC report returned by the tool. Check for nulls, duplicates, disguised nulls, etc.
-3. SCORE & REFINE: Calculate a `quality_score` from 0 to 100.
-    - Start at 100.
-    - Deduct points for issues (e.g. -20 for high nulls, -30 for duplicates, -10 for disguised nulls).
-    - If score >= 80, it is PASS. If < 80, it is FAIL.
-4. OUTPUT: Provide the structured ValidatorOutput.
-
-Be strict but fair.
-"""
 
 class ValidatorAgent(BaseAgent):
     """Output Validator Agent that evaluates data quality using ReAct LLM loop."""
@@ -43,29 +28,42 @@ class ValidatorAgent(BaseAgent):
         self.structured_llm = create_llm().with_structured_output(ValidatorOutput)
 
     async def run(self, state: GlobalState) -> Dict[str, Any]:
-        logger.info("ValidatorAgent: Starting output validation via ReAct...")
+        logger.info("ValidatorAgent: Starting output validation...")
         
         user_prompt = state.get("user_prompt", "")
         raw_req = state.get("raw_requirement_input", "")
         active_task = _resolve_active_task(state)
         task_plan_str = active_task.model_dump_json() if active_task else "No specific task plan."
         
-        # The worker saved the output to physical_dataframe_path
-        file_path = state.get("physical_dataframe_path")
+        # The worker saved the output to path_file_to_validate or physical_dataframe_path
+        file_path = state.get("path_file_to_validate") or state.get("physical_dataframe_path")
         if not file_path:
-            logger.error("ValidatorAgent: No physical_dataframe_path found to validate.")
+            logger.error("ValidatorAgent: No path_file_to_validate found to validate.")
             return {
                 "validator_agent_result": None,
-                "error": "No physical_dataframe_path found.",
+                "error": "No path_file_to_validate found.",
                 "success": False
             }
+            
+        # Resolve agent name
+        agent_name = getattr(active_task.agent, "value", str(active_task.agent)) if active_task else "Unknown Agent"
+        
+        # Run deterministic pandas validation
+        validation_result_str = run_pandas_validation(
+            file_path=file_path,
+            task=active_task,
+            semantic_profile=state.get("semantic_profile")
+        )
             
         human_content = (
             f"--- USER PROMPT ---\n{user_prompt}\n\n"
             f"--- CLARIFICATIONS ---\n{raw_req}\n\n"
             f"--- TASK PLAN ---\n{task_plan_str}\n\n"
+            f"--- AGENT NAME ---\n{agent_name}\n\n"
+            f"--- DETERMINISTIC VALIDATION RESULT ---\n{validation_result_str}\n\n"
             f"The dataset is located at: {file_path}\n"
-            "Please call `perform_data_quality_check` on this file_path, then provide your structured output."
+            "You may call `perform_data_quality_check` on this file_path if you need to observe the full profiling state, then provide your structured output. "
+            "Remember to ONLY penalize the data for issues that were within the scope of the Agent Name listed above."
         )
         
         messages: list[Any] = [
@@ -92,15 +90,9 @@ class ValidatorAgent(BaseAgent):
             # 3. Second LLM call: generate structured output based on observation
             output: ValidatorOutput = await self.structured_llm.ainvoke(messages)
             
-            # Note: We don't have df loaded in memory here, so we leave df_validated as None or load it if needed.
-            # But the validator_node in app/graphs/nodes.py expects df_validated to push to LineageService.
-            # So we load it here.
-            import pandas as pd
-            df_validated = pd.read_parquet(file_path) if str(file_path).endswith('.parquet') else pd.read_csv(file_path)
-
             return {
                 "validator_agent_result": output,
-                "df_validated": df_validated,
+                "df_validated_path": file_path,
                 "success": True
             }
         except Exception as exc:

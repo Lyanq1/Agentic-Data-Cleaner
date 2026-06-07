@@ -23,11 +23,11 @@ from app.config.config import get_settings
 from app.graphs.states.global_state import (
     ExecutionPlan,
     GlobalState,
-    TaskDetail,
     ValidationResultItem,
-    WorkerStateDetail,
     WorkerStates,
 )
+from app.graphs.states.planning import TaskDetail
+from app.graphs.states.workers import WorkerStateDetail
 
 logger = logging.getLogger(__name__)
 

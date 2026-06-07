@@ -74,6 +74,66 @@ class LineageService:
             db.close()
             
     @staticmethod
+    def append_new_version_from_file(
+        session_id: uuid.UUID,
+        file_path: str,
+        agent_name: str,
+        description: str = ""
+    ) -> int:
+        """Appends a new version from a file path (CSV or Parquet) using chunks to prevent OOM."""
+        db: Session = SessionLocal()
+        try:
+            # 1. Determine the latest version
+            current_max_version = db.query(func.max(LineageVersion.version)).filter(
+                LineageVersion.session_id == session_id
+            ).scalar()
+            
+            new_version = (current_max_version or 0) + 1
+            
+            # 2. Create a new LineageVersion entry
+            db_version = LineageVersion(
+                session_id=session_id,
+                version=new_version,
+                agent_name=agent_name,
+                description=description
+            )
+            db.add(db_version)
+            db.flush()
+            
+            # 3. Read file in chunks to avoid OOM
+            import pandas as pd
+            if str(file_path).endswith('.parquet'):
+                import pyarrow.parquet as pq
+                parquet_file = pq.ParquetFile(file_path)
+                row_idx = 0
+                for batch in parquet_file.iter_batches(batch_size=10000):
+                    df_chunk = batch.to_pandas()
+                    records_dict = [
+                        {"session_id": session_id, "version": new_version, "data": {k: _json_safe_value(v) for k, v in row.items()}, "row_index": i}
+                        for i, row in enumerate(df_chunk.to_dict(orient="records"), start=row_idx)
+                    ]
+                    db.bulk_insert_mappings(DatasetRecord, records_dict)
+                    row_idx += len(df_chunk)
+            else:
+                chunk_iterator = pd.read_csv(file_path, chunksize=10000)
+                row_idx = 0
+                for df_chunk in chunk_iterator:
+                    records_dict = [
+                        {"session_id": session_id, "version": new_version, "data": {k: _json_safe_value(v) for k, v in row.items()}, "row_index": i}
+                        for i, row in enumerate(df_chunk.to_dict(orient="records"), start=row_idx)
+                    ]
+                    db.bulk_insert_mappings(DatasetRecord, records_dict)
+                    row_idx += len(df_chunk)
+            
+            db.commit()
+            return new_version
+        except Exception as e:
+            db.rollback()
+            raise e
+        finally:
+            db.close()
+
+    @staticmethod
     def get_latest_version(session_id: uuid.UUID) -> pd.DataFrame:
         """Retrieves the latest version of the dataset as a Pandas DataFrame."""
         db: Session = SessionLocal()

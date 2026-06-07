@@ -7,21 +7,17 @@ from langchain_core.messages import AIMessage, SystemMessage, HumanMessage
 
 from app.agents.base import BaseAgent
 from app.agents.input_validator.prompts import INPUT_VALIDATOR_SYSTEM_PROMPT
-from app.graphs.states.global_state import (
-    InputValidationResult as ValidationResult,
-    StrategyQuestion,
+from app.graphs.states.global_state import GlobalState
+from app.graphs.states.input_validation import (
+    InputValidationResult,
     NullClarifications,
-    AllowMissingConfirmationQuestion,
+    StrategyQuestion,
     ClarificationIssues,
-    SemanticProfile,
-    GlobalState,
 )
+from app.graphs.states.profiles import SemanticProfile
+
 
 logger = logging.getLogger(__name__)
-
-
-
-
 
 class InputValidatorAgent(BaseAgent):
     """Analyzes the statistical EDA profile of a dataset via the LLM.
@@ -106,7 +102,7 @@ class InputValidatorAgent(BaseAgent):
                 for cat in ["null", "duplicate", "typecast"]:
                     cat_data = clar_dict.get(cat) if clar_dict else None
                     if cat_data:
-                        for q_key, q in cat_data.items():
+                        for _, q in cat_data.items():
                             if q:
                                 has_questions = True
                                 if q.get("answer") is None:
@@ -161,13 +157,13 @@ class InputValidatorAgent(BaseAgent):
             if start != -1 and end != -1:
                 content_clean = content_clean[start:end+1]
                 
-            response = ValidationResult.model_validate_json(content_clean)
+            response = InputValidationResult.model_validate_json(content_clean)
         except Exception as e:
             logger.error(f"Failed to parse LLM JSON output: {e}")
             print(f"\n[DEBUG ERROR] JSON parsing / validation failed: {e}")
             print(f"[DEBUG ERROR] Cleaned Content received:\n{content_clean}\n")
             # Fallback to a safe error state
-            response = ValidationResult(
+            response = InputValidationResult(
                 status="needs_clarification",
                 reasoning=f"The system encountered an error parsing the LLM's JSON output. Error: {e}",
                 clarifications=ClarificationIssues(
@@ -225,7 +221,7 @@ class InputValidatorAgent(BaseAgent):
     @staticmethod
     def _apply_allow_missing_overrides(
         raw_semantic_profile: Any,
-        validation_result: "ValidationResult",  # noqa: F821
+        validation_result: InputValidationResult,
     ) -> "SemanticProfile | None":  # noqa: F821
         """Patch semantic_profile.columns[col].allow_missing from Q4 user answer.
 

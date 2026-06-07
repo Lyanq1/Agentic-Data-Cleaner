@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Database, Binary } from 'lucide-react';
+import { Database, Binary, Hash, Columns, Copy, Key, AlertTriangle, ListFilter } from 'lucide-react';
 
 interface StatisticalProfilePanelProps {
   profileData: any;
@@ -171,6 +171,128 @@ export const StatisticalProfilePanel: React.FC<StatisticalProfilePanelProps> = (
 
   return (
     <div className="space-y-4">
+      {/* Dataset Profile Overview */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="bg-card rounded-xl border border-slate-200 p-5 shadow-sm text-left flex items-center space-x-4">
+          <div className="p-3 rounded-lg bg-blue-50 text-blue-600">
+            <Hash className="h-6 w-6" />
+          </div>
+          <div>
+            <div className="text-2xl font-bold text-slate-800">
+              {profileData.total_rows?.toLocaleString() ?? 0}
+            </div>
+            <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+              Total Rows
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-card rounded-xl border border-slate-200 p-5 shadow-sm text-left flex items-center space-x-4">
+          <div className="p-3 rounded-lg bg-indigo-50 text-indigo-600">
+            <Columns className="h-6 w-6" />
+          </div>
+          <div>
+            <div className="text-2xl font-bold text-slate-800">
+              {profileData.total_columns ?? 0}
+            </div>
+            <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+              Total Columns
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-card rounded-xl border border-slate-200 p-5 shadow-sm text-left flex items-center space-x-4">
+          <div className={`p-3 rounded-lg ${(profileData.duplicate_rows ?? 0) > 0 ? 'bg-amber-50 text-amber-600' : 'bg-slate-50 text-slate-500'}`}>
+            <Copy className="h-6 w-6" />
+          </div>
+          <div>
+            <div className="text-2xl font-bold text-slate-800">
+              {profileData.duplicate_rows?.toLocaleString() ?? 0}
+            </div>
+            <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+              Duplicate Rows
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Dataset Structural Highlights */}
+      {((profileData.pk_candidates && profileData.pk_candidates.length > 0) ||
+        (profileData.near_unique_columns && profileData.near_unique_columns.length > 0) ||
+        (profileData.categorical_columns && profileData.categorical_columns.length > 0) ||
+        (profileData.high_null_columns && profileData.high_null_columns.length > 0)) && (
+        <div className="bg-card rounded-xl border border-slate-200 p-6 text-left shadow-sm space-y-4">
+          <h2 className="text-base font-bold text-slate-800 tracking-tight border-b border-slate-100 pb-2">
+            Dataset Structural Highlights
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+            {profileData.pk_candidates && profileData.pk_candidates.length > 0 && (
+              <div className="space-y-1.5 p-3 rounded-lg bg-slate-50/50 border border-slate-100">
+                <div className="flex items-center space-x-1.5 text-slate-700 font-semibold">
+                  <Key className="h-4 w-4 text-amber-500" />
+                  <span>Primary Key Candidates</span>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {profileData.pk_candidates.map((col: string, idx: number) => (
+                    <span key={idx} className="font-mono text-[10px] bg-amber-50 text-amber-800 border border-amber-200/50 px-1.5 py-0.5 rounded">
+                      {col}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {profileData.near_unique_columns && profileData.near_unique_columns.length > 0 && (
+              <div className="space-y-1.5 p-3 rounded-lg bg-slate-50/50 border border-slate-100">
+                <div className="flex items-center space-x-1.5 text-slate-700 font-semibold">
+                  <AlertTriangle className="h-4 w-4 text-amber-600" />
+                  <span>Near-Unique Columns (with duplicates)</span>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {profileData.near_unique_columns.map((col: string, idx: number) => (
+                    <span key={idx} className="font-mono text-[10px] bg-slate-100 text-slate-700 border border-slate-200/50 px-1.5 py-0.5 rounded">
+                      {col}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {profileData.categorical_columns && profileData.categorical_columns.length > 0 && (
+              <div className="space-y-1.5 p-3 rounded-lg bg-slate-50/50 border border-slate-100">
+                <div className="flex items-center space-x-1.5 text-slate-700 font-semibold">
+                  <ListFilter className="h-4 w-4 text-blue-500" />
+                  <span>Categorical Columns</span>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {profileData.categorical_columns.map((col: string, idx: number) => (
+                    <span key={idx} className="font-mono text-[10px] bg-blue-50 text-blue-800 border border-blue-200/50 px-1.5 py-0.5 rounded">
+                      {col}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {profileData.high_null_columns && profileData.high_null_columns.length > 0 && (
+              <div className="space-y-1.5 p-3 rounded-lg bg-slate-50/50 border border-slate-100">
+                <div className="flex items-center space-x-1.5 text-slate-700 font-semibold">
+                  <AlertTriangle className="h-4 w-4 text-red-500" />
+                  <span>High Null Columns (&gt; 50% missing)</span>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {profileData.high_null_columns.map((col: string, idx: number) => (
+                    <span key={idx} className="font-mono text-[10px] bg-red-50 text-red-800 border border-red-200/50 px-1.5 py-0.5 rounded">
+                      {col}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Dataset Semantic Context */}
       {semanticProfile && (
         <div className="bg-card rounded-xl border border-slate-200 overflow-hidden shadow-sm p-6 text-left space-y-4">
@@ -399,6 +521,40 @@ export const StatisticalProfilePanel: React.FC<StatisticalProfilePanelProps> = (
                 )}
               </div>
             </div>
+
+            {/* Sample Values & Detected Patterns */}
+            {((col.sample_values && col.sample_values.length > 0) || (col.detected_patterns && col.detected_patterns.length > 0)) && (
+              <div className="border-t border-slate-100 px-5 py-4 bg-slate-50/10 text-left space-y-3">
+                {col.detected_patterns && col.detected_patterns.length > 0 && (
+                  <div>
+                    <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
+                      Detected Patterns
+                    </h4>
+                    <div className="flex flex-wrap gap-1.5">
+                      {col.detected_patterns.map((pat: string, idx: number) => (
+                        <span key={idx} className="font-mono text-[11px] bg-indigo-50 text-indigo-700 border border-indigo-100 px-2 py-0.5 rounded">
+                          {pat}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {col.sample_values && col.sample_values.length > 0 && (
+                  <div>
+                    <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
+                      Representative Samples
+                    </h4>
+                    <div className="flex flex-wrap gap-1.5">
+                      {col.sample_values.map((val: any, idx: number) => (
+                        <span key={idx} className="font-mono text-[11px] bg-slate-100/65 text-slate-600 border border-slate-200 px-2 py-0.5 rounded max-w-xs truncate" title={val === null || val === undefined ? 'null' : String(val)}>
+                          {val === null || val === undefined ? <em className="text-slate-400 font-sans">null</em> : String(val)}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Semantic Profile Parallel Reason Table */}
             {(() => {

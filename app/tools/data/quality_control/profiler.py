@@ -16,6 +16,19 @@ class QualityProfiler:
         self.null_threshold = null_threshold
         self.string_pattern_threshold = string_pattern_threshold
 
+    def check_file(self, file_path: str | Path) -> QualityReport:
+        """Load a file (CSV, TSV, Parquet) and return a QualityReport."""
+        path = Path(file_path)
+        if not path.exists():
+            raise FileNotFoundError(f"File not found: {file_path}")
+            
+        if path.suffix.lower() == ".parquet":
+            df = pd.read_parquet(path)
+        else:
+            raise ValueError(f"Unsupported file format: {path.suffix}")
+            
+        return self.check_dataframe(df, source=str(path))
+
     def check_dataframe(self, df: pd.DataFrame, source: str = "<in-memory DataFrame>") -> QualityReport:
         """Profile an in-memory pandas DataFrame and return a QualityReport."""
         total_rows = len(df)
@@ -59,22 +72,6 @@ class QualityProfiler:
             columns_with_disguised_nulls=columns_with_disguised_nulls,
             constant_columns=constant_columns,
         )
-
-    def check_file(self, file_path: str | Path) -> QualityReport:
-        """Load a file (CSV, TSV, Parquet) and return a QualityReport."""
-        path = Path(file_path)
-        if not path.exists():
-            raise FileNotFoundError(f"File not found: {file_path}")
-            
-        if path.suffix.lower() == ".parquet":
-            df = pd.read_parquet(path)
-        elif path.suffix.lower() in {".csv", ".tsv"}:
-            sep = "\t" if path.suffix.lower() == ".tsv" else ","
-            df = pd.read_csv(path, sep=sep)
-        else:
-            raise ValueError(f"Unsupported file format: {path.suffix}")
-            
-        return self.check_dataframe(df, source=str(path))
 
     def _check_column(self, df: pd.DataFrame, col: str, total_rows: int) -> ColumnQuality:
         """Perform quality checks on a single column."""

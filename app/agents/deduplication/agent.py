@@ -14,16 +14,11 @@ from app.agents.base import BaseAgent
 from app.agents.registry import AgentRegistry
 from app.agents.roles import AgentRole
 from app.config.config import get_settings
-from app.graphs.states.global_state import (
-    DeduplicationResult,
-    ExecutionPlan,
-    GlobalState,
-    StatisticalProfile,
-    TaskDetail,
-    ValidationResultItem,
-    WorkerStateDetail,
-    WorkerStates,
-)
+from app.graphs.states.global_state import GlobalState
+from app.graphs.states.workers import DeduplicationResult, WorkerStateDetail, WorkerStates
+from app.graphs.states.planning import ExecutionPlan, TaskDetail
+from app.graphs.states.output_validation import ValidationResultItem
+from app.graphs.states.profiler_state import StatisticalProfile
 
 logger = logging.getLogger(__name__)
 

@@ -6,7 +6,9 @@ from typing import Any
 
 import pandas as pd
 
-from app.graphs.states.global_state import SemanticProfile, TaskDetail, ValidationCheck
+from app.graphs.states.profiles import SemanticProfile
+from app.graphs.states.planning import TaskDetail
+from app.graphs.states.output_validation import ValidationCheck
 
 
 class PandasValidationError(Exception):
@@ -114,3 +116,30 @@ def validate_dataframe(
                         
     if errors:
         raise PandasValidationErrors(errors)
+
+def run_pandas_validation(
+    file_path: str,
+    task: TaskDetail | None,
+    semantic_profile: SemanticProfile | None = None
+) -> str:
+    """Helper to run the validation on a file and return a string result."""
+    if not task:
+        return "No task detail provided; skipping pandas validation."
+        
+    try:
+        import pathlib
+        path = pathlib.Path(file_path)
+        if path.suffix.lower() in {".parquet", ".pq"}:
+            df = pd.read_parquet(path)
+        elif path.suffix.lower() in {".csv", ".txt"}:
+            df = pd.read_csv(path)
+        else:
+            return f"Unsupported file format for validation: {path.suffix}"
+            
+        validate_dataframe(df, task, semantic_profile)
+        return "SUCCESS: All Pandas validation rules for this task passed."
+    except PandasValidationErrors as e:
+        error_msgs = "\n".join([f"- {err.check}: {err.message}" for err in e.errors])
+        return f"FAILED: {len(e.errors)} rules failed.\n{error_msgs}"
+    except Exception as e:
+        return f"ERROR: Failed to run validation: {e}"

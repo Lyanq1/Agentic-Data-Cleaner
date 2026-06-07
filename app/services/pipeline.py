@@ -2,6 +2,7 @@
 import copy
 import uuid
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -9,7 +10,8 @@ from app.agents.deduplication.agent import DeduplicationAgent
 from app.agents.roles import AgentRole
 from app.graphs.graph import build_graph
 from app.graphs.checkpointer import get_checkpointer_manager
-from app.graphs.states.global_state import ExecutionPlan, TaskDetail, TaskDetailWrapper, PlanMetadata, GlobalConstraints, GlobalState
+from app.graphs.states.global_state import GlobalState
+from app.graphs.states.planning import ExecutionPlan, TaskDetail, TaskDetailWrapper, PlanMetadata, GlobalConstraints
 
 logger = logging.getLogger(__name__)
 
@@ -163,16 +165,16 @@ def _inject_dedup_key_columns(state: GlobalState, key_columns: list[str]) -> Glo
     else:
         plan = ExecutionPlan(
             metadata=PlanMetadata(
-                plan_id="debug",
+                plan_id=f"debug-dedup-{uuid.uuid4().hex[:12]}",
                 plan_version=1,
-                created_at="2026-06-06T00:00:00"
+                created_at=datetime.now(timezone.utc).isoformat(),
             ),
             global_constraints=GlobalConstraints(
                 max_retries_per_task=3,
-                preserve_columns=[]
+                preserve_columns=[],
             ),
             task_list=[],
-            plan_summary="Debug dedup execution plan."
+            plan_summary="Debug dedup execution plan.",
         )
 
     dedup_task = TaskDetail(
@@ -180,7 +182,7 @@ def _inject_dedup_key_columns(state: GlobalState, key_columns: list[str]) -> Glo
         agent=AgentRole.DEDUP_AGENT,
         skip=False,
         columns=key_columns,
-        strategy={"requested_via_debug_endpoint": True},
+        rationale="Injected by the debug dedup endpoint.",
     )
     updated_tasks = [
         task
@@ -191,9 +193,10 @@ def _inject_dedup_key_columns(state: GlobalState, key_columns: list[str]) -> Glo
 
     working_state["execution_plan"] = ExecutionPlan(
         metadata=plan.metadata,
+        plan_summary=plan.plan_summary or "Debug dedup execution plan.",
+        assumptions=list(plan.assumptions),
         global_constraints=plan.global_constraints,
         task_list=updated_tasks,
-        plan_summary=plan.plan_summary or "Debug dedup execution plan.",
     )
     return working_state
 
