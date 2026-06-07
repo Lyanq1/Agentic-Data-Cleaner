@@ -1,1 +1,1 @@
-"""Agent definitions: Supervisor + worker agents + registry."""
+"""Agent definitions"""

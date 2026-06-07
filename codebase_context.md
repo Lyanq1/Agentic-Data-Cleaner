@@ -9,7 +9,7 @@
 
 ## 1. Tóm Tắt Executive
 
-Hệ thống **Agentic Data Engineering** là đồ án tốt nghiệp HCMUS xây dựng pipeline ETL tự động làm sạch dữ liệu dạng bảng (CSV, Excel, JSON) bằng kiến trúc **Multi-Agent** trên **LangGraph**, kết hợp cơ chế kiểm soát chất lượng tự động thông qua **Pandera** và tương tác người dùng **Human-In-The-Loop (HITL)**.
+Hệ thống **Agentic Data Engineering** là đồ án tốt nghiệp HCMUS xây dựng pipeline ETL tự động làm sạch dữ liệu dạng bảng (CSV, Excel, JSON) bằng kiến trúc **Multi-Agent** trên **LangGraph**, kết hợp cơ chế kiểm soát chất lượng tự động thông qua **Custom Pandas Validator** và tương tác người dùng **Human-In-The-Loop (HITL)**.
 
 **Luồng pipeline thực tế hiện tại:**
 ```
@@ -23,11 +23,11 @@ Hệ thống **Agentic Data Engineering** là đồ án tốt nghiệp HCMUS xâ
    ↓ ── (Nếu status == 'needs_clarification' → HITL: Dừng chờ user trả lời)
 [planner_node] (Lập kế hoạch làm sạch ExecutionPlan)
    ↓ ── (HITL: interrupt_before ở các worker task)
-[deduplication] ── [validator] (Pandera check & Retry/Replan loop)
+[deduplication] ── [validator] (Pandas check & Retry/Replan loop)
    ↓
-[null_handling] ── [validator] (Pandera check & Retry/Replan loop)
+[null_handling] ── [validator] (Pandas check & Retry/Replan loop)
    ↓
-[type_casting]  ── [validator] (Pandera check & Retry/Replan loop)
+[type_casting]  ── [validator] (Pandas check & Retry/Replan loop)
    ↓ ── (HITL: interrupt_before)
 [report_agent] (Tạo báo cáo kết quả và kết thúc)
 ```
@@ -43,7 +43,7 @@ Hệ thống **Agentic Data Engineering** là đồ án tốt nghiệp HCMUS xâ
 | **LLM Framework**       | LangChain                            | langchain-core, langchain-openai, langchain-anthropic |
 | **LLM Providers**       | OpenAI (mặc định), Anthropic         | Cấu hình qua `.env`          |
 | **Data Processing**     | pandas, pyarrow                      | Parquet format cho Ingestion |
-| **Validation Engine**   | Pandera                              | Định nghĩa và check schemas  |
+| **Validation Engine**   | Custom Pandas Validator              | Thực thi validation rules |
 | **Database**            | PostgreSQL                           | Lưu trữ Lineage và dữ liệu   |
 | **ORM & Driver**        | SQLAlchemy, psycopg2-binary          | Quản lý kết nối PostgreSQL   |
 | **Session Cache**       | Redis                                | Quản lý session              |
@@ -121,11 +121,11 @@ Agentic-Data-Cleaner/
 │   │       ├── excel_parser.py
 │   │       └── json_parser.py
 │   │
-│   ├── validators/               # Thư viện kiểm chuẩn chất lượng dữ liệu với Pandera
+│   ├── validators/               # Thư viện kiểm chuẩn chất lượng dữ liệu với Pandas
 │   │   ├── __init__.py
 │   │   ├── models.py             # ValidationOutcome model
 │   │   ├── runner.py             # validate_current_task() chạy kiểm thử thực tế trên dataframe
-│   │   └── schema_builder.py     # Tự động sinh Pandera Schema động từ profile
+│   │   └── pandas_validator.py   # Thực thi rule kiểm tra bằng Pandas
 │   │
 │   ├── services/                 # Business logic services
 │   │   ├── __init__.py
@@ -169,7 +169,7 @@ Hệ thống định nghĩa 9 nodes chính trong [app/graphs/nodes.py](file:///U
 | **deduplication** | `deduplication_node` | Node thực hiện dọn dẹp các dòng trùng lặp (hiện tại là worker stub lưu pass-through dữ liệu). | `_persist_passthrough_worker_version` |
 | **null_handling** | `null_handling_node` | Node xử lý giá trị khuyết thiếu (hiện tại là worker stub). | `_persist_passthrough_worker_version` |
 | **type_casting** | `type_casting_node` | Node chuẩn hóa kiểu dữ liệu theo mong đợi ngữ nghĩa (hiện tại là worker stub). | `_persist_passthrough_worker_version` |
-| **validator** | `validator_node` | Kiểm thử chất lượng dữ liệu đầu ra của worker hiện tại bằng Pandera schema sinh tự động. | `validate_current_task()` |
+| **validator** | `validator_node` | Kiểm thử chất lượng dữ liệu đầu ra của worker hiện tại bằng Custom Pandas Validator. | `validate_current_task()` |
 | **report_agent** | `report_agent_node` | Node xuất báo cáo tổng kết pipeline (hiện tại là stub). | Trả về trạng thái `reporting` |
 
 ### 4.2 Định Tuyến Có Điều Kiện (Conditional Edges)
@@ -300,7 +300,7 @@ class GlobalState(TypedDict):
      - **Deduplication:** Nếu có dòng lặp lại hoặc tỷ lệ unique < 1.0 trên cột key.
      - **Null Handling:** Nếu phát hiện null hay disguised missing values.
      - **Type Casting:** Nếu kiểu dữ liệu thực tế sai lệch so với kiểu dữ liệu mong đợi của ngữ nghĩa.
-  3. Buộc LLM sinh JSON khớp với Pydantic model `ExecutionPlan` chứa danh sách chi tiết các công việc (`task_list`), bao gồm config chiến lược dọn dẹp cụ thể cho từng cột (`strategy`), logic kiểm tra Pandera và các metrics đo lường thành công.
+  3. Buộc LLM sinh JSON khớp với Pydantic model `ExecutionPlan` chứa danh sách chi tiết các công việc (`task_list`), bao gồm config chiến lược dọn dẹp cụ thể cho từng cột (`strategy`), logic kiểm tra bằng Pandas và các metrics đo lường thành công.
 
 ---
 
@@ -320,10 +320,10 @@ Thay vì lưu file Parquet ad-hoc cho từng bước xử lý, hệ thống tri�
 
 ## 8. Cơ Chế Kiểm Thử Chất Lượng (Validator Node)
 
-Khác với các tài liệu cũ đề xuất sử dụng LLM để validate kết quả làm sạch, hệ thống hiện tại sử dụng **Pandera Engine** để thực hiện kiểm thử tự động một cách nghiêm ngặt:
+Khác với các tài liệu cũ đề xuất sử dụng LLM để validate kết quả làm sạch, hệ thống hiện tại sử dụng **Custom Pandas Validator** để thực hiện kiểm thử tự động một cách nghiêm ngặt:
 
-1. **Sinh Schema Động (`app/validators/schema_builder.py`):**
-   Đọc cấu hình dọn dẹp từ `TaskDetail` của planner kết hợp với thông tin ngữ nghĩa của `SemanticProfile` để tạo ra một `pandera.DataFrameSchema` động phù hợp cho cột cần check.
+1. **Sinh Luật Kiểm tra Động (`app/validators/pandas_validator.py`):**
+   Đọc cấu hình dọn dẹp từ `TaskDetail` của planner kết hợp với thông tin ngữ nghĩa của `SemanticProfile` để chuyển hóa thành các bước kiểm tra (ví dụ duplicate_rows = 0, null_rate <= X) chạy trên data gốc bằng Pandas.
 2. **Thực thi Validate (`app/validators/runner.py`):**
    Hàm `validate_current_task(state)` lấy DataFrame của phiên bản dữ liệu mới nhất từ `LineageService` và thực hiện validate dựa trên schema động đã xây dựng.
 3. **Phản hồi lỗi dọn dẹp:**

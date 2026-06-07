@@ -155,7 +155,6 @@ This is the main current duplication in the state model.
 Why both exist today:
 
 - `execution_plan.task_list` is the typed planner output
-- top-level `task_list` is the simplified router list used by the graph supervisor
 
 Where top-level `task_list` is currently used:
 
@@ -237,7 +236,6 @@ Why:
 
 Why this file was added:
 
-- the current graph stops before `supervisor`
 - dedup cannot be reached through `POST /api/v1/pipeline/run`
 - the repo had no direct endpoint for running only the dedup worker
 

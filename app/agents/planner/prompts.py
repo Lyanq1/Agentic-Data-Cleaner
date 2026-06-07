@@ -131,14 +131,13 @@ For each non-skipped task, define the metadata context:
 - **`verification`**:
   Define a strict validation contract containing:
   - `validation_scope`: Always `"post_task"`.
-  - `validator_mode`: `"pandera"` (for null_handling), `"pandera_plus_custom"` (for deduplication and type_casting).
+  - `validator_mode`: `"pandas_custom"`.
   - `baseline_metrics`: Key metrics BEFORE running the task (e.g. `{"duplicate_rows_before": X}` or `{"null_count_before": Y}`).
-  - `pandera_checks`: List of structured check objects. Each check must contain:
-    - `type`: Check type string (`"column_unique"`, `"null_rate_lte"`, `"dataframe_no_exact_duplicates"`).
+  - `checks`: List of structured check objects. Each check must contain:
+    - `type`: Check type string (`"column_unique"`, `"null_rate_lte"`, `"dataframe_no_exact_duplicates"`, `"no_unresolved_duplicate_groups"`).
     - `column`: Target column name (null if dataframe-wide).
     - `threshold`: Optional float threshold (e.g. for `null_rate_lte`, set to `0.0`).
     - `severity`: `"error"` or `"warning"`.
-  - `custom_checks`: List of structured custom checks (e.g. `{"type": "no_unresolved_duplicate_groups", "column": null, "threshold": null, "severity": "error", "params": {}}`).
   - `success_metrics`: Dict of expected post-run metrics (e.g., `{"duplicate_rows": 0}`).
   - `failure_policy`: Map defining routing on rule failures:
     - Must define `"after_max_retries": "replan"` or `"fail_fast"`.
@@ -200,12 +199,12 @@ You must return a single, pure JSON object conforming exactly to the structure b
         },
         "verification": {
           "validation_scope": "post_task",
-          "validator_mode": "pandera_plus_custom",
+          "validator_mode": "pandas_custom",
           "baseline_metrics": {
             "duplicate_rows_before": 120,
             "customer_id_unique_ratio_before": 0.98
           },
-          "pandera_checks": [
+          "checks": [
             {
               "type": "dataframe_no_exact_duplicates",
               "column": null,
@@ -219,9 +218,7 @@ You must return a single, pure JSON object conforming exactly to the structure b
               "threshold": null,
               "severity": "error",
               "params": {}
-            }
-          ],
-          "custom_checks": [
+            },
             {
               "type": "no_unresolved_duplicate_groups",
               "column": null,
@@ -323,11 +320,11 @@ You must return a single, pure JSON object conforming exactly to the structure b
         },
         "verification": {
           "validation_scope": "post_task",
-          "validator_mode": "pandera",
+          "validator_mode": "pandas_custom",
           "baseline_metrics": {
             "null_count_before": 12
           },
-          "pandera_checks": [
+          "checks": [
             {
               "type": "null_rate_lte",
               "column": "<col_name>",
@@ -336,7 +333,6 @@ You must return a single, pure JSON object conforming exactly to the structure b
               "params": {}
             }
           ],
-          "custom_checks": [],
           "success_metrics": {
             "null_count": 0
           },

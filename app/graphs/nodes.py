@@ -7,12 +7,11 @@ from typing import Any, Literal, cast
 from app.agents.deduplication.agent import DeduplicationAgent
 from app.agents.input_validator.agent import InputValidatorAgent
 from app.agents.semantic_analyzer.profiler_agent import SemanticProfilerAgent
-from app.graphs.states.global_state import GlobalState, StatisticalProfile, ValidationResultItem
-from app.services.lineage_service import LineageService
-from app.services.lineage_utils import resolve_lineage_session_id
+from app.graphs.states.global_state import GlobalState
+from app.graphs.states.output_validation import ValidationResultItem
 from app.tools.data.eda import perform_eda
-from app.validators import validate_current_task
-from app.validators.runner import _resolve_active_task
+from app.graphs.utils import _resolve_active_task
+from app.graphs.states.profiler_state import StatisticalProfile
 
 logger = logging.getLogger(__name__)
 
@@ -95,31 +94,6 @@ async def planner_node(state: GlobalState) -> dict[str, Any]:
         "completed_steps": "planning",
     }
 
-
-# Supervisor node (Điều phối luồng chạy của các Worker)
-async def supervisor_node(state: GlobalState) -> dict[str, Any]:
-    """Skeletal Supervisor Node — increments indices and coordinates task steps."""
-    current_idx_val = state.get("current_task_idx")
-    current_idx = current_idx_val if current_idx_val is not None else 0
-    task_list = state.get("task_list") or []
-
-    if current_idx < len(task_list):
-        active_task = task_list[current_idx]
-        logger.info(
-            "supervisor_node: Active task is '%s' (index %s/%s)",
-            active_task,
-            current_idx,
-            len(task_list),
-        )
-    else:
-        logger.info("supervisor_node: All tasks in DAG completed successfully.")
-
-    return {
-        "current_step": "supervisor",
-        "completed_steps": "supervisor",
-    }
-
-
 # Deduplication Worker stub node
 async def dedup_agent_node(state: GlobalState) -> dict[str, Any]:
     """Run the deterministic simple-case deduplication worker."""
@@ -153,68 +127,98 @@ def _persist_passthrough_worker_version(
     agent_name: str,
     step_name: str,
 ) -> dict[str, Any]:
-    """Worker stub contract: load latest lineage dataframe and save a new version.
+    """Worker stub contract: load latest lineage dataframe and save a new version to a temporary file.
 
     Real workers should replace the pass-through dataframe with their transformed
     dataframe, then keep the same append/version state update behavior.
     """
+    import uuid
+    from pathlib import Path
+    from app.graphs.utils import _load_latest_dataframe, _resolve_active_task
+    
     base_update: dict[str, Any] = {
         "current_step": step_name,
         "completed_steps": step_name,
     }
-    session_id = resolve_lineage_session_id(state)
-    if not session_id:
-        logger.warning("%s: lineage session id missing; skipping version append.", agent_name)
-        return base_update
 
     try:
-        dataframe = LineageService.get_latest_version(session_id)
-        if dataframe.empty:
+        task = _resolve_active_task(state)
+        # Load the latest dataframe to pass through
+        dataframe = _load_latest_dataframe(state, task) if task else None
+        if dataframe is None or dataframe.empty:
             logger.warning(
-                "%s: latest lineage dataframe is empty; skipping version append.", agent_name
+                "%s: latest lineage dataframe is empty or missing; skipping version append.", agent_name
             )
             return base_update
 
-        new_version = LineageService.append_new_version(
-            session_id=session_id,
-            df=dataframe,
-            agent_name=agent_name,
-            description=f"Pass-through skeletal output for {step_name}.",
-        )
+        # Save to temporary parquet file
+        file_id = state.get("project_id") or uuid.uuid4().hex[:12]
+        output_dir = Path.cwd() / ".tmp" / "agentic-data-cleaner" / "outputs"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        output_path = output_dir / f"{file_id}_{step_name}_temp.parquet"
+        dataframe.to_parquet(output_path, index=False)
+        
     except Exception as exc:
-        logger.error("%s: failed to persist lineage version: %s", agent_name, exc)
+        logger.error("%s: failed to save temporary dataset: %s", agent_name, exc)
         return {
             **base_update,
-            "global_errors": f"{agent_name}: failed to persist lineage version: {exc}",
+            "global_errors": f"{agent_name}: failed to save temporary dataset: {exc}",
         }
 
     return {
         **base_update,
-        "dataset_version": str(new_version),
-        "current_dataset_version": str(new_version),
+        "physical_dataframe_path": str(output_path),
     }
 
 
 # Self-Correction Validator node
 async def validator_node(state: GlobalState) -> dict[str, Any]:
-    """Validate the active worker output with Pandera and update retry routing state."""
+    """Validate the active worker output using ValidatorAgent (LLM)."""
+    from app.agents.result_validators.agent import ValidatorAgent
+    from app.services.lineage_service import LineageService
+    from app.services.lineage_utils import resolve_lineage_session_id
+
     current_idx = state.get("current_task_idx") or 0
     retry_count = state.get("retry_count") or 0
-    outcome = validate_current_task(state)
-
     active_task = _resolve_active_task(state)
-    verification = active_task.verification if active_task else None
-    failure_policy = verification.failure_policy if verification else {}
+    task_id = active_task.task_id if active_task else "unknown"
+    agent_name = getattr(active_task.agent, "value", str(active_task.agent)) if active_task else "unknown"
+    
+    agent = ValidatorAgent()
+    result = await agent.run(state)
+    
+    if not result.get("success"):
+        logger.error("validator_node: ValidatorAgent failed to execute.")
+        return {"global_errors": "ValidatorAgent failed to execute."}
+        
+    validator_result = result.get("validator_agent_result")
+    df_validated = result.get("df_validated")
+    
+    passed = validator_result.passed if validator_result else False
+    
+    if passed:
+        logger.info(f"validator_node: task '{task_id}' PASSED validation.")
+        
+        # Persist to LineageService since it passed
+        session_id = resolve_lineage_session_id(state)
+        new_version_str = state.get("current_dataset_version")
+        if session_id and df_validated is not None:
+            try:
+                new_version = LineageService.append_new_version(
+                    session_id=session_id,
+                    df=df_validated,
+                    agent_name=agent_name,
+                    description=f"Output from {task_id} approved by ValidatorAgent."
+                )
+                new_version_str = str(new_version)
+                logger.info(f"validator_node: dataset persisted as version {new_version_str}")
+            except Exception as e:
+                logger.error(f"validator_node: failed to persist to lineage: {e}")
 
-    if outcome.passed:
-        logger.info(
-            "validator_node: task '%s' passed Pandera validation%s.",
-            outcome.task_id,
-            " (skipped)" if outcome.skipped else "",
-        )
         validation_item = ValidationResultItem(
-            agent=outcome.agent,
-            task_id=outcome.task_id,
+            agent=agent_name,
+            task_id=task_id,
             passed=True,
             failed_rules=[],
             recommended_next_action="pass",
@@ -228,67 +232,43 @@ async def validator_node(state: GlobalState) -> dict[str, Any]:
             "replan_reason": None,
             "next_node": None,
             "validation_results": validation_item,
+            "dataset_version": new_version_str,
+            "current_dataset_version": new_version_str,
             "current_step": "validation",
             "completed_steps": "validation",
         }
 
+    # If Failed
     retry_count += 1
     max_retries = _max_retries_per_task(state)
-    error_log = outcome.compact_error_log()
-
-    policy_action: Any = "retry_worker"
+    failed_rules = validator_result.failed_rules if validator_result else ["validator_rejected"]
+    error_log = f"Failed Rules: {failed_rules}. Reasoning: {validator_result.reasoning if validator_result else ''}"
+    
+    recommended_next_action = "retry_worker"
     if retry_count >= max_retries:
-        policy_action = failure_policy.get("after_max_retries") or "replan"
-    else:
-        for rule in outcome.failed_rules:
-            act = failure_policy.get(f"on_{rule}_fail") or failure_policy.get(rule)
-            if act:
-                policy_action = act
-                break
-
-    if policy_action not in (
-        "pass",
-        "retry_worker",
-        "retry_worker_with_modified_params",
-        "replan",
-        "hitl",
-    ):
-        policy_action = "replan"
-
-    recommended_next_action = cast(
-        Literal["pass", "retry_worker", "retry_worker_with_modified_params", "replan", "hitl"],
-        policy_action,
-    )
-
-    metrics_observed = {"failed_count": len(outcome.failed_rules)}
-    expected_metrics = verification.success_metrics if verification else {}
-
+        recommended_next_action = "replan"
+        
     validation_item = ValidationResultItem(
-        agent=outcome.agent,
-        task_id=outcome.task_id,
+        agent=agent_name,
+        task_id=task_id,
         passed=False,
-        failed_rules=outcome.failed_rules,
-        metrics_observed=metrics_observed,
-        expected_metrics=expected_metrics,
-        recommended_next_action=recommended_next_action,
-        replan_hints={"failed_rules": outcome.failed_rules, "retry_count": retry_count},
+        failed_rules=failed_rules,
+        recommended_next_action=cast(Any, recommended_next_action),
+        replan_hints=validator_result.replan_hints if validator_result else {},
         timestamp=datetime.now(UTC).isoformat(),
     )
 
-    if recommended_next_action in ("replan", "fail_fast"):
+    if recommended_next_action == "replan":
         logger.warning(
             "validator_node: task '%s' failed validation. Action: %s. Routing to planner.",
-            outcome.task_id,
+            task_id,
             recommended_next_action,
         )
         return {
             "retry_count": retry_count,
             "last_validation_error": error_log,
-            "failed_task_id": outcome.task_id,
-            "replan_reason": (
-                f"Validation failed with policy action '{recommended_next_action}'. "
-                f"Errors: {outcome.failed_rules}"
-            ),
+            "failed_task_id": task_id,
+            "replan_reason": f"Validation failed with policy action '{recommended_next_action}'. Errors: {failed_rules}",
             "next_node": "planner",
             "validation_results": validation_item,
             "global_errors": error_log,
@@ -297,7 +277,7 @@ async def validator_node(state: GlobalState) -> dict[str, Any]:
 
     logger.warning(
         "validator_node: task '%s' failed validation; retry %s/%s. Action: %s.",
-        outcome.task_id,
+        task_id,
         retry_count,
         max_retries,
         recommended_next_action,
@@ -305,7 +285,7 @@ async def validator_node(state: GlobalState) -> dict[str, Any]:
     return {
         "retry_count": retry_count,
         "last_validation_error": error_log,
-        "failed_task_id": outcome.task_id,
+        "failed_task_id": task_id,
         "next_node": None,
         "validation_results": validation_item,
         "current_step": "validation_failed",

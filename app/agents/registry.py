@@ -4,8 +4,6 @@ How to register a new agent:
 1. Create your agent class inheriting BaseAgent in a new folder under app/agents/
 2. Call AgentRegistry.register(MyAgent) anywhere (e.g., in your agent's __init__.py)
    OR decorate with @AgentRegistry.auto_register
-
-The Supervisor uses this registry to know which agents are available.
 """
 from typing import TYPE_CHECKING, Type
 

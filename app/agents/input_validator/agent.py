@@ -7,12 +7,12 @@ from langchain_core.messages import AIMessage, SystemMessage, HumanMessage
 
 from app.agents.base import BaseAgent
 from app.agents.input_validator.prompts import INPUT_VALIDATOR_SYSTEM_PROMPT
-from app.graphs.states.global_state import (
-    InputValidationResult as ValidationResult,
+from app.graphs.states.global_state import GlobalState
+from app.graphs.states.input_validation import (
+    InputValidationResult,
     StrategyQuestion,
     NullClarifications,
     ClarificationIssues,
-    GlobalState,
 )
 
 logger = logging.getLogger(__name__)
@@ -104,7 +104,7 @@ class InputValidatorAgent(BaseAgent):
                 for cat in ["null", "duplicate", "typecast"]:
                     cat_data = clar_dict.get(cat) if clar_dict else None
                     if cat_data:
-                        for q_key, q in cat_data.items():
+                        for _, q in cat_data.items():
                             if q:
                                 has_questions = True
                                 if q.get("answer") is None:
@@ -152,13 +152,13 @@ class InputValidatorAgent(BaseAgent):
             if start != -1 and end != -1:
                 content_clean = content_clean[start:end+1]
                 
-            response = ValidationResult.model_validate_json(content_clean)
+            response = InputValidationResult.model_validate_json(content_clean)
         except Exception as e:
             logger.error(f"Failed to parse LLM JSON output: {e}")
             print(f"\n[DEBUG ERROR] JSON parsing / validation failed: {e}")
             print(f"[DEBUG ERROR] Cleaned Content received:\n{content_clean}\n")
             # Fallback to a safe error state
-            response = ValidationResult(
+            response = InputValidationResult(
                 status="needs_clarification",
                 reasoning=f"The system encountered an error parsing the LLM's JSON output. Error: {e}",
                 clarifications=ClarificationIssues(

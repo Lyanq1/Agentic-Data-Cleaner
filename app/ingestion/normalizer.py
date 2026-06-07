@@ -17,9 +17,10 @@ from app.config.config import get_settings
 from app.exceptions.ingestion_exceptions import IngestionError
 from app.ingestion.parsers import CSVParser, ExcelParser, JSONParser
 from app.ingestion.parsers.base import BaseParser
+from app.core.database import SessionLocal, init_db
+from app.models.lineage import Session, LineageVersion, DatasetRecord
 
 logger = logging.getLogger(__name__)
-
 
 class InputFormat(str, Enum):
     """Supported input file formats."""
@@ -79,8 +80,7 @@ def ingest_to_canonical(
     logger.info(f"Canonical Parquet saved: {canonical_path} ({len(df)} rows × {len(df.columns)} cols)")
 
     # Save to PostgreSQL for lineage tracking using JSONB
-    from app.core.database import SessionLocal, init_db
-    from app.models.lineage import Session, LineageVersion, DatasetRecord
+
     
     # Initialize DB schema if not exists
     init_db()
@@ -133,8 +133,6 @@ def ingest_to_canonical(
         db.close()
 
     return canonical_path, fmt, schema
-
-
 
 def export_from_canonical(
     canonical_path: Path,
