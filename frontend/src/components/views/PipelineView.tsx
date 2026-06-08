@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { wsBaseURL } from "../../api/client";
 import { pipelineApi } from "../../api/services";
@@ -86,6 +86,8 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
 }) => {
   const queryClient = useQueryClient();
   const [wsStatus, setWsStatus] = useState<string>("connecting");
+  const [liveLogs, setLiveLogs] = useState<any[]>([]);
+  const terminalRef = useRef<HTMLDivElement | null>(null);
   const [feedback, setFeedback] = useState("");
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [lastSubmittedCheckpointId, setLastSubmittedCheckpointId] = useState<
@@ -106,6 +108,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
     setShowExecutionPlan(false);
     setIsGeneratingPlan(false);
     setIsApprovingPlan(false);
+    setLiveLogs([]);
   }, [runId]);
 
   const handleGeneratePlan = () => {
@@ -156,6 +159,15 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
+        if (data.event === "log" && data.log) {
+          setLiveLogs((prev) => {
+            const key = `${data.log.timestamp}-${data.log.agent}-${data.log.message}`;
+            if (prev.some((log) => `${log.timestamp}-${log.agent}-${log.message}` === key)) {
+              return prev;
+            }
+            return [...prev, data.log].slice(-500);
+          });
+        }
         if (data.event === "status_change") {
           queryClient.invalidateQueries({
             queryKey: ["pipeline-state", runId],
@@ -216,7 +228,6 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
       return pipelineApi.approvePlan(runId);
     },
     onSuccess: async () => {
-      setIsApprovingPlan(false);
       await queryClient.refetchQueries({ queryKey: ["pipeline-state", runId] });
       await queryClient.refetchQueries({
         queryKey: ["hitl-checkpoint", runId],
@@ -231,6 +242,14 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
   useEffect(() => {
     if (!state) return;
 
+    if (
+      isApprovingPlan &&
+      (state.status === "completed" ||
+        state.status === "failed")
+    ) {
+      setIsApprovingPlan(false);
+    }
+
     if (!state.awaiting_hitl && !state.resolving_hitl) {
       setIsTransitioning(false);
       return;
@@ -244,6 +263,8 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
       setIsTransitioning(false);
     }
   }, [
+    isApprovingPlan,
+    state?.status,
     state?.awaiting_hitl,
     state?.resolving_hitl,
     state?.current_checkpoint_id,
@@ -260,6 +281,22 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
       {wsStatus === "connected" ? "Live" : wsStatus}
     </span>
   );
+
+  const terminalLogs = useMemo(() => {
+    const merged = [...(state?.agent_logs || []), ...liveLogs];
+    const seen = new Set<string>();
+    return merged.filter((log: any) => {
+      const key = `${log.timestamp}-${log.agent}-${log.message}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [state?.agent_logs, liveLogs]);
+
+  useEffect(() => {
+    if (!terminalRef.current) return;
+    terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
+  }, [terminalLogs.length]);
 
   const activeCheckpoint = state?.awaiting_hitl
     ? checkpoint || lastCheckpoint
@@ -396,6 +433,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
               ) : showExecutionPlan && state?.execution_plan ? (
                 <ExecutionPlanPanel
                   executionPlan={state.execution_plan}
+                  pipelineState={state}
                   runId={runId}
                   onApprove={() => approvePlanMutation.mutate()}
                   isApproving={isApprovingPlan || approvePlanMutation.isPending}
@@ -433,9 +471,12 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
                 </div>
                 {wsIndicator}
               </div>
-              <div className="flex-1 p-4 overflow-auto font-mono text-[11px] leading-relaxed bg-slate-950 text-slate-300 custom-scrollbar">
-                {state?.agent_logs?.length ? (
-                  state.agent_logs.map((log: any, i: number) => (
+              <div
+                ref={terminalRef}
+                className="flex-1 p-4 overflow-auto font-mono text-[11px] leading-relaxed bg-slate-950 text-slate-300 custom-scrollbar"
+              >
+                {terminalLogs.length ? (
+                  terminalLogs.map((log: any, i: number) => (
                     <div
                       key={i}
                       className="mb-2 pb-2 border-b border-slate-800/50"
@@ -455,7 +496,24 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
                       <span className="text-purple-400 font-semibold">
                         {log.agent || "system"}:
                       </span>{" "}
-                      <span className="text-slate-200 break-words whitespace-pre-wrap">
+                      {log.level && log.level !== "info" && (
+                        <span
+                          className={`mr-1 font-semibold uppercase ${
+                            log.level === "error" ? "text-red-400" : "text-amber-300"
+                          }`}
+                        >
+                          [{log.level}]
+                        </span>
+                      )}
+                      <span
+                        className={`break-words whitespace-pre-wrap ${
+                          log.level === "error"
+                            ? "text-red-300"
+                            : log.level === "warning"
+                              ? "text-amber-300"
+                              : "text-slate-200"
+                        }`}
+                      >
                         {log.message || JSON.stringify(log)}
                       </span>
                     </div>

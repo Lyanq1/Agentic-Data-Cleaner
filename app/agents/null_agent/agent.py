@@ -33,6 +33,23 @@ from app.graphs.states.workers import WorkerStateDetail
 logger = logging.getLogger(__name__)
 
 
+def _agent_log(message: str, level: str = "info") -> dict[str, Any]:
+    return {
+        "timestamp": datetime.now(timezone.utc).timestamp(),
+        "agent": "null_agent",
+        "level": level,
+        "message": message,
+    }
+
+
+def _agent_logs_from_notes(notes: list[str]) -> list[dict[str, Any]]:
+    logs: list[dict[str, Any]] = []
+    for note in notes:
+        level = "warning" if "unrecognised strategy" in note or "not found" in note else "info"
+        logs.append(_agent_log(note, level))
+    return logs
+
+
 # ---------------------------------------------------------------------------
 # Input contract
 # ---------------------------------------------------------------------------
@@ -151,6 +168,7 @@ class NullAgent(BaseAgent):
                 state,
                 "NullAgent: post-processing validation failed.",
                 failed_rules=failed_rules,
+                notes=notes,
             )
 
         # ---- Build result --------------------------------------------------
@@ -192,6 +210,12 @@ class NullAgent(BaseAgent):
             ),
             "current_step": "null_handling",
             "completed_steps": "null_handling",
+            "agent_logs": [
+                *_agent_logs_from_notes(notes),
+                _agent_log(
+                    f"Null handling completed. before_rows={before_row_count}, after_rows={after_row_count}, dropped={dropped_row_count}."
+                ),
+            ],
         }
 
     # ------------------------------------------------------------------
@@ -313,13 +337,12 @@ class NullAgent(BaseAgent):
             else:
                 # Unknown strategy → treat as leave_as_is
                 skipped_columns.append(col)
-                notes.append(
-                    f"Column '{col}': unrecognised strategy '{strategy}'; treated as leave_as_is."
+                message = (
+                    f"NullAgent: unrecognised strategy '{strategy}' for column '{col}'; "
+                    "leaving as-is."
                 )
-                logger.warning(
-                    "NullAgent: unrecognised strategy '%s' for column '%s'; leaving as-is.",
-                    strategy, col,
-                )
+                notes.append(message)
+                logger.warning(message)
 
         return cleaned_df, dropped_per_column, filled_per_column, skipped_columns, notes
 
@@ -435,6 +458,7 @@ class NullAgent(BaseAgent):
         error_message: str,
         *,
         failed_rules: list[str],
+        notes: list[str] | None = None,
     ) -> dict[str, Any]:
         worker_states = self._coerce_worker_states(state)
         retries = state.get("retry_count") or 0
@@ -456,4 +480,8 @@ class NullAgent(BaseAgent):
             ),
             "global_errors": error_message,
             "current_step": "null_handling",
+            "agent_logs": [
+                *_agent_logs_from_notes(notes or []),
+                _agent_log(error_message, "error"),
+            ],
         }

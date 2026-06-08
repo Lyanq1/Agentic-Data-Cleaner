@@ -1,5 +1,5 @@
 import React from "react";
-import { roleMeta, ERROR_TYPE_LABELS } from "./utils";
+import { roleMeta, ERROR_TYPE_LABELS, formatDisplayValue } from "./utils";
 
 export const TaskCard: React.FC<{
   task: any;
@@ -18,7 +18,7 @@ export const TaskCard: React.FC<{
             {meta.label}
           </span>
           <span className="text-xs text-muted-foreground font-mono">
-            {task.task_id}
+            {formatDisplayValue(task.task_id)}
           </span>
         </div>
         <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
@@ -29,7 +29,7 @@ export const TaskCard: React.FC<{
       {task.error_type && (
         <div className="text-sm text-muted-foreground mb-2">
           <span className="font-medium text-foreground">Fixes:</span>{" "}
-          {ERROR_TYPE_LABELS[task.error_type] ?? task.error_type}
+          {ERROR_TYPE_LABELS[task.error_type] ?? formatDisplayValue(task.error_type)}
         </div>
       )}
 
@@ -39,12 +39,12 @@ export const TaskCard: React.FC<{
             Target columns
           </div>
           <div className="flex flex-wrap gap-1.5">
-            {task.target_columns.map((col: string) => (
+            {task.target_columns.map((col: any) => (
               <span
-                key={col}
+                key={formatDisplayValue(col)}
                 className="inline-block rounded bg-primary/8 border border-primary/15 px-2 py-0.5 text-xs font-mono text-primary"
               >
-                {col}
+                {formatDisplayValue(col)}
               </span>
             ))}
           </div>

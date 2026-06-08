@@ -66,6 +66,7 @@ async def run_pipeline(
         "user_prompt": user_prompt,
         "project_id": run_id,
         "session_id": Path(canonical_path).stem,
+        "original_filename": original_filename,
         "dataset_schema": data_schema,
     }
 
@@ -119,6 +120,7 @@ async def get_pipeline_state(run_id: str) -> dict[str, Any] | None:
 
     return {
         "run_id": run_id,
+        "original_filename": state.get("original_filename"),
         "dataset_path": state.get("dataset_path"),
         "physical_dataframe_path": state.get("physical_dataframe_path"),
         "dataset_schema": state.get("dataset_schema"),
@@ -129,9 +131,13 @@ async def get_pipeline_state(run_id: str) -> dict[str, Any] | None:
         "input_validation_result": state.get("input_validation_result"),
         "worker_states": state.get("worker_states"),
         "validation_results": state.get("validation_results", []),
+        "agent_logs": state.get("agent_logs", []),
         "deduplication_result": state.get("deduplication_result"),
         "current_dataset_version": state.get("current_dataset_version"),
         "execution_plan": state.get("execution_plan").model_dump() if state.get("execution_plan") and hasattr(state.get("execution_plan"), "model_dump") else state.get("execution_plan"),
+        "task_list": state.get("task_list", []),
+        "current_task_idx": state.get("current_task_idx", 0),
+        "retry_count": state.get("retry_count", 0),
         "current_step": state.get("current_step"),
         "completed_steps": state.get("completed_steps", []),
         "errors": state.get("global_errors", []),

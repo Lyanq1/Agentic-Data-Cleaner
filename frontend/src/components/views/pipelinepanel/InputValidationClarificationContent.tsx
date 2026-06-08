@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from "react";
 import { StepFooter } from "./StepFooter";
 import { TextIcon } from "./TextIcon";
-import { getOptionConsequence } from "./utils";
+import { formatDisplayValue, getOptionConsequence } from "./utils";
 
 export const InputValidationClarificationContent: React.FC<{
   payload: any;
@@ -59,7 +59,7 @@ export const InputValidationClarificationContent: React.FC<{
       {payload.reasoning && (
         <div className="rounded-xl border bg-muted/30 p-4 text-sm leading-relaxed text-muted-foreground">
           <strong className="text-foreground block mb-1">Reasoning:</strong>
-          {payload.reasoning}
+          {formatDisplayValue(payload.reasoning)}
         </div>
       )}
 
@@ -109,20 +109,21 @@ export const InputValidationClarificationContent: React.FC<{
                         className={`pt-4 ${qi === 0 ? "pt-0" : ""} text-left`}
                       >
                         <p className="text-sm font-medium text-foreground mb-3 leading-snug">
-                          {qi + 1}. {q.question}
+                          {qi + 1}. {formatDisplayValue(q.question)}
                         </p>
 
                         {isStrategy ? (
                           <div className="space-y-3">
                             <div className="space-y-3 pl-2">
-                              {(q.options || []).map((opt: string) => {
-                                const isSelected = selectedVal === opt;
+                              {(q.options || []).map((opt: any) => {
+                                const optionLabel = formatDisplayValue(opt);
+                                const isSelected = selectedVal === optionLabel;
                                 const optConsequence = getOptionConsequence(
                                   q.consequences,
-                                  opt,
+                                  optionLabel,
                                 );
                                 return (
-                                  <div key={opt} className="space-y-2">
+                                  <div key={optionLabel} className="space-y-2">
                                     <label
                                       className={`flex items-start gap-2.5 text-sm cursor-pointer rounded-lg px-3 py-2.5 border transition-all ${
                                         isSelected
@@ -133,16 +134,16 @@ export const InputValidationClarificationContent: React.FC<{
                                       <input
                                         type="radio"
                                         name={key}
-                                        value={opt}
+                                        value={optionLabel}
                                         checked={isSelected}
                                         onChange={() =>
-                                          handleSelectAnswer(key, opt)
+                                          handleSelectAnswer(key, optionLabel)
                                         }
                                         disabled={!isAwaiting}
                                         className="text-primary mt-0.5 shrink-0"
                                       />
                                       <span className="leading-snug">
-                                        {opt}
+                                        {optionLabel}
                                       </span>
                                     </label>
                                     {isSelected && optConsequence && (
@@ -154,7 +155,7 @@ export const InputValidationClarificationContent: React.FC<{
                                           <strong className="font-semibold text-indigo-900 block mb-0.5">
                                             Consequence:
                                           </strong>
-                                          {optConsequence}
+                                          {formatDisplayValue(optConsequence)}
                                         </div>
                                       </div>
                                     )}
@@ -167,7 +168,7 @@ export const InputValidationClarificationContent: React.FC<{
                           <div className="space-y-3">
                             {q.insight && (
                               <div className="text-xs bg-muted/40 p-2.5 rounded border border-border/40 text-muted-foreground italic mb-2 leading-relaxed">
-                                💡 {q.insight}
+                                💡 {formatDisplayValue(q.insight)}
                               </div>
                             )}
                             <div className="flex gap-4 pl-2">

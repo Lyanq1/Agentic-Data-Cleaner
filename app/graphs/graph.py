@@ -96,7 +96,12 @@ def route_from_validator(state: GlobalState) -> str:
 class GraphBuilder:
     """Assembles the multi-agent ETL pipeline graph."""
 
-    def build(self, checkpointer: BaseCheckpointSaver[Any] | None = None) -> Any:  # noqa: ANN401
+    def build(
+        self,
+        checkpointer: BaseCheckpointSaver[Any] | None = None,
+        *,
+        interrupt_before: list[str] | None = None,
+    ) -> Any:  # noqa: ANN401
         """Compile and return the StateGraph with stubs and HILT interrupts.
 
         Flow::
@@ -160,13 +165,25 @@ class GraphBuilder:
         # Final endpoint
         builder.add_edge("report_agent", END)
 
-        # Compile graph with HITL interrupt before worker execution and final report.
+        # Compile graph with HITL interrupt before worker execution by default.
+        # Approval resumes use an empty interrupt list so workers, validators, and
+        # report generation can finish in one background run.
+        if interrupt_before is None:
+            interrupt_before = ["deduplication", "null_handling", "type_casting"]
+
         return builder.compile(
             checkpointer=checkpointer,
-            interrupt_before=["deduplication", "null_handling", "type_casting", "report_agent"],
+            interrupt_before=interrupt_before,
         )
 
 
-def build_graph(checkpointer: BaseCheckpointSaver[Any] | None = None) -> Any:  # noqa: ANN401
+def build_graph(
+    checkpointer: BaseCheckpointSaver[Any] | None = None,
+    *,
+    interrupt_before: list[str] | None = None,
+) -> Any:  # noqa: ANN401
     """Convenience function to build and compile the graph."""
-    return GraphBuilder().build(checkpointer=checkpointer)
+    return GraphBuilder().build(
+        checkpointer=checkpointer,
+        interrupt_before=interrupt_before,
+    )

@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { ChevronDown, ChevronUp, FileText, ListChecks, AlertTriangle } from 'lucide-react';
+import { formatDisplayValue } from './pipelinepanel/utils';
 
 export interface RequirementSummaryProps {
   userRequirementsText?: string;
@@ -56,7 +57,7 @@ export const RequirementSummaryPanel: React.FC<RequirementSummaryProps> = ({
       dedupLabel: dedup
         ? `Yes — keep ${dedup.keep_strategy || 'first'}${
             dedup.subset_columns?.length
-              ? ` on [${dedup.subset_columns.join(', ')}]`
+              ? ` on [${dedup.subset_columns.map((col: any) => formatDisplayValue(col)).join(', ')}]`
               : ' (full row)'
           }`
         : 'No deduplication in spec',
@@ -139,7 +140,7 @@ export const RequirementSummaryPanel: React.FC<RequirementSummaryProps> = ({
               {summary.dropCount > 0 && (
                 <Row
                   label="Columns to drop"
-                  value={summary.columnsToDrop.join(', ')}
+                  value={summary.columnsToDrop.map((col: any) => formatDisplayValue(col)).join(', ')}
                   mono
                 />
               )}
@@ -152,8 +153,8 @@ export const RequirementSummaryPanel: React.FC<RequirementSummaryProps> = ({
                   Parser detected conflicts
                 </div>
                 <ul className="list-disc pl-5 text-sm text-amber-950 space-y-1">
-                  {summary.conflicts.map((c: string, i: number) => (
-                    <li key={i}>{c}</li>
+                  {summary.conflicts.map((c: any, i: number) => (
+                    <li key={i}>{formatDisplayValue(c)}</li>
                   ))}
                 </ul>
               </section>
@@ -165,8 +166,8 @@ export const RequirementSummaryPanel: React.FC<RequirementSummaryProps> = ({
                   LLM still unsure about
                 </h4>
                 <ul className="list-disc pl-5 text-sm space-y-1">
-                  {summary.openQuestions.map((q: string, i: number) => (
-                    <li key={i}>{q}</li>
+                  {summary.openQuestions.map((q: any, i: number) => (
+                    <li key={i}>{formatDisplayValue(q)}</li>
                   ))}
                 </ul>
               </section>
@@ -190,9 +191,9 @@ export const RequirementSummaryPanel: React.FC<RequirementSummaryProps> = ({
                     <tbody className="divide-y">
                       {summary.mappings.map((m: any, i: number) => (
                         <tr key={i} className="hover:bg-muted/30">
-                          <td className="p-2 font-mono whitespace-nowrap">{m.original_name}</td>
-                          <td className="p-2 font-mono text-indigo-700 whitespace-nowrap">{m.target_name}</td>
-                          <td className="p-2 whitespace-nowrap">{m.target_type}</td>
+                          <td className="p-2 font-mono whitespace-nowrap">{formatDisplayValue(m.original_name)}</td>
+                          <td className="p-2 font-mono text-indigo-700 whitespace-nowrap">{formatDisplayValue(m.target_name)}</td>
+                          <td className="p-2 whitespace-nowrap">{formatDisplayValue(m.target_type)}</td>
                           <td className="p-2 whitespace-nowrap">{m.nullable ? 'yes' : 'no'}</td>
                         </tr>
                       ))}
@@ -221,9 +222,9 @@ export const RequirementSummaryPanel: React.FC<RequirementSummaryProps> = ({
                     <tbody className="divide-y">
                       {summary.rules.map((r: any, i: number) => (
                         <tr key={i} className="hover:bg-muted/30">
-                          <td className="p-2 font-mono font-medium whitespace-nowrap">{r.column_name}</td>
+                          <td className="p-2 font-mono font-medium whitespace-nowrap">{formatDisplayValue(r.column_name)}</td>
                           <td className="p-2 whitespace-nowrap">{r.strip_whitespace ? 'trim' : '—'}</td>
-                          <td className="p-2 whitespace-nowrap">{CASE_LABELS[r.case_transformation] || r.case_transformation}</td>
+                          <td className="p-2 whitespace-nowrap">{CASE_LABELS[r.case_transformation] || formatDisplayValue(r.case_transformation)}</td>
                           <td className="p-2 whitespace-nowrap">{formatImputation(r.imputation)}</td>
                           <td className="p-2 whitespace-nowrap">
                             {r.outliers?.method && r.outliers.method !== 'none'
@@ -272,13 +273,13 @@ const Stat: React.FC<{ label: string; value: string }> = ({ label, value }) => (
   </div>
 );
 
-const Row: React.FC<{ label: string; value: string; mono?: boolean }> = ({
+const Row: React.FC<{ label: string; value: any; mono?: boolean }> = ({
   label,
   value,
   mono,
 }) => (
   <div className="flex flex-col gap-0.5 sm:flex-row sm:gap-2">
     <span className="text-muted-foreground sm:min-w-[7rem]">{label}:</span>
-    <span className={`${mono ? 'font-mono text-foreground' : 'text-foreground'} break-words`}>{value}</span>
+    <span className={`${mono ? 'font-mono text-foreground' : 'text-foreground'} break-words`}>{formatDisplayValue(value)}</span>
   </div>
 );

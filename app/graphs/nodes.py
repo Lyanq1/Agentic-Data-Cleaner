@@ -8,6 +8,7 @@ from app.agents.deduplication.agent import DeduplicationAgent
 from app.agents.input_validator.agent import InputValidatorAgent
 from app.agents.null_agent.agent import NullAgent
 from app.agents.semantic_analyzer.profiler_agent import SemanticProfilerAgent
+from app.agents.type_agent.agent import TypeCastingAgent
 from app.graphs.states.global_state import GlobalState
 from app.graphs.states.output_validation import ValidationResultItem
 from app.tools.data.eda import perform_eda
@@ -15,6 +16,16 @@ from app.graphs.utils import _resolve_active_task
 from app.graphs.states.profiler_state import StatisticalProfile
 
 logger = logging.getLogger(__name__)
+
+
+def _agent_log(agent: str, message: str, level: str = "info") -> dict[str, Any]:
+    """Build a frontend-terminal log entry."""
+    return {
+        "timestamp": datetime.now(UTC).timestamp(),
+        "agent": agent,
+        "level": level,
+        "message": message,
+    }
 
 
 # Data profiling node (runs statistical EDA on the uploaded dataset)
@@ -54,6 +65,10 @@ async def profiler_node(state: GlobalState) -> dict[str, Any]:
         "statistical_profile": validated_profile,
         "current_step": "profiling",
         "completed_steps": "profiling",
+        "agent_logs": _agent_log(
+            "profiler",
+            f"Dataset profiling completed. Analyzed {profile.get('total_rows', '?')} rows and {profile.get('total_columns', '?')} columns.",
+        ),
     }
 
 
@@ -77,6 +92,10 @@ async def input_validator_node(state: GlobalState) -> dict[str, Any]:
         **result,
         "current_step": "input_validation",
         "completed_steps": "input_validation",
+        "agent_logs": _agent_log(
+            "input_validator",
+            "Data quality and user intent validation completed.",
+        ),
     }
 
 
@@ -93,6 +112,7 @@ async def planner_node(state: GlobalState) -> dict[str, Any]:
         **result,
         "current_step": "planning",
         "completed_steps": "planning",
+        "agent_logs": _agent_log("planner", "Execution plan generated."),
     }
 
 # Deduplication Worker stub node
@@ -106,6 +126,14 @@ async def dedup_agent_node(state: GlobalState) -> dict[str, Any]:
         **result,
         "current_step": "deduplication",
         "completed_steps": "deduplication",
+        "agent_logs": result.get(
+            "agent_logs",
+            _agent_log(
+                "dedup_agent",
+                str(result.get("global_errors") or "Deduplication worker finished."),
+                "error" if result.get("global_errors") else "info",
+            ),
+        ),
     }
 
 
@@ -120,14 +148,37 @@ async def null_agent_node(state: GlobalState) -> dict[str, Any]:
         **result,
         "current_step": "null_handling",
         "completed_steps": "null_handling",
+        "agent_logs": result.get(
+            "agent_logs",
+            _agent_log(
+                "null_agent",
+                str(result.get("global_errors") or "Null handling worker finished."),
+                "error" if result.get("global_errors") else "info",
+            ),
+        ),
     }
 
 
 # Type Casting Worker stub node
 async def type_agent_node(state: GlobalState) -> dict[str, Any]:
-    """Skeletal Type Casting Worker."""
+    """Run the deterministic type-casting worker."""
     logger.info("type_agent_node: Applying strict type cast constraints...")
-    return _persist_passthrough_worker_version(state, "typecast_agent", "type_casting")
+    agent = TypeCastingAgent()
+    result = await agent.run(state)
+    
+    return {
+        **result,
+        "current_step": "type_casting",
+        "completed_steps": "type_casting",
+        "agent_logs": result.get(
+            "agent_logs",
+            _agent_log(
+                "typecast_agent",
+                str(result.get("global_errors") or "Type casting worker finished."),
+                "error" if result.get("global_errors") else "info",
+            ),
+        ),
+    }
 
 
 def _persist_passthrough_worker_version(
@@ -198,7 +249,14 @@ async def validator_node(state: GlobalState) -> dict[str, Any]:
     
     if not result.get("success"):
         logger.error("validator_node: ValidatorAgent failed to execute.")
-        return {"global_errors": "ValidatorAgent failed to execute."}
+        return {
+            "global_errors": "ValidatorAgent failed to execute.",
+            "agent_logs": _agent_log(
+                "validator",
+                "ValidatorAgent failed to execute.",
+                "error",
+            ),
+        }
         
     validator_result = result.get("validator_agent_result")
     df_validated_path = result.get("df_validated_path")
@@ -244,6 +302,10 @@ async def validator_node(state: GlobalState) -> dict[str, Any]:
             "current_dataset_version": new_version_str,
             "current_step": "validation",
             "completed_steps": "validation",
+            "agent_logs": _agent_log(
+                "validator",
+                f"Task '{task_id}' passed validation.",
+            ),
         }
 
     # If Failed
@@ -281,6 +343,11 @@ async def validator_node(state: GlobalState) -> dict[str, Any]:
             "validation_results": validation_item,
             "global_errors": error_log,
             "current_step": "validation_failed",
+            "agent_logs": _agent_log(
+                "validator",
+                f"Task '{task_id}' failed validation. Action: replan. Routing to planner.",
+                "warning",
+            ),
         }
 
     logger.warning(
@@ -297,6 +364,11 @@ async def validator_node(state: GlobalState) -> dict[str, Any]:
         "next_node": None,
         "validation_results": validation_item,
         "current_step": "validation_failed",
+        "agent_logs": _agent_log(
+            "validator",
+            f"Task '{task_id}' failed validation; retry {retry_count}/{max_retries}. Action: retry_worker.",
+            "warning",
+        ),
     }
 
 
@@ -324,4 +396,5 @@ async def report_agent_node(state: GlobalState) -> dict[str, Any]:
     return {
         "current_step": "reporting",
         "completed_steps": "reporting",
+        "agent_logs": _agent_log("report_agent", "Final report is ready."),
     }
