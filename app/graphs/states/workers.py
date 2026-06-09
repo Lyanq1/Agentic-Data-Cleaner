@@ -17,6 +17,7 @@ class WorkerStates(BaseModel):
 
 class DedupDecisionTrace(BaseModel):
     decision_source: Literal["llm", "planner_fallback", "profile_fallback", "safe_default"]
+    column_roles: dict[str, str] = Field(default_factory=dict)
     ignore_columns: list[str] = Field(default_factory=list)
     confidence: float | None = None
     reasoning_summary: str = ""

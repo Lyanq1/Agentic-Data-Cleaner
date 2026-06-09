@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -24,13 +25,15 @@ class DeduplicationAgentInput(BaseModel):
     planner_task: TaskDetail | None = None
     retry_count: int = 0
     hitl_feedback: str | None = None
+    fuzzy_enabled: bool = False
 
 
 class DedupDecision(BaseModel):
     """Raw LLM output used to select a dedup strategy."""
 
-    mode: Literal["exact_full_row", "exact_key", "review_needed"]
+    mode: Literal["exact_full_row", "exact_key"]
     key_columns: list[str] = Field(default_factory=list)
+    column_roles: dict[str, str] = Field(default_factory=dict)
     ignore_columns: list[str] = Field(default_factory=list)
     confidence: float | None = None
     reasoning_summary: str = ""
@@ -39,22 +42,61 @@ class DedupDecision(BaseModel):
 class ValidatedDedupDecision(BaseModel):
     """Dedup decision after deterministic validation and fallback."""
 
-    mode: Literal["exact_full_row", "exact_key", "review_needed"]
+    mode: Literal["exact_full_row", "exact_key"]
     key_columns: list[str] = Field(default_factory=list)
+    column_roles: dict[str, str] = Field(default_factory=dict)
     ignore_columns: list[str] = Field(default_factory=list)
     decision_source: Literal["llm", "planner_fallback", "profile_fallback", "safe_default"]
     confidence: float | None = None
     reasoning_summary: str = ""
     validation_notes: list[str] = Field(default_factory=list)
+    unresolved_collisions: list[dict[str, Any]] = Field(default_factory=list)
 
     def to_trace(self, *, context_hash: str) -> DedupDecisionTrace:
         """Project the validated decision into the persisted trace model."""
 
         return DedupDecisionTrace(
             decision_source=self.decision_source,
+            column_roles=dict(self.column_roles),
             ignore_columns=list(self.ignore_columns),
             confidence=self.confidence,
             reasoning_summary=self.reasoning_summary,
             validation_notes=list(self.validation_notes),
             context_hash=context_hash,
         )
+
+
+class FuzzyCandidate(BaseModel):
+    """A candidate pair surfaced by fuzzy blocking."""
+
+    row_index_a: int
+    row_index_b: int
+    field: str
+    similarity_score: float
+    blocking_key: str
+    candidate_type: Literal["company_name", "person_name", "address", "cross_script_name"]
+
+
+class FuzzyCandidateSet(BaseModel):
+    """In-memory summary of fuzzy candidates."""
+
+    candidates: list[FuzzyCandidate] = Field(default_factory=list)
+    oversized_buckets: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+    @property
+    def total_count(self) -> int:
+        return len(self.candidates)
+
+
+@dataclass(slots=True)
+class FuzzyBlockingConfig:
+    """Static fuzzy blocking configuration for slice 2."""
+
+    company_ngram_size: int = 3
+    person_ngram_size: int = 2
+    address_shingle_size: int = 2
+    company_threshold: float = 0.5
+    person_threshold: float = 0.4
+    address_threshold: float = 0.6
+    max_bucket_size: int = 500
