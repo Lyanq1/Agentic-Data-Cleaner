@@ -545,5 +545,6 @@ async def report_agent_node(state: GlobalState) -> dict[str, Any]:
         "current_step": "reporting",
         "completed_steps": "reporting",
         "agent_logs": _agent_log("report_agent", "Final report is ready."),
+        "f1_metrics": f1_metrics,
     }
 
