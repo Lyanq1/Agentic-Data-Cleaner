@@ -7,7 +7,8 @@ export const ResolvedValidationPlanPanel: React.FC<{
   validationResult: any;
   onGeneratePlan: () => void;
   isGenerating: boolean;
-}> = ({ validationResult, onGeneratePlan, isGenerating }) => {
+  hasExecutionPlan?: boolean;
+}> = ({ validationResult, onGeneratePlan, isGenerating, hasExecutionPlan }) => {
   const reasoning = validationResult.reasoning || "";
   const actionPlan = validationResult.action_plan || {};
   const resolvedByUser = validationResult.resolved_by_user || [];
@@ -133,24 +134,26 @@ export const ResolvedValidationPlanPanel: React.FC<{
           </details>
         )}
 
-        <StepFooter currentStep={2} statusText="">
-          <button
-            type="button"
-            onClick={onGeneratePlan}
-            disabled={isGenerating}
-            aria-busy={isGenerating}
-            className="inline-flex h-11 items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-emerald-600 px-5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-emerald-700 hover:shadow-md disabled:cursor-wait disabled:opacity-70"
-          >
-            {isGenerating ? (
-              <>
-                <SpinnerIcon />
-                Generating plan...
-              </>
-            ) : (
-              <>Start Plan</>
-            )}
-          </button>
-        </StepFooter>
+        {!hasExecutionPlan && (
+          <StepFooter currentStep={2} statusText="">
+            <button
+              type="button"
+              onClick={onGeneratePlan}
+              disabled={isGenerating}
+              aria-busy={isGenerating}
+              className="inline-flex h-11 items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-emerald-600 px-5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-emerald-700 hover:shadow-md disabled:cursor-wait disabled:opacity-70"
+            >
+              {isGenerating ? (
+                <>
+                  <SpinnerIcon />
+                  Generating plan...
+                </>
+              ) : (
+                <>View Execution Plan</>
+              )}
+            </button>
+          </StepFooter>
+        )}
       </div>
     </div>
   );

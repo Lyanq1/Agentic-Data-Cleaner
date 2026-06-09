@@ -226,7 +226,8 @@ export const ExecutionPlanPanel: React.FC<{
   runId: string;
   onApprove: () => void;
   isApproving: boolean;
-}> = ({ executionPlan, pipelineState, runId, onApprove, isApproving }) => {
+  readOnly?: boolean;
+}> = ({ executionPlan, pipelineState, runId, onApprove, isApproving, readOnly }) => {
   const metadata = executionPlan.metadata || {};
   const assumptions = executionPlan.assumptions || [];
   const globalConstraints = executionPlan.global_constraints || {};
@@ -239,13 +240,20 @@ export const ExecutionPlanPanel: React.FC<{
           <div>
             <h3 className="text-lg font-bold text-white">Execution Plan</h3>
             <p className="text-white/80 text-sm">
-              Generated strategies
+              {readOnly ? "Completed execution details for review" : "Generated strategies"}
             </p>
           </div>
         </div>
       </div>
 
       <div className="p-6 space-y-6">
+        {readOnly && (
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 shadow-sm">
+            <strong className="font-semibold">Final report is ready.</strong>{" "}
+            This execution plan is now read-only so you can safely review what happened without re-running the pipeline.
+          </div>
+        )}
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="rounded-xl border bg-white p-4 shadow-sm text-xs space-y-2">
             <h4 className="font-bold text-foreground uppercase tracking-wider mb-2">
@@ -547,24 +555,31 @@ export const ExecutionPlanPanel: React.FC<{
         </div>
 
         <div className="pt-4 border-t border-slate-100 flex justify-end">
-          <button
-            type="button"
-            onClick={onApprove}
-            disabled={isApproving}
-            aria-busy={isApproving}
-            className="inline-flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-semibold transition-all shadow-md hover:shadow-lg disabled:cursor-wait disabled:opacity-70"
-          >
-            {isApproving ? (
-              <>
-                <SpinnerIcon />
-                Executing pipeline...
-              </>
-            ) : (
-              <>
-                Approve & Execute Cleaning
-              </>
-            )}
-          </button>
+          {readOnly ? (
+            <div className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-3 text-sm font-semibold text-emerald-700">
+              <span className="inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+              Report ready - review only
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={onApprove}
+              disabled={isApproving}
+              aria-busy={isApproving}
+              className="inline-flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-semibold transition-all shadow-md hover:shadow-lg disabled:cursor-wait disabled:opacity-70"
+            >
+              {isApproving ? (
+                <>
+                  <SpinnerIcon />
+                  Executing pipeline...
+                </>
+              ) : (
+                <>
+                  Approve & Execute Cleaning
+                </>
+              )}
+            </button>
+          )}
         </div>
       </div>
     </div>

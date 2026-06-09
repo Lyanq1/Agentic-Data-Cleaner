@@ -13,6 +13,7 @@ import { RequirementSummaryPanel } from "./RequirementSummaryPanel";
 interface PipelineViewProps {
   runId: string;
   onComplete: () => void;
+  onOpenProfile?: () => void;
 }
 
 /* ── Status Badge ───────────────────────────────────────────────────────── */
@@ -78,11 +79,143 @@ const StatusBadge: React.FC<{ status: string }> = ({ status }) => {
   );
 };
 
+const ReviewSection: React.FC<{
+  step: number;
+  title: string;
+  description: string;
+  children: React.ReactNode;
+}> = ({ step, title, description, children }) => (
+  <section className="space-y-3">
+    <div className="flex items-start gap-3">
+      <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-xs font-bold text-white">
+        {step}
+      </span>
+      <div className="min-w-0">
+        <h3 className="text-sm font-bold text-foreground">{title}</h3>
+        <p className="text-xs text-muted-foreground">{description}</p>
+      </div>
+    </div>
+    <div className="pl-0 sm:pl-10">{children}</div>
+  </section>
+);
+
+const CompletedPipelineReviewPanel: React.FC<{
+  state: any;
+  runId: string;
+  onOpenProfile?: () => void;
+}> = ({ state, runId, onOpenProfile }) => (
+  <div className="mb-8 rounded-2xl border-2 border-emerald-300/60 bg-emerald-50/60 shadow-lg overflow-hidden text-left animate-fadeIn">
+    <div className="bg-emerald-600 px-6 py-4">
+      <h3 className="text-lg font-bold text-white">Completed Pipeline Review</h3>
+      <p className="text-white/80 text-sm">
+        Review the full path that led to the final report. This view is read-only.
+      </p>
+    </div>
+
+    <div className="p-6 space-y-8">
+      <div className="rounded-xl border border-emerald-200 bg-white px-4 py-3 text-sm text-emerald-800 shadow-sm">
+        <strong className="font-semibold">Final report is ready.</strong>{" "}
+        You can inspect each stage below without re-running the pipeline.
+      </div>
+
+      <ReviewSection
+        step={1}
+        title="Statistical Profile"
+        description="Initial EDA profile generated before HITL validation and planning."
+      >
+        <div className="rounded-xl border bg-white p-4 shadow-sm space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="rounded-lg border bg-muted/20 p-3">
+              <div className="text-lg font-bold text-foreground">
+                {(state?.data_profile?.total_rows ?? 0).toLocaleString()}
+              </div>
+              <div className="text-[10px] uppercase tracking-wide text-muted-foreground mt-1">
+                Total rows
+              </div>
+            </div>
+            <div className="rounded-lg border bg-muted/20 p-3">
+              <div className="text-lg font-bold text-foreground">
+                {state?.data_profile?.total_columns ?? 0}
+              </div>
+              <div className="text-[10px] uppercase tracking-wide text-muted-foreground mt-1">
+                Total columns
+              </div>
+            </div>
+            <div className="rounded-lg border bg-muted/20 p-3">
+              <div className="text-lg font-bold text-foreground">
+                {(state?.data_profile?.duplicate_rows ?? 0).toLocaleString()}
+              </div>
+              <div className="text-[10px] uppercase tracking-wide text-muted-foreground mt-1">
+                Duplicate rows
+              </div>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={onOpenProfile}
+            disabled={!onOpenProfile}
+            className="inline-flex items-center justify-center rounded-lg border bg-background px-4 py-2 text-xs font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Open full Statistical Profile
+          </button>
+        </div>
+      </ReviewSection>
+
+      <ReviewSection
+        step={2}
+        title="Requirement And Dataset Specification"
+        description="Original user intent, parsed column mapping, and validation summary."
+      >
+        <RequirementSummaryPanel
+          userRequirementsText={state?.user_requirements?.raw_text}
+          spec={state?.structured_cleaning_spec}
+          validation={state?.requirement_validation}
+          compact
+        />
+      </ReviewSection>
+
+      {state?.input_validation_result && (
+        <ReviewSection
+          step={3}
+          title="Resolved Validation Plan"
+          description="Clarifications and cleaning instructions produced before execution planning."
+        >
+          <ResolvedValidationPlanPanel
+            validationResult={state.input_validation_result}
+            onGeneratePlan={() => undefined}
+            isGenerating={false}
+            hasExecutionPlan
+          />
+        </ReviewSection>
+      )}
+
+      {state?.execution_plan && (
+        <ReviewSection
+          step={4}
+          title="Execution Plan And Worker Results"
+          description="Worker order, validation gates, strategies, and rules used during the run."
+        >
+          <ExecutionPlanPanel
+            executionPlan={state.execution_plan}
+            pipelineState={state}
+            runId={runId}
+            onApprove={() => undefined}
+            isApproving={false}
+            readOnly
+          />
+        </ReviewSection>
+      )}
+    </div>
+  </div>
+);
+
 /* ── Main View ──────────────────────────────────────────────────────────── */
 
 export const PipelineView: React.FC<PipelineViewProps> = ({
   runId,
   onComplete,
+  onOpenProfile,
 }) => {
   const queryClient = useQueryClient();
   const [wsStatus, setWsStatus] = useState<string>("connecting");
@@ -302,17 +435,22 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
     ? checkpoint || lastCheckpoint
     : null;
   const hasHitl = Boolean(activeCheckpoint);
+  const isPipelineCompleted = state?.status === "completed";
   const isValidationReady = state?.input_validation_result?.status === "ready";
   const isWaitingForResolution = Boolean(state?.resolving_hitl);
 
   const displayHitl = hasHitl && showHitl;
   const displayPendingResolution =
     isWaitingForResolution && showHitl && !hasHitl;
-  const displayResolvedPlan = isValidationReady && showHitl && !hasHitl;
+  const displayExecutionReview = Boolean(
+    showHitl && state?.execution_plan && (showExecutionPlan || isPipelineCompleted),
+  );
+  const displayResolvedPlan =
+    isValidationReady && showHitl && !hasHitl && !displayExecutionReview;
   const showLeftPanel =
-    displayHitl || displayPendingResolution || displayResolvedPlan;
+    displayHitl || displayPendingResolution || displayExecutionReview || displayResolvedPlan;
   const reviewPanelAvailable =
-    hasHitl || isWaitingForResolution || isValidationReady;
+    hasHitl || isWaitingForResolution || isValidationReady || Boolean(state?.execution_plan);
   const displayLogs = showLogs || !showLeftPanel;
 
   const isRequirementHitl =
@@ -430,7 +568,13 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
                 />
               ) : displayPendingResolution ? (
                 <ValidationResolutionPendingPanel />
-              ) : showExecutionPlan && state?.execution_plan ? (
+              ) : displayExecutionReview && isPipelineCompleted ? (
+                <CompletedPipelineReviewPanel
+                  state={state}
+                  runId={runId}
+                  onOpenProfile={onOpenProfile}
+                />
+              ) : displayExecutionReview && state?.execution_plan ? (
                 <ExecutionPlanPanel
                   executionPlan={state.execution_plan}
                   pipelineState={state}

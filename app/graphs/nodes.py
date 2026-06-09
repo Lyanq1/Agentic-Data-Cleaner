@@ -65,10 +65,13 @@ async def profiler_node(state: GlobalState) -> dict[str, Any]:
         "statistical_profile": validated_profile,
         "current_step": "profiling",
         "completed_steps": "profiling",
-        "agent_logs": _agent_log(
-            "profiler",
-            f"Dataset profiling completed. Analyzed {profile.get('total_rows', '?')} rows and {profile.get('total_columns', '?')} columns.",
-        ),
+        "agent_logs": [
+            _agent_log("profiler", "Running detailed statistical exploratory data analysis (EDA)..."),
+            _agent_log(
+                "profiler",
+                f"Dataset profiling completed. Analyzed {profile.get('total_rows', '?')} rows and {profile.get('total_columns', '?')} columns.",
+            ),
+        ],
     }
 
 
@@ -92,10 +95,10 @@ async def input_validator_node(state: GlobalState) -> dict[str, Any]:
         **result,
         "current_step": "input_validation",
         "completed_steps": "input_validation",
-        "agent_logs": _agent_log(
-            "input_validator",
-            "Data quality and user intent validation completed.",
-        ),
+        "agent_logs": [
+            _agent_log("input_validator", "Running data quality and user intent validation..."),
+            _agent_log("input_validator", "Data quality and user intent validation completed."),
+        ],
     }
 
 
@@ -112,7 +115,10 @@ async def planner_node(state: GlobalState) -> dict[str, Any]:
         **result,
         "current_step": "planning",
         "completed_steps": "planning",
-        "agent_logs": _agent_log("planner", "Execution plan generated."),
+        "agent_logs": [
+            _agent_log("planner", "Generating execution plan..."),
+            _agent_log("planner", "Execution plan generated."),
+        ],
     }
 
 # Deduplication Worker stub node
@@ -122,18 +128,27 @@ async def dedup_agent_node(state: GlobalState) -> dict[str, Any]:
     agent = DeduplicationAgent()
     result = await agent.run(state)
 
-    return {
-        **result,
-        "current_step": "deduplication",
-        "completed_steps": "deduplication",
-        "agent_logs": result.get(
-            "agent_logs",
+    agent_logs = [_agent_log("dedup_agent", "Running deduplication worker...")]
+    if "agent_logs" in result:
+        res_logs = result["agent_logs"]
+        if isinstance(res_logs, list):
+            agent_logs.extend(res_logs)
+        else:
+            agent_logs.append(res_logs)
+    else:
+        agent_logs.append(
             _agent_log(
                 "dedup_agent",
                 str(result.get("global_errors") or "Deduplication worker finished."),
                 "error" if result.get("global_errors") else "info",
-            ),
-        ),
+            )
+        )
+
+    return {
+        **result,
+        "current_step": "deduplication",
+        "completed_steps": "deduplication",
+        "agent_logs": agent_logs,
     }
 
 
@@ -144,18 +159,27 @@ async def null_agent_node(state: GlobalState) -> dict[str, Any]:
     agent = NullAgent()
     result = await agent.run(state)
 
-    return {
-        **result,
-        "current_step": "null_handling",
-        "completed_steps": "null_handling",
-        "agent_logs": result.get(
-            "agent_logs",
+    agent_logs = [_agent_log("null_agent", "Running null handling worker...")]
+    if "agent_logs" in result:
+        res_logs = result["agent_logs"]
+        if isinstance(res_logs, list):
+            agent_logs.extend(res_logs)
+        else:
+            agent_logs.append(res_logs)
+    else:
+        agent_logs.append(
             _agent_log(
                 "null_agent",
                 str(result.get("global_errors") or "Null handling worker finished."),
                 "error" if result.get("global_errors") else "info",
-            ),
-        ),
+            )
+        )
+
+    return {
+        **result,
+        "current_step": "null_handling",
+        "completed_steps": "null_handling",
+        "agent_logs": agent_logs,
     }
 
 
@@ -166,18 +190,27 @@ async def type_agent_node(state: GlobalState) -> dict[str, Any]:
     agent = TypeCastingAgent()
     result = await agent.run(state)
     
-    return {
-        **result,
-        "current_step": "type_casting",
-        "completed_steps": "type_casting",
-        "agent_logs": result.get(
-            "agent_logs",
+    agent_logs = [_agent_log("typecast_agent", "Running type casting worker...")]
+    if "agent_logs" in result:
+        res_logs = result["agent_logs"]
+        if isinstance(res_logs, list):
+            agent_logs.extend(res_logs)
+        else:
+            agent_logs.append(res_logs)
+    else:
+        agent_logs.append(
             _agent_log(
                 "typecast_agent",
                 str(result.get("global_errors") or "Type casting worker finished."),
                 "error" if result.get("global_errors") else "info",
-            ),
-        ),
+            )
+        )
+    
+    return {
+        **result,
+        "current_step": "type_casting",
+        "completed_steps": "type_casting",
+        "agent_logs": agent_logs,
     }
 
 
