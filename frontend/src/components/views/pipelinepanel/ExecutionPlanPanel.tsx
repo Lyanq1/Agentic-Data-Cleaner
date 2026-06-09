@@ -1,5 +1,6 @@
 import React from "react";
 import { SpinnerIcon } from "./SpinnerIcon";
+import { formatDisplayValue } from "./utils";
 
 const formatToGmt7 = (dateStr: string) => {
   if (!dateStr) return "";
@@ -21,12 +22,212 @@ const formatToGmt7 = (dateStr: string) => {
   }
 };
 
+const WORKER_FLOW = [
+  {
+    taskId: "deduplication",
+    label: "Dedup",
+    description: "Remove exact/fuzzy duplicates before downstream statistics are computed.",
+    cardClass: "bg-violet-50 border-violet-200",
+    kindClass: "text-violet-700",
+  },
+  {
+    taskId: "null_handling",
+    label: "Null",
+    description: "Resolve missing and disguised missing values on the deduplicated version.",
+    cardClass: "bg-sky-50 border-sky-200",
+    kindClass: "text-sky-700",
+  },
+  {
+    taskId: "type_casting",
+    label: "Type Cast",
+    description: "Cast columns after null cleanup so Pandera validates final dtypes.",
+    cardClass: "bg-amber-50 border-amber-200",
+    kindClass: "text-amber-700",
+  },
+] as const;
+
+const VALIDATOR_META = {
+  cardClass: "bg-emerald-50 border-emerald-200",
+  kindClass: "text-emerald-700",
+};
+
+const statusStyles: Record<string, string> = {
+  completed: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  running: "bg-blue-50 text-blue-700 border-blue-200",
+  pending: "bg-slate-50 text-slate-500 border-slate-200",
+  skipped: "bg-slate-100 text-slate-500 border-slate-200",
+  failed: "bg-rose-50 text-rose-700 border-rose-200",
+};
+
+type FlowStep = {
+  id: string;
+  kind: string;
+  kindClass: string;
+  label: string;
+  description: string;
+  statusLabel: string;
+  statusClass: string;
+  cardClass: string;
+};
+
+const getWorkerStatus = (
+  task: any,
+  activeTaskIds: string[],
+  currentTaskIdx: number,
+) => {
+  if (task?.skip) return "skipped";
+  const activeIndex = activeTaskIds.indexOf(task?.task_id);
+  if (activeIndex === -1) return task ? "pending" : "skipped";
+  if (activeIndex < currentTaskIdx) return "completed";
+  if (activeIndex === currentTaskIdx) return "running";
+  return "pending";
+};
+
+const getValidatorStatus = (taskId: string, validationResults: any[]) => {
+  const latest = [...validationResults]
+    .reverse()
+    .find((item: any) => item.task_id === taskId);
+  if (!latest) return "pending";
+  return latest.passed ? "completed" : "failed";
+};
+
+const buildExecutionFlow = (
+  taskById: Record<string, any>,
+  activeTaskIds: string[],
+  currentTaskIdx: number,
+  validationResults: any[],
+): FlowStep[] => {
+  const steps: FlowStep[] = [];
+
+  WORKER_FLOW.forEach((meta) => {
+    const task = taskById[meta.taskId];
+    const workerStatus = getWorkerStatus(task, activeTaskIds, currentTaskIdx);
+    steps.push({
+      id: meta.taskId,
+      kind: "Worker",
+      kindClass: meta.kindClass,
+      label: meta.label,
+      description: task?.skip
+        ? formatDisplayValue(task.skip_reason, "Skipped by planner.")
+        : meta.description,
+      statusLabel: workerStatus,
+      statusClass: statusStyles[workerStatus],
+      cardClass: meta.cardClass,
+    });
+
+    const validatorStatus = task?.skip
+      ? "skipped"
+      : getValidatorStatus(meta.taskId, validationResults);
+    steps.push({
+      id: `${meta.taskId}-validator`,
+      kind: "Validator",
+      kindClass: VALIDATOR_META.kindClass,
+      label: "Pandera Gate",
+      description: `Validate ${meta.label.toLowerCase()} output before the next worker runs.`,
+      statusLabel: validatorStatus,
+      statusClass: statusStyles[validatorStatus],
+      cardClass: VALIDATOR_META.cardClass,
+    });
+  });
+
+  const reportReady = activeTaskIds.length > 0 && currentTaskIdx >= activeTaskIds.length;
+  steps.push({
+    id: "report_agent",
+    kind: "Output",
+    kindClass: "text-slate-700",
+    label: "Report",
+    description: "Summarize final lineage version and validation outcomes.",
+    statusLabel: reportReady ? "ready" : "pending",
+    statusClass:
+      reportReady
+        ? "bg-indigo-50 text-indigo-700 border-indigo-200"
+        : statusStyles.pending,
+    cardClass: "bg-slate-50 border-slate-200",
+  });
+
+  return steps;
+};
+
+export const WorkerValidatorFlow: React.FC<{
+  executionPlan?: any;
+  pipelineState?: any;
+}> = ({ executionPlan, pipelineState }) => {
+  const taskList = executionPlan?.task_list || [];
+  const taskById = taskList.reduce((acc: Record<string, any>, item: any) => {
+    const task = item.work_order || {};
+    if (task.task_id) acc[task.task_id] = task;
+    return acc;
+  }, {});
+  const activeTaskIds = pipelineState?.task_list || [];
+  const currentTaskIdx =
+    typeof pipelineState?.current_task_idx === "number"
+      ? pipelineState.current_task_idx
+      : 0;
+  const validationResults = pipelineState?.validation_results || [];
+  const flowSteps = buildExecutionFlow(
+    taskById,
+    activeTaskIds,
+    currentTaskIdx,
+    validationResults,
+  );
+
+  return (
+    <div className="rounded-xl bg-white border p-5 shadow-sm">
+      <div className="flex items-start justify-between gap-3 mb-4">
+        <div>
+          <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+            Worker / Validator Flow
+          </h4>
+          <p className="text-xs text-slate-500 mt-1">
+            Mirrors the backend graph: each worker writes a new data version, then Pandera validates before the next worker runs.
+          </p>
+        </div>
+        <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+          Sequential
+        </span>
+      </div>
+
+      <div className="flex flex-wrap items-stretch gap-2">
+        {flowSteps.map((step, idx) => (
+          <React.Fragment key={`${step.id}-${idx}`}>
+            <div
+              className={`min-w-[150px] flex-1 rounded-xl border p-3 ${step.cardClass}`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className={`text-[10px] font-bold uppercase tracking-wider ${step.kindClass}`}>
+                  {step.kind}
+                </span>
+                <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase ${step.statusClass}`}>
+                  {step.statusLabel}
+                </span>
+              </div>
+              <div className="mt-2 text-sm font-bold text-slate-800">
+                {step.label}
+              </div>
+              <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
+                {step.description}
+              </p>
+            </div>
+            {idx < flowSteps.length - 1 && (
+              <div className="hidden md:flex items-center justify-center text-slate-300 font-mono text-lg px-1">
+                -&gt;
+              </div>
+            )}
+          </React.Fragment>
+        ))}
+      </div>
+    </div>
+  );
+};
+
 export const ExecutionPlanPanel: React.FC<{
   executionPlan: any;
+  pipelineState?: any;
   runId: string;
   onApprove: () => void;
   isApproving: boolean;
-}> = ({ executionPlan, runId, onApprove, isApproving }) => {
+  readOnly?: boolean;
+}> = ({ executionPlan, pipelineState, runId, onApprove, isApproving, readOnly }) => {
   const metadata = executionPlan.metadata || {};
   const assumptions = executionPlan.assumptions || [];
   const globalConstraints = executionPlan.global_constraints || {};
@@ -39,13 +240,20 @@ export const ExecutionPlanPanel: React.FC<{
           <div>
             <h3 className="text-lg font-bold text-white">Execution Plan</h3>
             <p className="text-white/80 text-sm">
-              Generated strategies
+              {readOnly ? "Completed execution details for review" : "Generated strategies"}
             </p>
           </div>
         </div>
       </div>
 
       <div className="p-6 space-y-6">
+        {readOnly && (
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 shadow-sm">
+            <strong className="font-semibold">Final report is ready.</strong>{" "}
+            This execution plan is now read-only so you can safely review what happened without re-running the pipeline.
+          </div>
+        )}
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="rounded-xl border bg-white p-4 shadow-sm text-xs space-y-2">
             <h4 className="font-bold text-foreground uppercase tracking-wider mb-2">
@@ -108,8 +316,8 @@ export const ExecutionPlanPanel: React.FC<{
               Plan Assumptions
             </h4>
             <ul className="list-disc pl-5 space-y-1 text-xs text-foreground">
-              {assumptions.map((asm: string, i: number) => (
-                <li key={i}>{asm}</li>
+              {assumptions.map((asm: any, i: number) => (
+                <li key={i}>{formatDisplayValue(asm)}</li>
               ))}
             </ul>
           </div>
@@ -120,9 +328,11 @@ export const ExecutionPlanPanel: React.FC<{
             Plan Summary
           </h4>
           <p className="text-xs text-foreground leading-relaxed leading-5">
-            {executionPlan.plan_summary}
+            {formatDisplayValue(executionPlan.plan_summary)}
           </p>
         </div>
+
+        <WorkerValidatorFlow executionPlan={executionPlan} pipelineState={pipelineState} />
 
         <div className="space-y-4">
           <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
@@ -174,7 +384,7 @@ export const ExecutionPlanPanel: React.FC<{
 
                   {isSkipped ? (
                     <p className="text-xs text-slate-500 italic">
-                      Reason: {task.skip_reason}
+                      Reason: {formatDisplayValue(task.skip_reason)}
                     </p>
                   ) : (
                     <div className="space-y-3 mt-2 text-xs">
@@ -183,7 +393,7 @@ export const ExecutionPlanPanel: React.FC<{
                           <strong className="text-foreground">
                             Rationale:
                           </strong>{" "}
-                          {task.rationale}
+                          {formatDisplayValue(task.rationale)}
                         </p>
                       )}
 
@@ -193,12 +403,12 @@ export const ExecutionPlanPanel: React.FC<{
                             Target columns:
                           </span>
                           <div className="inline-flex flex-wrap gap-1">
-                            {task.columns.map((col: string) => (
+                            {task.columns.map((col: any) => (
                               <span
-                                key={col}
+                                key={formatDisplayValue(col)}
                                 className="px-1.5 py-0.5 bg-indigo-50 border border-indigo-100 rounded text-[10px] font-mono text-indigo-600"
                               >
-                                {col}
+                                {formatDisplayValue(col)}
                               </span>
                             ))}
                           </div>
@@ -215,21 +425,21 @@ export const ExecutionPlanPanel: React.FC<{
                               {task.strategy?.dedup_scope && (
                                 <div>
                                   <span className="text-muted-foreground font-semibold">Dedup Scope:</span>{" "}
-                                  <span className="font-mono text-foreground">{task.strategy.dedup_scope}</span>
+                                  <span className="font-mono text-foreground">{formatDisplayValue(task.strategy.dedup_scope)}</span>
                                 </div>
                               )}
                               {task.strategy?.primary_keys?.length > 0 && (
                                 <div>
                                   <span className="text-muted-foreground font-semibold">Primary Keys:</span>{" "}
                                   <span className="font-mono text-foreground">
-                                    {task.strategy.primary_keys.join(", ")}
+                                    {task.strategy.primary_keys.map((key: any) => formatDisplayValue(key)).join(", ")}
                                   </span>
                                 </div>
                               )}
                               {task.strategy?.exact_match?.enabled && (
                                 <div>
                                   <span className="text-muted-foreground font-semibold">Exact Match:</span>{" "}
-                                  <span className="text-foreground">Enabled (keep: {task.strategy.exact_match.keep || "first"})</span>
+                                  <span className="text-foreground">Enabled (keep: {formatDisplayValue(task.strategy.exact_match.keep, "first")})</span>
                                 </div>
                               )}
                               {task.strategy?.fuzzy_matching?.enabled && (
@@ -239,22 +449,22 @@ export const ExecutionPlanPanel: React.FC<{
                                   </span>
                                   <div>
                                     <span className="text-muted-foreground">Method:</span>{" "}
-                                    <span className="font-semibold">{task.strategy.fuzzy_matching.method || "minhash_lsh"}</span>
+                                    <span className="font-semibold">{formatDisplayValue(task.strategy.fuzzy_matching.method, "minhash_lsh")}</span>
                                   </div>
                                   <div>
                                     <span className="text-muted-foreground">Threshold:</span>{" "}
-                                    <span className="font-mono font-semibold">{task.strategy.fuzzy_matching.threshold}</span>
+                                    <span className="font-mono font-semibold">{formatDisplayValue(task.strategy.fuzzy_matching.threshold)}</span>
                                   </div>
                                   {task.strategy.fuzzy_matching.blocking_columns?.length > 0 && (
                                     <div>
                                       <span className="text-muted-foreground">Blocking Columns:</span>{" "}
-                                      <span className="font-mono">{task.strategy.fuzzy_matching.blocking_columns.join(", ")}</span>
+                                      <span className="font-mono">{task.strategy.fuzzy_matching.blocking_columns.map((col: any) => formatDisplayValue(col)).join(", ")}</span>
                                     </div>
                                   )}
                                   {task.strategy.fuzzy_matching.match_columns?.length > 0 && (
                                     <div>
                                       <span className="text-muted-foreground">Match Columns:</span>{" "}
-                                      <span className="font-mono">{task.strategy.fuzzy_matching.match_columns.join(", ")}</span>
+                                      <span className="font-mono">{task.strategy.fuzzy_matching.match_columns.map((col: any) => formatDisplayValue(col)).join(", ")}</span>
                                     </div>
                                   )}
                                 </div>
@@ -274,9 +484,9 @@ export const ExecutionPlanPanel: React.FC<{
                                         {col}
                                       </span>
                                       <span className="text-muted-foreground">
-                                        Imputation: {cfg.strategy}{" "}
+                                        Imputation: {formatDisplayValue(cfg.strategy)}{" "}
                                         {cfg.fill_value !== null
-                                          ? `(${cfg.fill_value})`
+                                          ? `(${formatDisplayValue(cfg.fill_value)})`
                                           : ""}
                                       </span>
                                     </div>
@@ -297,9 +507,9 @@ export const ExecutionPlanPanel: React.FC<{
                                         {col}
                                       </span>
                                       <span className="text-muted-foreground">
-                                        Cast expected: {cfg.expected_type}{" "}
+                                        Cast expected: {formatDisplayValue(cfg.expected_type)}{" "}
                                         {cfg.parse_format
-                                          ? `(Format: ${cfg.parse_format})`
+                                          ? `(Format: ${formatDisplayValue(cfg.parse_format)})`
                                           : ""}
                                       </span>
                                     </div>
@@ -319,7 +529,9 @@ export const ExecutionPlanPanel: React.FC<{
                             {task.verification.pandera_checks.map(
                               (rule: any, ri: number) => {
                                 const label = typeof rule === "object" && rule !== null
-                                  ? (rule.column ? `${rule.column} (${rule.type})` : rule.type)
+                                  ? (rule.column
+                                      ? `${formatDisplayValue(rule.column)} (${formatDisplayValue(rule.type)})`
+                                      : formatDisplayValue(rule.type, formatDisplayValue(rule)))
                                   : String(rule);
                                 return (
                                   <span
@@ -343,23 +555,31 @@ export const ExecutionPlanPanel: React.FC<{
         </div>
 
         <div className="pt-4 border-t border-slate-100 flex justify-end">
-          <button
-            type="button"
-            onClick={onApprove}
-            disabled={isApproving}
-            className="inline-flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-semibold transition-all shadow-md hover:shadow-lg disabled:opacity-50"
-          >
-            {isApproving ? (
-              <>
-                <SpinnerIcon />
-                Executing Pipeline...
-              </>
-            ) : (
-              <>
-                Approve & Execute Cleaning
-              </>
-            )}
-          </button>
+          {readOnly ? (
+            <div className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-3 text-sm font-semibold text-emerald-700">
+              <span className="inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+              Report ready - review only
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={onApprove}
+              disabled={isApproving}
+              aria-busy={isApproving}
+              className="inline-flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-semibold transition-all shadow-md hover:shadow-lg disabled:cursor-wait disabled:opacity-70"
+            >
+              {isApproving ? (
+                <>
+                  <SpinnerIcon />
+                  Executing pipeline...
+                </>
+              ) : (
+                <>
+                  Approve & Execute Cleaning
+                </>
+              )}
+            </button>
+          )}
         </div>
       </div>
     </div>

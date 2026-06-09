@@ -1,11 +1,14 @@
 import React, { useMemo } from "react";
 import { StepFooter } from "./StepFooter";
+import { SpinnerIcon } from "./SpinnerIcon";
+import { formatDisplayValue } from "./utils";
 
 export const ResolvedValidationPlanPanel: React.FC<{
   validationResult: any;
   onGeneratePlan: () => void;
   isGenerating: boolean;
-}> = ({ validationResult, onGeneratePlan, isGenerating }) => {
+  hasExecutionPlan?: boolean;
+}> = ({ validationResult, onGeneratePlan, isGenerating, hasExecutionPlan }) => {
   const reasoning = validationResult.reasoning || "";
   const actionPlan = validationResult.action_plan || {};
   const resolvedByUser = validationResult.resolved_by_user || [];
@@ -50,7 +53,7 @@ export const ResolvedValidationPlanPanel: React.FC<{
             <strong className="text-foreground block mb-1.5">
               Decision Reasoning:
             </strong>
-            {reasoning}
+            {formatDisplayValue(reasoning)}
           </div>
         )}
 
@@ -81,7 +84,7 @@ export const ResolvedValidationPlanPanel: React.FC<{
                       {title}
                     </h5>
                     <p className="text-xs text-muted-foreground leading-relaxed whitespace-pre-line">
-                      {planText}
+                      {formatDisplayValue(planText)}
                     </p>
                   </div>
                 </div>
@@ -117,13 +120,13 @@ export const ResolvedValidationPlanPanel: React.FC<{
               {submittedAnswers.map((item) => (
                 <div key={item.key} className="pt-2 first:pt-0">
                   <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/90 block mb-0.5">
-                    {item.label}
+                    {formatDisplayValue(item.label)}
                   </span>
                   <p className="text-xs text-foreground font-semibold leading-relaxed mb-1">
-                    {item.question}
+                    {formatDisplayValue(item.question)}
                   </p>
                   <p className="text-xs text-foreground font-medium">
-                    {item.answer}
+                    {formatDisplayValue(item.answer)}
                   </p>
                 </div>
               ))}
@@ -131,16 +134,26 @@ export const ResolvedValidationPlanPanel: React.FC<{
           </details>
         )}
 
-        <StepFooter currentStep={2} statusText="">
-          <button
-            type="button"
-            onClick={onGeneratePlan}
-            disabled={isGenerating}
-            className="inline-flex h-11 items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-emerald-600 px-5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-emerald-700 hover:shadow-md disabled:opacity-50"
-          >
-            {isGenerating ? <>Generating Plan...</> : <>Start Plan</>}
-          </button>
-        </StepFooter>
+        {!hasExecutionPlan && (
+          <StepFooter currentStep={2} statusText="">
+            <button
+              type="button"
+              onClick={onGeneratePlan}
+              disabled={isGenerating}
+              aria-busy={isGenerating}
+              className="inline-flex h-11 items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-emerald-600 px-5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-emerald-700 hover:shadow-md disabled:cursor-wait disabled:opacity-70"
+            >
+              {isGenerating ? (
+                <>
+                  <SpinnerIcon />
+                  Generating plan...
+                </>
+              ) : (
+                <>View Execution Plan</>
+              )}
+            </button>
+          </StepFooter>
+        )}
       </div>
     </div>
   );

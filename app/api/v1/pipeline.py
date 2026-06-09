@@ -1,12 +1,17 @@
 """Pipeline API — upload dataset, run pipeline, check state."""
+import io
 import uuid
 import logging
 
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from langchain_core.messages import HumanMessage
 
 from app.exceptions.ingestion_exceptions import IngestionError
+from app.services.dataframe_order import restore_original_column_order
+from app.services.lineage_service import LineageService
+from app.services.lineage_utils import resolve_lineage_session_id
 from app.services.ingestion import get_ingestion_service
 from app.services.pipeline import run_pipeline, get_pipeline_state
 from app.graphs.graph import build_graph
@@ -73,6 +78,121 @@ async def api_get_pipeline_state(run_id: str):
         raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found.")
 
     return state
+
+
+def _load_latest_processed_dataframe(state: dict):
+    """Load the latest processed dataframe from lineage, falling back to canonical parquet."""
+    session_id = resolve_lineage_session_id(state)
+    if session_id:
+        df = LineageService.get_latest_version(session_id)
+        if not df.empty:
+            return restore_original_column_order(df, state)
+
+    dataset_path = state.get("dataset_path")
+    if dataset_path:
+        import pandas as pd
+
+        return pd.read_parquet(dataset_path)
+
+    return None
+
+
+def _json_safe_preview_value(value):
+    """Convert dataframe preview values to JSON-safe scalars."""
+    try:
+        import pandas as pd
+
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(k): _json_safe_preview_value(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_json_safe_preview_value(item) for item in value]
+    return value
+
+
+@router.get("/pipeline/{run_id}/download", summary="Download latest processed dataset")
+async def api_download_processed_dataset(run_id: str, format: str = "parquet"):
+    """Export the latest processed lineage version as CSV, XLSX, or Parquet."""
+    state = await get_pipeline_state(run_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found.")
+
+    try:
+        df = _load_latest_processed_dataframe(state)
+    except Exception as e:
+        logger.error(f"Failed to load processed dataset for run_id={run_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to load processed dataset: {e}")
+
+    if df is None or df.empty:
+        raise HTTPException(status_code=404, detail="No processed dataset available to download.")
+
+    export_format = format.lower()
+    if export_format not in {"csv", "xlsx", "parquet"}:
+        raise HTTPException(status_code=400, detail="Unsupported format. Use csv, xlsx, or parquet.")
+
+    buffer = io.BytesIO()
+    try:
+        if export_format == "csv":
+            buffer.write(df.to_csv(index=False).encode("utf-8-sig"))
+            media_type = "text/csv"
+            extension = "csv"
+        elif export_format == "xlsx":
+            df.to_excel(buffer, index=False, engine="openpyxl")
+            media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            extension = "xlsx"
+        else:
+            df.to_parquet(buffer, index=False, engine="pyarrow")
+            media_type = "application/octet-stream"
+            extension = "parquet"
+    except Exception as e:
+        logger.error(f"Failed to export processed dataset for run_id={run_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to export processed dataset: {e}")
+    buffer.seek(0)
+
+    filename = f"{run_id}_processed.{extension}"
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    return StreamingResponse(buffer, media_type=media_type, headers=headers)
+
+
+@router.get("/pipeline/{run_id}/preview", summary="Preview latest processed dataset")
+async def api_preview_processed_dataset(run_id: str, limit: int = 50):
+    """Return a small JSON preview of the latest processed lineage version."""
+    state = await get_pipeline_state(run_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found.")
+
+    try:
+        df = _load_latest_processed_dataframe(state)
+    except Exception as e:
+        logger.error(f"Failed to load processed preview for run_id={run_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to load processed preview: {e}")
+
+    if df is None or df.empty:
+        return {
+            "columns": [],
+            "rows": [],
+            "row_count": 0,
+            "preview_count": 0,
+        }
+
+    safe_limit = max(1, min(limit, 200))
+    preview_df = df.head(safe_limit).where(df.head(safe_limit).notna(), None)
+    rows = [
+        {str(key): _json_safe_preview_value(value) for key, value in row.items()}
+        for row in preview_df.to_dict(orient="records")
+    ]
+    return {
+        "columns": [str(col) for col in df.columns],
+        "rows": rows,
+        "row_count": int(len(df)),
+        "preview_count": int(len(preview_df)),
+    }
 
 
 class ResolveRequest(BaseModel):
@@ -175,10 +295,34 @@ async def api_approve_plan(
             
     # Resume graph execution in the background
     async def resume_graph():
+        from app.core.websocket_manager import manager
+        import time
         async with get_checkpointer_manager().get() as cp:
-            gr = build_graph(checkpointer=cp)
-            # Passing None as inputs resumes from the last checkpoint
-            await gr.ainvoke(None, config=config)
+            gr = build_graph(checkpointer=cp, interrupt_before=[])
+            try:
+                async for event in gr.astream_events(None, config=config, version="v2"):
+                    kind = event["event"]
+                    name = event.get("name", "")
+                    
+                    if kind == "on_tool_start":
+                        await manager.broadcast_to_run(run_id, {"event": "log", "log": {"timestamp": time.time(), "agent": name, "message": f"Calling tool '{name}'...", "level": "info"}})
+                    elif kind == "on_tool_end":
+                        await manager.broadcast_to_run(run_id, {"event": "log", "log": {"timestamp": time.time(), "agent": name, "message": f"Tool '{name}' completed successfully.", "level": "info"}})
+                    elif kind == "on_tool_error":
+                        err = event.get("data", {}).get("error", "Unknown error")
+                        await manager.broadcast_to_run(run_id, {"event": "log", "log": {"timestamp": time.time(), "agent": name, "message": f"Tool '{name}' failed. Error: {err}", "level": "error"}})
+                    elif kind == "on_chain_start":
+                        if name in ["profiler", "semantic_profile", "input_validator", "planner", "supervisor", "deduplication", "null_handling", "type_casting", "validator", "report_agent"]:
+                            await manager.broadcast_to_run(run_id, {"event": "log", "log": {"timestamp": time.time(), "agent": "system", "message": f"Starting step: {name}", "level": "info"}})
+                    elif kind == "on_chain_error":
+                        err = event.get("data", {}).get("error", "Unknown error")
+                        if name != "LangGraph":
+                            await manager.broadcast_to_run(run_id, {"event": "log", "log": {"timestamp": time.time(), "agent": "system", "message": f"Error in {name}: {err}", "level": "error"}})
+                
+                await manager.broadcast_to_run(run_id, {"event": "status_change", "status": "completed"})
+            except Exception as e:
+                logger.error(f"Pipeline resume error: {e}")
+                await manager.broadcast_to_run(run_id, {"event": "status_change", "status": "failed"})
             
     background_tasks.add_task(resume_graph)
     

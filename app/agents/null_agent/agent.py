@@ -1,9 +1,10 @@
 """Null Agent — processes missing values according to the Planner's work order.
 
-Current implementation: supports only the ``drop_row`` strategy.
-All columns whose strategy is ``drop_row`` (typically mapped from
-``allow_missing = False`` in the semantic profile) will have their
-null-containing rows removed from the dataframe.
+Supported strategies (read from ``NullStrategy.per_column``):
+- ``drop_row``   : drop every row that has a null in the target column.
+- ``fill_value`` : fill nulls with the value in ``cfg["fill_value"]``
+                   (falls back to ``"Unknown"`` when the key is absent).
+- ``leave_as_is``: skip the column intentionally; nulls are kept.
 """
 from __future__ import annotations
 
@@ -32,6 +33,23 @@ from app.graphs.states.workers import WorkerStateDetail
 logger = logging.getLogger(__name__)
 
 
+def _agent_log(message: str, level: str = "info") -> dict[str, Any]:
+    return {
+        "timestamp": datetime.now(timezone.utc).timestamp(),
+        "agent": "null_agent",
+        "level": level,
+        "message": message,
+    }
+
+
+def _agent_logs_from_notes(notes: list[str]) -> list[dict[str, Any]]:
+    logs: list[dict[str, Any]] = []
+    for note in notes:
+        level = "warning" if "unrecognised strategy" in note or "not found" in note else "info"
+        logs.append(_agent_log(note, level))
+    return logs
+
+
 # ---------------------------------------------------------------------------
 # Input contract
 # ---------------------------------------------------------------------------
@@ -57,9 +75,11 @@ class NullAgentResult(BaseModel):
     before_row_count: int
     after_row_count: int
     dropped_row_count: int
-    # Mapping of column → number of rows dropped due to null in that column
+    # Mapping of column → number of rows dropped (drop_row strategy)
     dropped_per_column: dict[str, int]
-    # Columns that were skipped (strategy != drop_row or not in drop_row list)
+    # Mapping of column → number of cells filled (fill_value strategy)
+    filled_per_column: dict[str, int]
+    # Columns intentionally left unchanged (leave_as_is strategy)
     skipped_columns: list[str]
     notes: list[str]
 
@@ -122,56 +142,10 @@ class NullAgent(BaseAgent):
 
         before_row_count = len(df)
 
-        # ---- Resolve drop_row columns from strategy -------------------------
-        drop_row_columns = self._resolve_drop_row_columns(agent_input.planner_task)
-        skipped_columns = self._resolve_skipped_columns(agent_input.planner_task, drop_row_columns)
-
-        if not drop_row_columns:
-            logger.info(
-                "NullAgent: no columns with strategy='drop_row' found; "
-                "dataset carried forward unchanged."
-            )
-        else:
-            logger.info(
-                "NullAgent: will drop rows with null in columns: %s",
-                drop_row_columns,
-            )
-
-        # ---- Apply drop_row per column, tracking counts --------------------
-        cleaned_df = df.copy()
-        dropped_per_column: dict[str, int] = {}
-        notes: list[str] = []
-
-        for col in drop_row_columns:
-            if col not in cleaned_df.columns:
-                notes.append(
-                    f"Column '{col}' from strategy not found in dataframe; skipped."
-                )
-                logger.warning("NullAgent: column '%s' not in dataframe, skipping.", col)
-                continue
-
-            null_mask = cleaned_df[col].isna()
-            count = int(null_mask.sum())
-            if count > 0:
-                cleaned_df = cleaned_df[~null_mask].reset_index(drop=True)
-                dropped_per_column[col] = count
-                notes.append(
-                    f"Dropped {count} row(s) with null in column '{col}'."
-                )
-                logger.info("NullAgent: dropped %d row(s) for column '%s'.", count, col)
-            else:
-                dropped_per_column[col] = 0
-                notes.append(f"Column '{col}': no null rows found; no rows dropped.")
-
-        if skipped_columns:
-            notes.append(
-                f"Columns skipped (strategy not 'drop_row'): {skipped_columns}."
-            )
-
-        if not drop_row_columns and not skipped_columns:
-            notes.append(
-                "No null handling strategy was provided; dataset carried forward unchanged."
-            )
+        # ---- Apply all null strategies from plan ---------------------------
+        cleaned_df, dropped_per_column, filled_per_column, skipped_columns, notes = (
+            self._apply_null_strategies(df, agent_input.planner_task)
+        )
 
         after_row_count = len(cleaned_df)
         dropped_row_count = before_row_count - after_row_count
@@ -194,6 +168,7 @@ class NullAgent(BaseAgent):
                 state,
                 "NullAgent: post-processing validation failed.",
                 failed_rules=failed_rules,
+                notes=notes,
             )
 
         # ---- Build result --------------------------------------------------
@@ -204,6 +179,7 @@ class NullAgent(BaseAgent):
             after_row_count=after_row_count,
             dropped_row_count=dropped_row_count,
             dropped_per_column=dropped_per_column,
+            filled_per_column=filled_per_column,
             skipped_columns=skipped_columns,
             notes=notes,
         )
@@ -234,6 +210,12 @@ class NullAgent(BaseAgent):
             ),
             "current_step": "null_handling",
             "completed_steps": "null_handling",
+            "agent_logs": [
+                *_agent_logs_from_notes(notes),
+                _agent_log(
+                    f"Null handling completed. before_rows={before_row_count}, after_rows={after_row_count}, dropped={dropped_row_count}."
+                ),
+            ],
         }
 
     # ------------------------------------------------------------------
@@ -265,43 +247,104 @@ class NullAgent(BaseAgent):
         return None
 
     @staticmethod
-    def _resolve_drop_row_columns(task: TaskDetail | None) -> list[str]:
-        """Return columns whose Planner strategy is ``drop_row``."""
-        if task is None or task.strategy is None:
-            return []
+    def _apply_null_strategies(
+        df: pd.DataFrame,
+        task: TaskDetail | None,
+    ) -> tuple[
+        pd.DataFrame,          # cleaned dataframe
+        dict[str, int],        # dropped_per_column
+        dict[str, int],        # filled_per_column
+        list[str],             # skipped_columns (leave_as_is)
+        list[str],             # notes
+    ]:
+        """Apply per-column null strategies from the Planner's work order.
 
+        Strategies handled:
+        - ``drop_row``   : drop rows that have a null in *col*.
+        - ``fill_value`` : fill nulls with ``cfg["fill_value"]`` (default ``"Unknown"``).
+        - ``leave_as_is``: intentionally keep nulls; column is recorded as skipped.
+        Any unrecognised strategy is treated as ``leave_as_is``.
+        """
+        cleaned_df = df.copy()
+        dropped_per_column: dict[str, int] = {}
+        filled_per_column: dict[str, int] = {}
+        skipped_columns: list[str] = []
+        notes: list[str] = []
+
+        if task is None or task.strategy is None:
+            notes.append("No null handling strategy provided; dataset carried forward unchanged.")
+            return cleaned_df, dropped_per_column, filled_per_column, skipped_columns, notes
+
+        # Coerce strategy to dict
         strategy_raw = task.strategy
-        # Coerce to dict
         if hasattr(strategy_raw, "model_dump"):
             strategy_dict = strategy_raw.model_dump()
         elif isinstance(strategy_raw, dict):
             strategy_dict = strategy_raw
         else:
-            return []
+            notes.append("Strategy format unrecognised; dataset carried forward unchanged.")
+            return cleaned_df, dropped_per_column, filled_per_column, skipped_columns, notes
 
         per_column: dict[str, Any] = strategy_dict.get("per_column", {})
-        return [
-            col
-            for col, cfg in per_column.items()
-            if isinstance(cfg, dict) and cfg.get("strategy") == "drop_row"
-        ]
 
-    @staticmethod
-    def _resolve_skipped_columns(task: TaskDetail | None, drop_row_columns: list[str]) -> list[str]:
-        """Return columns in the strategy that are NOT drop_row (currently unsupported)."""
-        if task is None or task.strategy is None:
-            return []
+        for col, cfg in per_column.items():
+            if not isinstance(cfg, dict):
+                skipped_columns.append(col)
+                continue
 
-        strategy_raw = task.strategy
-        if hasattr(strategy_raw, "model_dump"):
-            strategy_dict = strategy_raw.model_dump()
-        elif isinstance(strategy_raw, dict):
-            strategy_dict = strategy_raw
-        else:
-            return []
+            strategy = cfg.get("strategy", "leave_as_is")
 
-        per_column: dict[str, Any] = strategy_dict.get("per_column", {})
-        return [col for col in per_column if col not in drop_row_columns]
+            if col not in cleaned_df.columns:
+                notes.append(f"Column '{col}' not found in dataframe; skipped.")
+                logger.warning("NullAgent: column '%s' not in dataframe, skipping.", col)
+                continue
+
+            if strategy == "drop_row":
+                null_mask = cleaned_df[col].isna()
+                count = int(null_mask.sum())
+                if count > 0:
+                    cleaned_df = cleaned_df[~null_mask].reset_index(drop=True)
+                    dropped_per_column[col] = count
+                    notes.append(f"Dropped {count} row(s) with null in column '{col}'.")
+                    logger.info("NullAgent: dropped %d row(s) for column '%s'.", count, col)
+                else:
+                    dropped_per_column[col] = 0
+                    notes.append(f"Column '{col}': no null rows found; nothing dropped.")
+
+            elif strategy == "fill_value":
+                fill_val = cfg.get("fill_value", "Unknown")
+                null_mask = cleaned_df[col].isna()
+                count = int(null_mask.sum())
+                if count > 0:
+                    cleaned_df[col] = cleaned_df[col].fillna(fill_val)
+                    filled_per_column[col] = count
+                    notes.append(
+                        f"Filled {count} null(s) in column '{col}' with '{fill_val}'."
+                    )
+                    logger.info(
+                        "NullAgent: filled %d null(s) in column '%s' with '%s'.",
+                        count, col, fill_val,
+                    )
+                else:
+                    filled_per_column[col] = 0
+                    notes.append(f"Column '{col}': no nulls found; nothing filled.")
+
+            elif strategy in ("leave_as_is", "skip"):
+                skipped_columns.append(col)
+                notes.append(f"Column '{col}': strategy='leave_as_is'; nulls retained intentionally.")
+                logger.info("NullAgent: column '%s' intentionally left with nulls.", col)
+
+            else:
+                # Unknown strategy → treat as leave_as_is
+                skipped_columns.append(col)
+                message = (
+                    f"NullAgent: unrecognised strategy '{strategy}' for column '{col}'; "
+                    "leaving as-is."
+                )
+                notes.append(message)
+                logger.warning(message)
+
+        return cleaned_df, dropped_per_column, filled_per_column, skipped_columns, notes
 
     @staticmethod
     def _read_dataframe(dataset_path: str) -> pd.DataFrame:
@@ -415,6 +458,7 @@ class NullAgent(BaseAgent):
         error_message: str,
         *,
         failed_rules: list[str],
+        notes: list[str] | None = None,
     ) -> dict[str, Any]:
         worker_states = self._coerce_worker_states(state)
         retries = state.get("retry_count") or 0
@@ -436,4 +480,8 @@ class NullAgent(BaseAgent):
             ),
             "global_errors": error_message,
             "current_step": "null_handling",
+            "agent_logs": [
+                *_agent_logs_from_notes(notes or []),
+                _agent_log(error_message, "error"),
+            ],
         }

@@ -66,6 +66,7 @@ async def run_pipeline(
         "user_prompt": user_prompt,
         "project_id": run_id,
         "session_id": Path(canonical_path).stem,
+        "original_filename": original_filename,
         "dataset_schema": data_schema,
     }
 
@@ -75,8 +76,91 @@ async def run_pipeline(
         graph = build_graph(checkpointer=checkpointer)
 
         logger.info(f"Pipeline started — run_id={run_id}, file={original_filename}")
-        final_state = await graph.ainvoke(initial_state, config=config)
+        
+        from app.core.websocket_manager import manager
+        import asyncio
+        import time
+        
+        # Give frontend a split second to connect to WebSocket before emitting
+        await asyncio.sleep(0.5)
+
+        try:
+            async for event in graph.astream_events(initial_state, config=config, version="v2"):
+                kind = event["event"]
+                name = event.get("name", "")
+                
+                # Filter and broadcast tool/function events
+                if kind == "on_tool_start":
+                    await manager.broadcast_to_run(run_id, {
+                        "event": "log",
+                        "log": {
+                            "timestamp": time.time(),
+                            "agent": name,
+                            "message": f"Calling tool '{name}'...",
+                            "level": "info"
+                        }
+                    })
+                elif kind == "on_tool_end":
+                    await manager.broadcast_to_run(run_id, {
+                        "event": "log",
+                        "log": {
+                            "timestamp": time.time(),
+                            "agent": name,
+                            "message": f"Tool '{name}' completed successfully.",
+                            "level": "info"
+                        }
+                    })
+                elif kind == "on_tool_error":
+                    err = event.get("data", {}).get("error", "Unknown error")
+                    await manager.broadcast_to_run(run_id, {
+                        "event": "log",
+                        "log": {
+                            "timestamp": time.time(),
+                            "agent": name,
+                            "message": f"Tool '{name}' failed. Error: {err}",
+                            "level": "error"
+                        }
+                    })
+                elif kind == "on_chain_start":
+                    if name in ["profiler", "semantic_profile", "input_validator", "planner", "supervisor", "deduplication", "null_handling", "type_casting", "validator", "report_agent"]:
+                        await manager.broadcast_to_run(run_id, {
+                            "event": "log",
+                            "log": {
+                                "timestamp": time.time(),
+                                "agent": "system",
+                                "message": f"Starting step: {name}",
+                                "level": "info"
+                            }
+                        })
+                elif kind == "on_chain_error":
+                    err = event.get("data", {}).get("error", "Unknown error")
+                    if name != "LangGraph": # avoid root error spam
+                        await manager.broadcast_to_run(run_id, {
+                            "event": "log",
+                            "log": {
+                                "timestamp": time.time(),
+                                "agent": "system",
+                                "message": f"Error in {name}: {err}",
+                                "level": "error"
+                            }
+                        })
+                        
+            # Tell frontend that execution ended
+            await manager.broadcast_to_run(run_id, {
+                "event": "status_change",
+                "status": "completed"
+            })
+        except Exception as e:
+            logger.error(f"Pipeline execution error: {e}")
+            await manager.broadcast_to_run(run_id, {
+                "event": "status_change",
+                "status": "failed"
+            })
+
         logger.info(f"Pipeline finished — run_id={run_id}")
+        
+        snapshot = await graph.aget_state(config)
+        final_state = snapshot.values if snapshot else initial_state
 
     raw_profile = final_state.get("statistical_profile")
     formatted_profile = _format_profile_for_frontend(raw_profile)
@@ -119,6 +203,7 @@ async def get_pipeline_state(run_id: str) -> dict[str, Any] | None:
 
     return {
         "run_id": run_id,
+        "original_filename": state.get("original_filename"),
         "dataset_path": state.get("dataset_path"),
         "physical_dataframe_path": state.get("physical_dataframe_path"),
         "dataset_schema": state.get("dataset_schema"),
@@ -129,9 +214,13 @@ async def get_pipeline_state(run_id: str) -> dict[str, Any] | None:
         "input_validation_result": state.get("input_validation_result"),
         "worker_states": state.get("worker_states"),
         "validation_results": state.get("validation_results", []),
+        "agent_logs": state.get("agent_logs", []),
         "deduplication_result": state.get("deduplication_result"),
         "current_dataset_version": state.get("current_dataset_version"),
         "execution_plan": state.get("execution_plan").model_dump() if state.get("execution_plan") and hasattr(state.get("execution_plan"), "model_dump") else state.get("execution_plan"),
+        "task_list": state.get("task_list", []),
+        "current_task_idx": state.get("current_task_idx", 0),
+        "retry_count": state.get("retry_count", 0),
         "current_step": state.get("current_step"),
         "completed_steps": state.get("completed_steps", []),
         "errors": state.get("global_errors", []),
