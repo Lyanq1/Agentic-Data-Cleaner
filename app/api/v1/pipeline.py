@@ -295,10 +295,34 @@ async def api_approve_plan(
             
     # Resume graph execution in the background
     async def resume_graph():
+        from app.core.websocket_manager import manager
+        import time
         async with get_checkpointer_manager().get() as cp:
             gr = build_graph(checkpointer=cp, interrupt_before=[])
-            # Passing None as inputs resumes from the last checkpoint
-            await gr.ainvoke(None, config=config)
+            try:
+                async for event in gr.astream_events(None, config=config, version="v2"):
+                    kind = event["event"]
+                    name = event.get("name", "")
+                    
+                    if kind == "on_tool_start":
+                        await manager.broadcast_to_run(run_id, {"event": "log", "log": {"timestamp": time.time(), "agent": name, "message": f"Calling tool '{name}'...", "level": "info"}})
+                    elif kind == "on_tool_end":
+                        await manager.broadcast_to_run(run_id, {"event": "log", "log": {"timestamp": time.time(), "agent": name, "message": f"Tool '{name}' completed successfully.", "level": "info"}})
+                    elif kind == "on_tool_error":
+                        err = event.get("data", {}).get("error", "Unknown error")
+                        await manager.broadcast_to_run(run_id, {"event": "log", "log": {"timestamp": time.time(), "agent": name, "message": f"Tool '{name}' failed. Error: {err}", "level": "error"}})
+                    elif kind == "on_chain_start":
+                        if name in ["profiler", "semantic_profile", "input_validator", "planner", "supervisor", "deduplication", "null_handling", "type_casting", "validator", "report_agent"]:
+                            await manager.broadcast_to_run(run_id, {"event": "log", "log": {"timestamp": time.time(), "agent": "system", "message": f"Starting step: {name}", "level": "info"}})
+                    elif kind == "on_chain_error":
+                        err = event.get("data", {}).get("error", "Unknown error")
+                        if name != "LangGraph":
+                            await manager.broadcast_to_run(run_id, {"event": "log", "log": {"timestamp": time.time(), "agent": "system", "message": f"Error in {name}: {err}", "level": "error"}})
+                
+                await manager.broadcast_to_run(run_id, {"event": "status_change", "status": "completed"})
+            except Exception as e:
+                logger.error(f"Pipeline resume error: {e}")
+                await manager.broadcast_to_run(run_id, {"event": "status_change", "status": "failed"})
             
     background_tasks.add_task(resume_graph)
     
