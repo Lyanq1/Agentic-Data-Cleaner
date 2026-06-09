@@ -1,6 +1,6 @@
 import React from "react";
 import { Shield, CheckCircle2, AlertTriangle, Database, Key, Clock, FileText } from "lucide-react";
-import { SEVERITY_STYLES } from "./utils";
+import { SEVERITY_STYLES, formatDisplayValue } from "./utils";
 
 interface ValidationReviewPanelProps {
   checkpoint: any;
@@ -51,7 +51,7 @@ export const ValidationReviewPanel: React.FC<ValidationReviewPanelProps> = ({
           )}
         </div>
         <p className="text-xs text-slate-600 leading-relaxed whitespace-pre-line text-left">
-          {checkpoint.message_to_user || "Please review the execution summary and remaining quality metrics below before approving the data cleaner's results."}
+          {formatDisplayValue(checkpoint.message_to_user, "Please review the execution summary and remaining quality metrics below before approving the data cleaner's results.")}
         </p>
       </div>
 
@@ -208,7 +208,7 @@ export const ValidationReviewPanel: React.FC<ValidationReviewPanelProps> = ({
                   {pipelineState.validation_results.map((item: any, idx: number) => (
                     <tr key={idx} className="hover:bg-slate-50/25">
                       <td className="p-3 align-top font-semibold text-slate-700">
-                        {item.agent} <span className="font-mono text-[10px] text-slate-400 font-normal">({item.task_id})</span>
+                        {formatDisplayValue(item.agent)} <span className="font-mono text-[10px] text-slate-400 font-normal">({formatDisplayValue(item.task_id)})</span>
                       </td>
                       <td className="p-3 align-top text-center">
                         <span
@@ -222,7 +222,7 @@ export const ValidationReviewPanel: React.FC<ValidationReviewPanelProps> = ({
                         </span>
                       </td>
                       <td className="p-3 align-top text-slate-600 font-mono text-[10px]">
-                        {item.recommended_next_action || "pass"}
+                        {formatDisplayValue(item.recommended_next_action, "pass")}
                       </td>
                       <td className="p-3 align-top text-slate-400 text-[10px]">
                         {item.timestamp ? new Date(item.timestamp).toLocaleTimeString() : "—"}
@@ -257,21 +257,21 @@ export const ValidationReviewPanel: React.FC<ValidationReviewPanelProps> = ({
                       SEVERITY_STYLES[issue.severity] || SEVERITY_STYLES.info
                     }`}
                   >
-                    {issue.severity}
+                    {formatDisplayValue(issue.severity)}
                   </span>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <code className="text-xs font-mono bg-slate-100 text-slate-800 px-1.5 py-0.5 rounded border border-slate-200">
-                        {issue.column}
+                        {formatDisplayValue(issue.column)}
                       </code>
                       <span className="text-xs text-slate-400 font-medium">
-                        {issue.issue_type}
+                        {formatDisplayValue(issue.issue_type)}
                       </span>
                     </div>
                     <p className="text-xs text-slate-600 mt-1 leading-relaxed">
-                      {issue.description}
+                      {formatDisplayValue(issue.description)}
                     </p>
-                    {issue.affected_rows > 0 && (
+                    {typeof issue.affected_rows === "number" && issue.affected_rows > 0 && (
                       <span className="text-[10px] text-slate-400 font-semibold block mt-1">
                         {issue.affected_rows.toLocaleString()} rows affected
                       </span>

@@ -34,6 +34,7 @@ class GlobalState(TypedDict):
     project_id: str | None
     session_id: str | None
     dataset_path: str | None
+    original_filename: str | None
     user_prompt: str | None
 
     # Data Schema and Requirements
@@ -59,6 +60,7 @@ class GlobalState(TypedDict):
     worker_states: WorkerStates | None
     worker_outputs: dict[str, Any] | None
     validation_results: Annotated[list[ValidationResultItem], append_list]
+    agent_logs: Annotated[list[dict[str, Any]], append_list]
     deduplication_result: DeduplicationResult | None
 
     # Control flow variables

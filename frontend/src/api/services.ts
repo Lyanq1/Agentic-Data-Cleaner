@@ -84,7 +84,15 @@ export const pipelineApi = {
     const hasErrors = data.errors && data.errors.length > 0;
     const valResult = data.input_validation_result;
     const isValidationClarification = valResult?.status === 'needs_clarification';
-    const awaiting_hitl = hasUnansweredClarifications(valResult) || (data.next_node && data.next_node.includes('report_agent'));
+    const nextNodes = Array.isArray(data.next_node)
+      ? data.next_node
+      : data.next_node
+        ? [data.next_node]
+        : [];
+    const graphAtEnd = nextNodes.length === 0 || nextNodes.includes('__end__');
+    const reportCompleted =
+      data.current_step === 'reporting' || (data.completed_steps || []).includes('reporting');
+    const awaiting_hitl = hasUnansweredClarifications(valResult) || nextNodes.includes('report_agent');
     const isResolvingClarification =
       isValidationClarification &&
       hasAnsweredClarifications(valResult) &&
@@ -94,15 +102,19 @@ export const pipelineApi = {
       ? false 
       : isResolvingClarification
         ? false
-        : (!data.next_node || data.next_node.length === 0 || data.next_node.includes('__end__'));
+        : graphAtEnd && reportCompleted;
+    const isTerminalError = graphAtEnd && hasErrors && !reportCompleted;
       
-    const status = hasErrors 
-      ? 'failed' 
-      : (awaiting_hitl ? 'awaiting_hitl' : (isCompleted ? 'completed' : 'running'));
+    const status = isCompleted
+      ? 'completed'
+      : isTerminalError
+        ? 'failed'
+        : (awaiting_hitl ? 'awaiting_hitl' : 'running');
 
     // Dynamic generation of rich logs to visualize the agent workflow
-    const agent_logs: any[] = [];
-    if (data.completed_steps && data.completed_steps.length > 0) {
+    const agent_logs: any[] = Array.isArray(data.agent_logs) ? [...data.agent_logs] : [];
+    const hasBackendLogs = agent_logs.length > 0;
+    if (!hasBackendLogs && data.completed_steps && data.completed_steps.length > 0) {
       if (data.completed_steps.includes('profiling') || data.data_profile) {
         agent_logs.push({
           timestamp: Date.now() / 1000 - 15,
@@ -119,13 +131,13 @@ export const pipelineApi = {
       }
     }
 
-    if (data.current_step === 'profiling') {
+    if (!hasBackendLogs && data.current_step === 'profiling') {
       agent_logs.push({
         timestamp: Date.now() / 1000,
         agent: 'profiler',
         message: 'Running detailed statistical exploratory data analysis (EDA) on uploaded parquet dataset...',
       });
-    } else if (data.current_step === 'input_validation') {
+    } else if (!hasBackendLogs && data.current_step === 'input_validation') {
       agent_logs.push({
         timestamp: Date.now() / 1000,
         agent: 'input_validator',
@@ -139,7 +151,7 @@ export const pipelineApi = {
       awaiting_hitl,
       resolving_hitl: isResolvingClarification,
       current_checkpoint_id: awaiting_hitl ? runId : null,
-      error_message: hasErrors ? data.errors[0] : null,
+      error_message: isTerminalError ? data.errors[0] : null,
       user_requirements: {
         raw_text: data.user_prompt || '',
       },
@@ -172,6 +184,13 @@ export const pipelineApi = {
         blocking: valResult.status === 'needs_clarification',
       } : null,
       agent_logs,
+      next_node: nextNodes,
+      current_step: data.current_step,
+      completed_steps: data.completed_steps || [],
+      task_list: data.task_list || [],
+      current_task_idx: data.current_task_idx ?? 0,
+      validation_results: data.validation_results || [],
+      worker_states: data.worker_states,
       data_profile: data.data_profile,
       semantic_profile: data.semantic_profile,
       input_validation_result: valResult,
@@ -292,9 +311,16 @@ export const pipelineApi = {
     }
     return state.data_profile;
   },
+
+  getProcessedPreview: async (runId: string, limit = 50): Promise<any> => {
+    const response = await apiClient.get<any>(`/pipeline/${runId}/preview`, {
+      params: { limit },
+    });
+    return response.data;
+  },
   
-  getDownloadUrl: (runId: string): string => {
-    return `${apiClient.defaults.baseURL}/pipeline/${runId}/state`;
+  getDownloadUrl: (runId: string, format: 'csv' | 'xlsx' | 'parquet' = 'parquet'): string => {
+    return `${apiClient.defaults.baseURL}/pipeline/${runId}/download?format=${format}`;
   }
 };
 

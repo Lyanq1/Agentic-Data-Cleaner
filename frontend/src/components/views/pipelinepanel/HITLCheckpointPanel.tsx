@@ -4,8 +4,9 @@ import { SpinnerIcon } from "./SpinnerIcon";
 import { TextIcon } from "./TextIcon";
 import { TaskCard } from "./TaskCard";
 import { InputValidationClarificationContent } from "./InputValidationClarificationContent";
-import { SEVERITY_STYLES } from "./utils";
+import { SEVERITY_STYLES, formatDisplayValue } from "./utils";
 import { ValidationReviewPanel } from "./ValidationReviewPanel";
+import { WorkerValidatorFlow } from "./ExecutionPlanPanel";
 
 export const HITLCheckpointPanel: React.FC<{
   checkpoint: any;
@@ -323,7 +324,7 @@ export const HITLCheckpointPanel: React.FC<{
 
             {checkpoint.message_to_user && (
               <p className="text-sm text-muted-foreground whitespace-pre-line rounded-lg border bg-muted/30 p-3">
-                {checkpoint.message_to_user}
+                {formatDisplayValue(checkpoint.message_to_user)}
               </p>
             )}
 
@@ -334,8 +335,8 @@ export const HITLCheckpointPanel: React.FC<{
                     Questions for you
                   </h4>
                   <ul className="list-disc pl-5 space-y-1 text-sm text-amber-900">
-                    {openQuestions.map((q: string, i: number) => (
-                      <li key={i}>{q}</li>
+                    {openQuestions.map((q: any, i: number) => (
+                      <li key={i}>{formatDisplayValue(q)}</li>
                     ))}
                   </ul>
                 </div>
@@ -347,8 +348,8 @@ export const HITLCheckpointPanel: React.FC<{
                   Blocking issues
                 </h4>
                 <ul className="list-disc pl-5 space-y-1 text-sm text-red-900">
-                  {reqErrors.map((e: string, i: number) => (
-                    <li key={i}>{e}</li>
+                  {reqErrors.map((e: any, i: number) => (
+                    <li key={i}>{formatDisplayValue(e)}</li>
                   ))}
                 </ul>
               </div>
@@ -365,9 +366,9 @@ export const HITLCheckpointPanel: React.FC<{
                       <span
                         className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${SEVERITY_STYLES[n.severity] || SEVERITY_STYLES.info}`}
                       >
-                        {n.severity}
+                        {formatDisplayValue(n.severity)}
                       </span>
-                      <span>{n.message}</span>
+                      <span>{formatDisplayValue(n.message)}</span>
                     </li>
                   ))}
                 </ul>
@@ -398,7 +399,7 @@ export const HITLCheckpointPanel: React.FC<{
                       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-6 items-start">
                         <div id={`mcq-label-${qid}`}>
                           <p className="text-sm font-medium text-foreground leading-snug">
-                            {q.prompt}
+                            {formatDisplayValue(q.prompt)}
                           </p>
                           {multi && !clarifyOnly && (
                             <p className="text-xs font-normal text-indigo-600 mt-1">
@@ -407,44 +408,48 @@ export const HITLCheckpointPanel: React.FC<{
                           )}
                         </div>
                         <div className="space-y-1 lg:border-l lg:border-indigo-100 lg:pl-5 min-w-0">
-                          {(q.options || []).map((opt: any) => (
+                          {(q.options || []).map((opt: any) => {
+                            const optionValue = formatDisplayValue(opt.value ?? opt.option_id ?? opt.label);
+                            const optionLabel = formatDisplayValue(opt.label ?? opt.value);
+                            return (
                             <label
-                              key={opt.option_id}
+                              key={formatDisplayValue(opt.option_id, optionValue)}
                               className="flex items-start gap-2.5 text-sm cursor-pointer rounded-md px-2 py-1.5 hover:bg-indigo-50/80"
                             >
                               <input
                                 type={multi ? "checkbox" : "radio"}
                                 name={qid}
-                                value={opt.value}
+                                value={optionValue}
                                 checked={
                                   multi
-                                    ? selectedValues.includes(opt.value)
-                                    : mcqAnswers[qid] === opt.value
+                                    ? selectedValues.includes(optionValue)
+                                    : mcqAnswers[qid] === optionValue
                                 }
                                 onChange={() =>
                                   multi
                                     ? toggleMultiMcq(
                                         qid,
-                                        opt.value,
-                                        !selectedValues.includes(opt.value),
+                                        optionValue,
+                                        !selectedValues.includes(optionValue),
                                       )
                                     : setMcqAnswers((prev) => {
-                                        if (isClarifyValue(opt.value)) {
+                                        if (isClarifyValue(optionValue)) {
                                           setMcqClarifyText((t) => {
                                             const next = { ...t };
                                             delete next[qid];
                                             return next;
                                           });
                                         }
-                                        return { ...prev, [qid]: opt.value };
+                                        return { ...prev, [qid]: optionValue };
                                       })
                                 }
                                 disabled={!isAwaiting}
                                 className="text-indigo-600 mt-0.5 shrink-0"
                               />
-                              <span className="leading-snug">{opt.label}</span>
+                              <span className="leading-snug">{optionLabel}</span>
                             </label>
-                          ))}
+                          );
+                          })}
                         </div>
                       </div>
                       {clarifySelected && (
@@ -515,8 +520,8 @@ export const HITLCheckpointPanel: React.FC<{
                   Warnings
                 </h4>
                 <ul className="list-disc pl-5 space-y-1 text-sm text-foreground">
-                  {reqWarnings.map((w: string, i: number) => (
-                    <li key={i}>{w}</li>
+                  {reqWarnings.map((w: any, i: number) => (
+                    <li key={i}>{formatDisplayValue(w)}</li>
                   ))}
                 </ul>
               </div>
@@ -533,7 +538,7 @@ export const HITLCheckpointPanel: React.FC<{
                       key={m.original_name}
                       className="inline-block rounded-md bg-indigo-50 border border-indigo-200 px-2 py-0.5 text-xs font-mono text-indigo-700"
                     >
-                      {m.original_name} → {m.target_name}
+                      {formatDisplayValue(m.original_name)} → {formatDisplayValue(m.target_name)}
                     </span>
                   ))}
                 </div>
@@ -549,9 +554,14 @@ export const HITLCheckpointPanel: React.FC<{
                 Plan Summary
               </h4>
               <p className="text-foreground leading-relaxed">
-                {plan.summary || checkpoint.message_to_user}
+                {formatDisplayValue(plan.summary || checkpoint.message_to_user)}
               </p>
             </div>
+
+            <WorkerValidatorFlow
+              executionPlan={pipelineState?.execution_plan}
+              pipelineState={pipelineState}
+            />
 
             {(colSelection.target_columns?.length > 0 ||
               colSelection.skipped_columns?.length > 0) && (
@@ -570,12 +580,12 @@ export const HITLCheckpointPanel: React.FC<{
                       </span>
                     </div>
                     <div className="flex flex-wrap gap-1.5">
-                      {colSelection.target_columns.map((col: string) => (
+                      {colSelection.target_columns.map((col: any) => (
                         <span
-                          key={col}
+                          key={formatDisplayValue(col)}
                           className="inline-block rounded-md bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-xs font-mono text-emerald-700"
                         >
-                          {col}
+                          {formatDisplayValue(col)}
                         </span>
                       ))}
                     </div>
@@ -597,12 +607,12 @@ export const HITLCheckpointPanel: React.FC<{
                       </span>
                     </div>
                     <div className="flex flex-wrap gap-1.5">
-                      {colSelection.skipped_columns.map((col: string) => (
+                      {colSelection.skipped_columns.map((col: any) => (
                         <span
-                          key={col}
+                          key={formatDisplayValue(col)}
                           className="inline-block rounded-md bg-gray-50 border border-gray-200 px-2 py-0.5 text-xs font-mono text-gray-500"
                         >
-                          {col}
+                          {formatDisplayValue(col)}
                         </span>
                       ))}
                     </div>

@@ -119,12 +119,27 @@ function formatGMT7(dateStr: string): string {
   }
 }
 
+function formatCell(value: any): string {
+  if (value === null || value === undefined || value === '') return '—';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
 export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) => {
   const [showRawJson, setShowRawJson] = useState(false);
 
   const { data: report, isLoading, error } = useQuery({
     queryKey: ['pipeline-report', runId],
     queryFn: () => pipelineApi.getReport(runId),
+  });
+  const { data: preview } = useQuery({
+    queryKey: ['processed-preview', runId],
+    queryFn: () => pipelineApi.getProcessedPreview(runId, 50),
   });
 
   const rowsProcessed = useMemo(() => getRowsProcessed(report), [report]);
@@ -136,8 +151,8 @@ export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) =>
   const validationPassed = hasValidation ? validation.passed === true : true;
   const validationIssues: any[] = Array.isArray(validation?.issues) ? validation.issues : [];
 
-  const handleDownload = () => {
-    window.location.href = pipelineApi.getDownloadUrl(runId);
+  const handleDownload = (format: 'csv' | 'xlsx' | 'parquet') => {
+    window.location.href = pipelineApi.getDownloadUrl(runId, format);
   };
 
   /** Outer fills main; inner scroll region gets flex-1 min-h-0 so it scrolls under h-screen + overflow-hidden. */
@@ -325,6 +340,53 @@ export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) =>
                 </div>
               )}
 
+              {preview?.columns?.length > 0 && (
+                <div className="rounded-xl border shadow-sm overflow-hidden">
+                  <div className="px-4 py-3 border-b bg-muted/30 flex items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-semibold">Processed data preview</h3>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Showing {preview.preview_count?.toLocaleString?.() ?? preview.rows?.length ?? 0} of {preview.row_count?.toLocaleString?.() ?? 0} rows from the latest processed version.
+                      </p>
+                    </div>
+                    <span className="text-[10px] uppercase tracking-wider font-semibold rounded-full border bg-slate-50 text-slate-600 px-2.5 py-1">
+                      Parquet export ready
+                    </span>
+                  </div>
+                  <div className="overflow-auto max-h-[360px]">
+                    <table className="w-full min-w-[48rem] border-separate border-spacing-0 text-xs">
+                      <thead className="sticky top-0 z-10">
+                        <tr>
+                          {preview.columns.map((column: string) => (
+                            <th
+                              key={column}
+                              className="bg-slate-50 border-b border-r px-3 py-2 text-left font-semibold text-slate-600 whitespace-nowrap"
+                            >
+                              {column}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(preview.rows || []).map((row: Record<string, any>, rowIndex: number) => (
+                          <tr key={rowIndex} className="hover:bg-muted/20">
+                            {preview.columns.map((column: string) => (
+                              <td
+                                key={column}
+                                className="border-b border-r px-3 py-1.5 text-slate-700 whitespace-nowrap max-w-xs truncate"
+                                title={formatCell(row[column])}
+                              >
+                                {formatCell(row[column])}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
               <div className="border-t pt-6">
                 <button
                   type="button"
@@ -348,13 +410,22 @@ export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) =>
       </div>
 
       <div className="flex-shrink-0 flex flex-col sm:flex-row justify-center gap-3 sm:gap-4 pt-4 pb-2 border-t border-border/60 bg-background">
-        <button
-          onClick={handleDownload}
-          className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-colors bg-primary text-primary-foreground hover:bg-primary/90 h-11 px-8"
-        >
-          <Download className="mr-2 h-4 w-4" />
-          Download Data
-        </button>
+        <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
+          {([
+            ['csv', 'CSV'],
+            ['xlsx', 'XLSX'],
+            ['parquet', 'Parquet'],
+          ] as const).map(([format, label]) => (
+            <button
+              key={format}
+              onClick={() => handleDownload(format)}
+              className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-colors bg-primary text-primary-foreground hover:bg-primary/90 h-11 px-5"
+            >
+              <Download className="mr-2 h-4 w-4" />
+              Download {label}
+            </button>
+          ))}
+        </div>
         <button
           onClick={onStartOver}
           className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-colors border border-input bg-background hover:bg-accent hover:text-accent-foreground h-11 px-8"

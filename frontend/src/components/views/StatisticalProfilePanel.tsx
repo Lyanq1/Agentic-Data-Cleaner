@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Database, Binary, Hash, Columns, Copy, Key, AlertTriangle, ListFilter } from 'lucide-react';
+import { formatDisplayValue } from './pipelinepanel/utils';
 
 interface StatisticalProfilePanelProps {
   profileData: any;
@@ -307,7 +308,7 @@ export const StatisticalProfilePanel: React.FC<StatisticalProfilePanelProps> = (
                 Table Summary
               </h3>
               <p className="text-sm text-slate-600 leading-relaxed font-sans">
-                {semanticProfile.table_summary}
+                {formatDisplayValue(semanticProfile.table_summary)}
               </p>
             </div>
           )}
@@ -329,12 +330,12 @@ export const StatisticalProfilePanel: React.FC<StatisticalProfilePanelProps> = (
                   <tbody className="divide-y divide-slate-100">
                     {Object.entries(logicalGroups).map(([groupName, cols], i) => (
                       <tr key={i} className="hover:bg-slate-50/30">
-                        <td className="p-2.5 align-top font-medium text-slate-600">{groupName}</td>
+                        <td className="p-2.5 align-top font-medium text-slate-600">{formatDisplayValue(groupName)}</td>
                         <td className="p-2.5 align-top">
                           <div className="flex flex-wrap gap-1.5">
                             {cols.map((colName, idx) => (
                               <span key={idx} className="font-mono text-[10px] bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded">
-                                {colName}
+                                {formatDisplayValue(colName)}
                               </span>
                             ))}
                           </div>
@@ -391,11 +392,11 @@ export const StatisticalProfilePanel: React.FC<StatisticalProfilePanelProps> = (
                   )}
                 </div>
                 <h3 className="font-bold text-slate-800 text-sm tracking-tight">
-                  {col.column_name}
+                  {formatDisplayValue(col.column_name)}
                 </h3>
               </div>
               <span className="text-[10px] font-bold text-slate-500 uppercase bg-slate-100/70 border border-slate-200/50 px-2 py-0.5 rounded-full select-none">
-                {col.dtype}
+                {formatDisplayValue(col.dtype)}
               </span>
             </div>
 

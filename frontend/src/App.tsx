@@ -23,6 +23,9 @@ function App() {
   const [currentStep, setCurrentStep] = useState<AppStep>(initialRoute.step);
   const [runId, setRunId] = useState<string | null>(initialRoute.runId);
   const [sessionKey, setSessionKey] = useState(0);
+  const [autoCompletedRunId, setAutoCompletedRunId] = useState<string | null>(
+    initialRoute.step === "result" ? initialRoute.runId : null,
+  );
 
   // Bare "/" with restored session: mirror ?step=&run= into the address bar without adding a history entry.
   useLayoutEffect(() => {
@@ -53,6 +56,7 @@ function App() {
     queryClient.clear();
 
     setRunId(null);
+    setAutoCompletedRunId(null);
     setCurrentStep("upload");
     setSessionKey((k) => k + 1);
     applyPipelineRoute("upload", null, "replace");
@@ -83,12 +87,15 @@ function App() {
 
   const handleUploadSuccess = (newRunId: string) => {
     setRunId(newRunId);
+    setAutoCompletedRunId(null);
     setCurrentStep("pipeline");
     applyPipelineRoute("pipeline", newRunId, "push");
   };
 
   const handlePipelineComplete = () => {
     if (!runId) return;
+    if (autoCompletedRunId === runId) return;
+    setAutoCompletedRunId(runId);
     setCurrentStep("result");
     applyPipelineRoute("result", runId, "push");
   };
@@ -121,7 +128,11 @@ function App() {
           />
         )}
         {currentStep === "pipeline" && runId && (
-          <PipelineView runId={runId} onComplete={handlePipelineComplete} />
+          <PipelineView
+            runId={runId}
+            onComplete={handlePipelineComplete}
+            onOpenProfile={() => handleNavigateStep("profile")}
+          />
         )}
         {currentStep === "result" && runId && (
           <ResultView runId={runId} onStartOver={handleStartOver} />

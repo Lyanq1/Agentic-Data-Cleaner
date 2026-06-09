@@ -5,6 +5,21 @@ export const ROLE_META: Record<
   string,
   { label: string; color: string; icon: React.ReactNode }
 > = {
+  dedup_agent: {
+    label: "Deduplication",
+    color: "bg-violet-500/10 text-violet-600 border-violet-200",
+    icon: React.createElement(TextIcon, null, "[]"),
+  },
+  null_agent: {
+    label: "Null Handling",
+    color: "bg-sky-500/10 text-sky-600 border-sky-200",
+    icon: React.createElement(TextIcon, null, "*"),
+  },
+  typecast_agent: {
+    label: "Type Casting",
+    color: "bg-amber-500/10 text-amber-600 border-amber-200",
+    icon: React.createElement(TextIcon, null, "T"),
+  },
   duplicate_handler: {
     label: "Deduplication",
     color: "bg-violet-500/10 text-violet-600 border-violet-200",
@@ -35,6 +50,17 @@ export function roleMeta(role: string) {
       icon: React.createElement(TextIcon, null, "*"),
     }
   );
+}
+
+export function formatDisplayValue(value: any, fallback = "—"): string {
+  if (value === null || value === undefined || value === "") return fallback;
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
 }
 
 export function getOptionConsequence(

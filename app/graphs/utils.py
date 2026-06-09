@@ -8,6 +8,7 @@ import pandas as pd
 
 from app.graphs.states.global_state import GlobalState
 from app.graphs.states.planning import ExecutionPlan, TaskDetail
+from app.services.dataframe_order import restore_original_column_order
 from app.services.lineage_service import LineageService
 from app.services.lineage_utils import resolve_lineage_session_id
 
@@ -45,7 +46,7 @@ def _load_latest_dataframe(state: GlobalState, task: TaskDetail) -> pd.DataFrame
         try:
             dataframe = LineageService.get_latest_version(session_id)
             if not dataframe.empty:
-                return dataframe
+                return restore_original_column_order(dataframe, state)
         except Exception:
             # Keep file-based validation usable for local/dev runs when lineage is unavailable.
             pass
