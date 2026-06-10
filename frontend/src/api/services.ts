@@ -195,8 +195,10 @@ export const pipelineApi = {
       semantic_profile: data.semantic_profile,
       input_validation_result: valResult,
       execution_plan: data.execution_plan,
+      f1_metrics: data.f1_metrics,
     };
   },
+
 
   getCheckpoint: async (runId: string): Promise<HITLCheckpointResponse | null> => {
     const state = await pipelineApi.getFullState(runId);
@@ -289,6 +291,7 @@ export const pipelineApi = {
             'Matched Columns': state.structured_cleaning_spec?.columns_mapping?.length || 0,
             'Missing values detected': Object.values(state.data_profile.columns || {}).reduce((acc: number, col: any) => acc + (col.categorical_stats?.missing_count || col.numeric_stats?.missing_count || 0), 0),
           } : {},
+          ...(state.f1_metrics ? { 'F1-Score Evaluation': state.f1_metrics } : {}),
         },
         issues: (state.structured_cleaning_spec?.open_questions || []).map((q: string, i: number) => ({
           severity: 'info',

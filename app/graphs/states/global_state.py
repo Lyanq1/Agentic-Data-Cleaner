@@ -77,6 +77,10 @@ class GlobalState(TypedDict):
 
     # Global Shared Errors
     global_errors: Annotated[list[str], append_list]
+    
+    # Evaluation Metrics
+    f1_metrics: dict[str, Any] | None
+
 
 class AgentStatus:
     IDLE = "idle"
