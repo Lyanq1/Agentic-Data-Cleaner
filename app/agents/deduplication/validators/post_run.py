@@ -18,6 +18,8 @@ def build_validation_results(
     unresolved_collisions: list[dict[str, Any]],
     fuzzy_candidate_count: int,
     fuzzy_notes: list[str],
+    pending_review_case_count: int,
+    pending_review_case_ids: list[str],
 ) -> list[ValidationResultItem]:
     """Build validation items using the current repo schema."""
 
@@ -40,6 +42,13 @@ def build_validation_results(
     if fuzzy_notes:
         replan_hints["fuzzy_notes"] = fuzzy_notes
 
+    recommended_next_action = "pass" if not failed_rules else "retry_worker"
+    if pending_review_case_count:
+        metrics_observed["pending_review_case_count"] = pending_review_case_count
+        metrics_observed["pending_review_case_ids"] = pending_review_case_ids
+        replan_hints["hitl_reason"] = "Ambiguous dedup cases require human review."
+        recommended_next_action = "hitl"
+
     return [
         ValidationResultItem(
             agent=agent_name,
@@ -48,7 +57,7 @@ def build_validation_results(
             failed_rules=failed_rules,
             metrics_observed=metrics_observed,
             replan_hints=replan_hints,
-            recommended_next_action="pass" if not failed_rules else "retry_worker",
+            recommended_next_action=recommended_next_action,
             timestamp=timestamp,
         )
     ]

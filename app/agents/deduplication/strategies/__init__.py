@@ -3,6 +3,7 @@
 from app.agents.deduplication.strategies.composite_key import (
     CompositeKeyExecutionResult,
     ExactKeyDedupConfig,
+    build_normalized_key_frame,
     execute_exact_key_dedup,
     has_normalized_key_duplicates,
 )
@@ -12,6 +13,7 @@ from app.agents.deduplication.strategies.fuzzy_blocking import run_fuzzy_blockin
 __all__ = [
     "CompositeKeyExecutionResult",
     "ExactKeyDedupConfig",
+    "build_normalized_key_frame",
     "execute_exact_key_dedup",
     "execute_full_row_dedup",
     "has_normalized_key_duplicates",

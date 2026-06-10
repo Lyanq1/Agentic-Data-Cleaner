@@ -1,6 +1,6 @@
 """State models for specific agent workers and their results."""
 
-from typing import Literal
+from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 class WorkerStateDetail(BaseModel):
@@ -24,6 +24,18 @@ class DedupDecisionTrace(BaseModel):
     validation_notes: list[str] = Field(default_factory=list)
     context_hash: str
 
+
+class DeduplicationReviewCase(BaseModel):
+    case_id: str
+    candidate_type: Literal["weak_single_key", "name_only", "cross_script_name", "fuzzy_candidate"]
+    row_fingerprints: list[str] = Field(default_factory=list)
+    row_indices: list[int] = Field(default_factory=list)
+    row_data: list[dict[str, Any]] = Field(default_factory=list)
+    matching_fields: list[str] = Field(default_factory=list)
+    conflicting_fields: list[str] = Field(default_factory=list)
+    agent_rationale: str = ""
+    suggested_action: Literal["merge", "do_not_merge"] | None = None
+
 class DeduplicationResult(BaseModel):
     applied_modes: list[Literal["exact_full_row", "exact_key"]] = Field(default_factory=list)
     key_columns: list[str] = Field(default_factory=list)
@@ -38,3 +50,4 @@ class DeduplicationResult(BaseModel):
     duplicate_group_count: int = 0
     notes: list[str] = Field(default_factory=list)
     decision_trace: DedupDecisionTrace | None = None
+    pending_review_cases: list[DeduplicationReviewCase] = Field(default_factory=list)

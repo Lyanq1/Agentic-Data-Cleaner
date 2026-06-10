@@ -7,11 +7,13 @@ from pathlib import Path
 from typing import Any
 
 from app.agents.deduplication.agent import DeduplicationAgent
+from app.agents.deduplication.models import DeduplicationHitlFeedback
 from app.agents.roles import AgentRole
 from app.graphs.graph import build_graph
 from app.graphs.checkpointer import get_checkpointer_manager
 from app.graphs.states.global_state import GlobalState
 from app.graphs.states.planning import ExecutionPlan, TaskDetail, TaskDetailWrapper, PlanMetadata, GlobalConstraints
+from app.graphs.states.workers import DeduplicationResult
 
 logger = logging.getLogger(__name__)
 
@@ -131,6 +133,8 @@ async def get_pipeline_state(run_id: str) -> dict[str, Any] | None:
         "validation_results": state.get("validation_results", []),
         "deduplication_result": state.get("deduplication_result"),
         "current_dataset_version": state.get("current_dataset_version"),
+        "hitl_status": state.get("hitl_status"),
+        "hitl_checkpoint": state.get("hitl_checkpoint"),
         "execution_plan": state.get("execution_plan").model_dump() if state.get("execution_plan") and hasattr(state.get("execution_plan"), "model_dump") else state.get("execution_plan"),
         "current_step": state.get("current_step"),
         "completed_steps": state.get("completed_steps", []),
@@ -230,5 +234,53 @@ async def run_dedup_agent_for_run(
     persisted_state = await get_pipeline_state(run_id)
     return {
         "run_id": run_id,
+        "state": persisted_state,
+    }
+
+
+async def submit_dedup_hitl_feedback(
+    run_id: str,
+    feedback: DeduplicationHitlFeedback,
+) -> dict[str, Any] | None:
+    """Validate and persist HITL decisions for a dedup review cycle."""
+
+    raw_state = await get_pipeline_raw_state(run_id)
+    if raw_state is None:
+        return None
+
+    existing_result_raw = raw_state.get("deduplication_result")
+    if not existing_result_raw:
+        raise ValueError("No deduplication_result is available for this run.")
+
+    existing_result = DeduplicationResult.model_validate(existing_result_raw)
+    pending_review_cases = existing_result.pending_review_cases
+    if not pending_review_cases:
+        raise ValueError("There are no pending dedup review cases for this run.")
+
+    pending_case_ids = {case.case_id for case in pending_review_cases}
+    accepted_decisions = [
+        decision for decision in feedback.decisions if decision.case_id in pending_case_ids
+    ]
+    unknown_case_ids = [
+        decision.case_id for decision in feedback.decisions if decision.case_id not in pending_case_ids
+    ]
+
+    persisted_feedback = DeduplicationHitlFeedback(decisions=accepted_decisions)
+    config = {"configurable": {"thread_id": run_id}}
+    updates = {
+        "hitl_feedback": persisted_feedback.model_dump_json(),
+        "hitl_status": "pending",
+        "hitl_checkpoint": raw_state.get("current_task_idx"),
+    }
+
+    async with get_checkpointer_manager().get() as checkpointer:
+        graph = build_graph(checkpointer=checkpointer)
+        await graph.aupdate_state(config, updates, as_node="dedup_review")
+
+    persisted_state = await get_pipeline_state(run_id)
+    return {
+        "run_id": run_id,
+        "accepted_decision_count": len(accepted_decisions),
+        "unknown_case_ids": unknown_case_ids,
         "state": persisted_state,
     }

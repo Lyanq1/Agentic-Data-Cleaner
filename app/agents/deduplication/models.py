@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from app.graphs.states.planning import TaskDetail
 from app.graphs.states.profiler_state import StatisticalProfile
 from app.graphs.states.profiles import SemanticProfile
-from app.graphs.states.workers import DedupDecisionTrace
+from app.graphs.states.workers import DedupDecisionTrace, DeduplicationReviewCase
 
 
 class DeduplicationAgentInput(BaseModel):
@@ -89,6 +89,25 @@ class FuzzyCandidateSet(BaseModel):
         return len(self.candidates)
 
 
+class DeduplicationHitlDecision(BaseModel):
+    case_id: str
+    decision: Literal["merge", "do_not_merge"]
+    reason: str | None = None
+
+
+class DeduplicationHitlFeedback(BaseModel):
+    decisions: list[DeduplicationHitlDecision] = Field(default_factory=list)
+
+
+class AppliedHitlResult(BaseModel):
+    deduped_df: Any
+    applied_case_ids: list[str] = Field(default_factory=list)
+    rejected_case_ids: list[str] = Field(default_factory=list)
+    unknown_case_ids: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+    remaining_review_cases: list[DeduplicationReviewCase] = Field(default_factory=list)
+
+
 @dataclass(slots=True)
 class FuzzyBlockingConfig:
     """Static fuzzy blocking configuration for slice 2."""
@@ -100,3 +119,8 @@ class FuzzyBlockingConfig:
     person_threshold: float = 0.4
     address_threshold: float = 0.6
     max_bucket_size: int = 500
+
+
+@dataclass(slots=True)
+class HitlConfig:
+    max_review_cases: int = 50

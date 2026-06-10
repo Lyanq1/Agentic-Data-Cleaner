@@ -37,6 +37,8 @@
   - `most_complete` tie-breaking for key duplicate groups
     - fewest nulls wins
     - stable first occurrence wins ties
+  - HITL review-case emission for ambiguous cases
+  - HITL feedback consumption on rerun via `hitl_feedback`
 
   ### Unsafe deterministic cases now blocked
 
@@ -48,6 +50,7 @@
   These cases are preserved, not merged, and surfaced through:
 
   - `deduplication_result.notes`
+  - `deduplication_result.pending_review_cases`
   - `validation_results[*].metrics_observed`
   - `validation_results[*].replan_hints`
 
@@ -71,6 +74,30 @@ Current fuzzy behavior:
   - no row merge
   - no sidecar artifact
   - no LLM pair classification
+
+  ## HITL
+
+  HITL is now supported for ambiguous dedup cases.
+
+  Current behavior:
+
+  - pending review cases are persisted in:
+    - `deduplication_result.pending_review_cases`
+  - `validation_results` signals review requirement only:
+    - `recommended_next_action = "hitl"`
+    - pending case counts and IDs in `metrics_observed`
+  - human decisions are submitted as serialized JSON into:
+    - `GlobalState.hitl_feedback`
+  - on rerun, dedup consumes that feedback and:
+    - merges approved cases with `most_complete` keep logic
+    - leaves rejected cases unchanged
+    - removes resolved cases from `pending_review_cases`
+
+  `hitl_status` usage:
+
+  - `"pending"` when review cases exist
+  - `"approved"` when submitted feedback resolves all pending cases
+  - `"rejected"` remains reserved and is not set by dedup in the current slice
 
   ## State Contract
 
@@ -112,6 +139,12 @@ Current fuzzy behavior:
 
   Those concerns are handled through existing structures instead.
 
+  HITL-related top-level fields used:
+
+  - `hitl_feedback`
+  - `hitl_status`
+  - `hitl_checkpoint`
+
   ## Dedup Result Contract
 
   The persisted dedup result remains:
@@ -130,7 +163,8 @@ Current fuzzy behavior:
       key_duplicate_count=...,
       duplicate_group_count=...,
       notes=[...],
-      decision_trace=...
+      decision_trace=...,
+      pending_review_cases=[...]
   )
   ```
 
@@ -172,6 +206,10 @@ Current fuzzy behavior:
   - `replan_hints`
     - safer follow-up guidance when unresolved collisions were detected
     - fuzzy notes when fuzzy blocking ran
+    - HITL guidance when pending review cases exist
+
+  `validation_results` is not the source of truth for pending review lifecycle.
+  It is signaling and audit only.
 
   ## API And Testing Path
 
@@ -193,6 +231,13 @@ Current fuzzy behavior:
 
   It is not part of the public route schema.
 
+  ### HITL feedback route
+
+  `POST /api/v1/dedup/review/{run_id}`
+
+  This persists accepted human decisions into `hitl_feedback`.
+  It does not rerun the dedup agent automatically.
+
   ### State inspection
 
   Use:
@@ -203,9 +248,11 @@ Current fuzzy behavior:
 
   - `physical_dataframe_path`
   - `deduplication_result`
+  - `deduplication_result.pending_review_cases`
   - `worker_states`
   - `validation_results`
   - `current_dataset_version`
+  - `hitl_status`
 
   ## Output File Behavior
 
@@ -236,7 +283,7 @@ Current fuzzy behavior:
 
   - fuzzy candidates are not persisted as a standalone artifact
   - there is no LLM-assisted pair resolution yet
-  - there is no HITL path for fuzzy candidates yet
+  - `hitl_checkpoint` is written as forward-compatible metadata only; supervisor resume routing is not implemented here
   - internal debug overrides are still available during migration and intentionally bypass the LLM path
 
   ## Bottom Line
@@ -248,6 +295,7 @@ Current fuzzy behavior:
   - LLM-guided for strategy selection
   - deterministic for execution
   - dataset-agnostic in its normalization layer
+  - async HITL-capable for ambiguous cases
   - repo-aligned in state usage
   - non-redundant in persisted fields
   - able to reject risky exact-key merges and surface them without inventing new schema

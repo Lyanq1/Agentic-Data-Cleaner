@@ -41,6 +41,30 @@ def _count_duplicate_groups(df: pd.DataFrame, key_columns: list[str]) -> int:
     return int(sizes[sizes > 1].shape[0])
 
 
+def build_normalized_key_frame(
+    df: pd.DataFrame,
+    key_columns: list[str],
+    *,
+    explicit_roles: dict[str, str] | None = None,
+    semantic_profile: SemanticProfile | None = None,
+) -> pd.DataFrame:
+    """Build a normalized comparison frame for the requested key columns."""
+
+    working = df.copy()
+    compare_columns: list[str] = []
+    for column in key_columns:
+        compare_name = f"__dedup_key__{column}"
+        normalized_series, _ = _normalize_key_series(
+            column,
+            working[column],
+            explicit_roles=explicit_roles,
+            semantic_profile=semantic_profile,
+        )
+        working[compare_name] = normalized_series.fillna("")
+        compare_columns.append(compare_name)
+    return working[compare_columns]
+
+
 @dataclass(slots=True)
 class ExactKeyDedupConfig:
     """Execution policy for exact key dedup."""
@@ -128,16 +152,10 @@ def has_normalized_key_duplicates(
 
     if not key_columns:
         return False
-    working = df.copy()
-    compare_columns: list[str] = []
-    for column in key_columns:
-        compare_name = f"__dedup_key__{column}"
-        normalized_series, _ = _normalize_key_series(
-            column,
-            working[column],
-            explicit_roles=explicit_roles,
-            semantic_profile=semantic_profile,
-        )
-        working[compare_name] = normalized_series.fillna("")
-        compare_columns.append(compare_name)
-    return bool(working.duplicated(subset=compare_columns, keep=False).any())
+    compare_frame = build_normalized_key_frame(
+        df,
+        key_columns,
+        explicit_roles=explicit_roles,
+        semantic_profile=semantic_profile,
+    )
+    return bool(compare_frame.duplicated(keep=False).any())
