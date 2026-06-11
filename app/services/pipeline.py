@@ -47,6 +47,7 @@ async def run_pipeline(
     user_prompt: str = "",
     original_filename: str = "",
     data_schema: dict | None = None,
+    clean_dataset_path: str | None = None,
 ) -> dict[str, Any]:
     """Run the profiler → input_validator pipeline on a canonical Parquet dataset.
 
@@ -63,6 +64,7 @@ async def run_pipeline(
     initial_state = {
         "messages": [],
         "dataset_path": canonical_path,
+        "clean_dataset_path": clean_dataset_path,
         "user_prompt": user_prompt,
         "project_id": run_id,
         "session_id": Path(canonical_path).stem,

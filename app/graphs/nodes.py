@@ -465,81 +465,78 @@ async def report_agent_node(state: GlobalState) -> dict[str, Any]:
         except Exception as exc:
             logger.error(f"report_agent_node: failed to load dirty dataframe: {exc}")
 
-    # Check if the dataset matches the hospital dataset based on columns
+    # Check if a clean ground truth dataset was provided
     f1_metrics = None
-    hospital_cols = {"ProviderNumber", "HospitalName", "MeasureCode", "MeasureName", "Stateavg"}
-    if cleaned_df is not None and not cleaned_df.empty:
-        matching_cols = [c for c in hospital_cols if c in cleaned_df.columns]
-        if len(matching_cols) >= 3:
-            # Matches hospital dataset! Perform evaluation against tests/hospital_clean.csv
-            gt_path = Path.cwd() / "tests" / "hospital_clean.csv"
-            if gt_path.exists() and dirty_df is not None and not dirty_df.empty:
-                try:
-                    logger.info(f"report_agent_node: hospital dataset detected, loading ground truth from {gt_path}")
-                    gt_df = pd.read_csv(gt_path)
+    gt_path_str = state.get("clean_dataset_path")
+    if gt_path_str and cleaned_df is not None and not cleaned_df.empty and dirty_df is not None and not dirty_df.empty:
+        try:
+            gt_path = Path(gt_path_str)
+            if gt_path.exists():
+                logger.info(f"report_agent_node: ground truth dataset detected, loading from {gt_path}")
+                gt_df = _load_dataframe(str(gt_path))
+                
+                # Align columns (exclude 'index' metadata column from GT)
+                gt_cols = [c for c in gt_df.columns if c != "index"]
+                common_cols = [c for c in gt_cols if c in cleaned_df.columns and c in dirty_df.columns]
+                
+                if common_cols:
+                    # Align rows (ensure equal lengths by slicing to the minimum)
+                    num_rows = min(len(gt_df), len(cleaned_df), len(dirty_df))
+                    df_gt_aligned = gt_df.iloc[:num_rows][common_cols]
+                    df_dirty_aligned = dirty_df.iloc[:num_rows][common_cols]
+                    df_cleaned_aligned = cleaned_df.iloc[:num_rows][common_cols]
                     
-                    # Align columns (exclude 'index' metadata column from GT)
-                    gt_cols = [c for c in gt_df.columns if c != "index"]
-                    common_cols = [c for c in gt_cols if c in cleaned_df.columns and c in dirty_df.columns]
+                    total_cells = num_rows * len(common_cols)
+                    total_tp = 0
+                    total_fp = 0
+                    total_fn = 0
+                    total_correct = 0
                     
-                    if common_cols:
-                        # Align rows (ensure equal lengths by slicing to the minimum)
-                        num_rows = min(len(gt_df), len(cleaned_df), len(dirty_df))
-                        df_gt_aligned = gt_df.iloc[:num_rows][common_cols]
-                        df_dirty_aligned = dirty_df.iloc[:num_rows][common_cols]
-                        df_cleaned_aligned = cleaned_df.iloc[:num_rows][common_cols]
+                    def get_equivalent_mask(s1: pd.Series, s2: pd.Series) -> pd.Series:
+                        def normalize(s):
+                            return s.astype(str).str.strip().str.lower().str.replace(r'\.0$', '', regex=True).replace({
+                                "nan": "__null__",
+                                "none": "__null__",
+                                "": "__null__",
+                                "empty": "__null__"
+                            })
+                        return normalize(s1) == normalize(s2)
+                    
+                    for col in common_cols:
+                        is_gt_equal_dirty = get_equivalent_mask(df_gt_aligned[col], df_dirty_aligned[col])
+                        is_cleaned_equal_gt = get_equivalent_mask(df_cleaned_aligned[col], df_gt_aligned[col])
+                        is_cleaned_equal_dirty = get_equivalent_mask(df_cleaned_aligned[col], df_dirty_aligned[col])
                         
-                        total_cells = num_rows * len(common_cols)
-                        total_tp = 0
-                        total_fp = 0
-                        total_fn = 0
-                        total_correct = 0
+                        tp = ((~is_gt_equal_dirty) & is_cleaned_equal_gt).sum()
+                        fp = ((~is_cleaned_equal_gt) & (~is_cleaned_equal_dirty)).sum()
+                        fn = ((~is_gt_equal_dirty) & (~is_cleaned_equal_gt)).sum()
+                        correct = is_cleaned_equal_gt.sum()
                         
-                        def get_equivalent_mask(s1: pd.Series, s2: pd.Series) -> pd.Series:
-                            def normalize(s):
-                                return s.astype(str).str.strip().str.lower().str.replace(r'\.0$', '', regex=True).replace({
-                                    "nan": "__null__",
-                                    "none": "__null__",
-                                    "": "__null__",
-                                    "empty": "__null__"
-                                })
-                            return normalize(s1) == normalize(s2)
-                        
-                        for col in common_cols:
-                            is_gt_equal_dirty = get_equivalent_mask(df_gt_aligned[col], df_dirty_aligned[col])
-                            is_cleaned_equal_gt = get_equivalent_mask(df_cleaned_aligned[col], df_gt_aligned[col])
-                            is_cleaned_equal_dirty = get_equivalent_mask(df_cleaned_aligned[col], df_dirty_aligned[col])
-                            
-                            tp = ((~is_gt_equal_dirty) & is_cleaned_equal_gt).sum()
-                            fp = ((~is_cleaned_equal_gt) & (~is_cleaned_equal_dirty)).sum()
-                            fn = ((~is_gt_equal_dirty) & (~is_cleaned_equal_gt)).sum()
-                            correct = is_cleaned_equal_gt.sum()
-                            
-                            total_tp += int(tp)
-                            total_fp += int(fp)
-                            total_fn += int(fn)
-                            total_correct += int(correct)
-                        
-                        precision = total_tp / (total_tp + total_fp) if (total_tp + total_fp) > 0 else 1.0
-                        recall = total_tp / (total_tp + total_fn) if (total_tp + total_fn) > 0 else 1.0
-                        f1_score = (2 * precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
-                        accuracy = total_correct / total_cells
-                        
-                        f1_metrics = {
-                            "cell_accuracy": round(accuracy, 4),
-                            "error_correction_precision": round(precision, 4),
-                            "error_correction_recall": round(recall, 4),
-                            "f1_score": round(f1_score, 4),
-                            "total_cells_evaluated": total_cells,
-                            "tp": total_tp,
-                            "fp": total_fp,
-                            "fn": total_fn,
-                        }
-                        logger.info(f"report_agent_node: F1 evaluation complete: F1={f1_score:.4f}, Accuracy={accuracy:.4f}")
-                except Exception as exc:
-                    logger.error(f"report_agent_node: failed to evaluate F1 metrics: {exc}")
+                        total_tp += int(tp)
+                        total_fp += int(fp)
+                        total_fn += int(fn)
+                        total_correct += int(correct)
+                    
+                    precision = total_tp / (total_tp + total_fp) if (total_tp + total_fp) > 0 else 1.0
+                    recall = total_tp / (total_tp + total_fn) if (total_tp + total_fn) > 0 else 1.0
+                    f1_score = (2 * precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
+                    accuracy = total_correct / total_cells
+                    
+                    f1_metrics = {
+                        "cell_accuracy": round(accuracy, 4),
+                        "error_correction_precision": round(precision, 4),
+                        "error_correction_recall": round(recall, 4),
+                        "f1_score": round(f1_score, 4),
+                        "total_cells_evaluated": total_cells,
+                        "tp": total_tp,
+                        "fp": total_fp,
+                        "fn": total_fn,
+                    }
+                    logger.info(f"report_agent_node: F1 evaluation complete: F1={f1_score:.4f}, Accuracy={accuracy:.4f}")
             else:
-                logger.warning(f"report_agent_node: hospital dataset detected but ground truth file or dirty file not found (gt_path={gt_path})")
+                logger.warning(f"report_agent_node: ground truth path provided but file not found (gt_path={gt_path})")
+        except Exception as exc:
+            logger.error(f"report_agent_node: failed to evaluate F1 metrics: {exc}")
 
     return {
         "current_step": "reporting",

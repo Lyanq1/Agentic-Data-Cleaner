@@ -33,7 +33,9 @@ For each active issue (that is not already explicitly resolved by the user's ins
 
   Q2_strategy_column_<column_name> (generate individually for columns with null values):
       - Ask the user how they would like to resolve the missing/null values for this specific column.
-      - Provide the pre-assigned options from the column's `fill_strategies` list in the semantic profile, and always add a custom free-text option: `"Custom strategy (describe in your next prompt)"`.
+      - Provide the pre-assigned options from the column's `fill_strategies` list in the semantic profile.
+      - CRITICAL: If the column's actual `dtype` in the Statistical Profile is `string`, `object`, or `mixed` (meaning it contains text like '33 patients'), you MUST append `"fill_llm"` and `"keep_null"` to the options if they are not already present. This is because mathematical operations like `fill_median` or `fill_mean` will fail on text strings!
+      - Always add a custom free-text option: `"Custom strategy (describe in your next prompt)"` as the final option.
       - State the consequences of each option in the `consequences` dictionary.
 
   Q3_semantic_insight / Q4_semantic_insight (Optional):
@@ -98,9 +100,10 @@ Do NOT generate the 3-question structure for blocked scenarios — only explain 
    - Do NOT proceed automatically. Set `status = "needs_clarification"`.
    - Treat all active issues (present in the dataset) as requiring clarification. Generate the clarification questions for each active issue to confirm the strategies and semantic insights.
    
-2. **Generalized Auditing for Active Issues vs. User Instruction (Strict Mapping):** 
+2. **Generalized Auditing for Active Issues vs. User Instruction (Strict Mapping & Language Support):** 
    - You MUST audit and cross-reference all active issues (NULL, DUPLICATE, TYPECAST) detected in STEP 1 against the user's explicit instructions/requests.
-   - Note: The user instructions might be in another language (e.g. Vietnamese, such as "hãy xử lý lỗi duplicate..."). Translate and understand the user prompt's intent precisely.
+   - **Language Support:** The user instructions might be in another language (e.g. Vietnamese, such as "hãy xử lý lỗi duplicate...", "xóa các dòng trùng", "xử lý rỗng"). You MUST mentally translate the instruction to English before applying the strict mapping rules below.
+   - Do NOT assume a generic instruction (e.g., "xử lý data", "clean dataset", "xử lý duplicate") applies to everything. For instance, if they only asked to fix duplicates (e.g. "xử lý duplicate"), they did NOT resolve the NULL issue!
    - Do NOT assume a default strategy or clean any active issue silently if it is not explicitly addressed/resolved by the user's instruction.
    - Strict criteria for "explicitly addressed/resolved":
      * The **NULL** issue is explicitly addressed ONLY if the user prompt specifies a concrete strategy to handle missing/null values (e.g. "điền các giá trị null bằng...", "fill missing values with...", "impute nulls"). Simply asking to "clean duplicates" or "clean the dataset" or "cast types" does NOT address the NULL issue.

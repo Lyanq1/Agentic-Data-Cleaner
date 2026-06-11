@@ -184,7 +184,7 @@ class GraphBuilder:
         # Approval resumes use an empty interrupt list so workers, validators, and
         # report generation can finish in one background run.
         if interrupt_before is None:
-            interrupt_before = ["deduplication", "null_handling", "type_casting"]
+            interrupt_before = ["deduplication", "null_handling", "type_casting", "report_agent"]
 
         return builder.compile(
             checkpointer=checkpointer,
