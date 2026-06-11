@@ -27,7 +27,7 @@ export const InputValidationClarificationContent: React.FC<{
     categories.forEach((cat) => {
       const catData = clarifications[cat];
       if (catData) {
-        count += Object.keys(catData).length;
+        count += Object.keys(catData).filter((qKey) => catData[qKey]).length;
       }
     });
     return count;
@@ -39,7 +39,7 @@ export const InputValidationClarificationContent: React.FC<{
       const catData = clarifications[cat];
       if (catData) {
         Object.keys(catData).forEach((qKey) => {
-          if (answers[`${cat}.${qKey}`]) {
+          if (catData[qKey] && answers[`${cat}.${qKey}`]) {
             count += 1;
           }
         });
@@ -99,9 +99,10 @@ export const InputValidationClarificationContent: React.FC<{
                   .sort()
                   .map((qKey, qi) => {
                     const q = catData[qKey];
+                    if (!q) return null;
                     const key = `${cat}.${qKey}`;
                     const selectedVal = answers[key] || "";
-                    const isStrategy = "options" in q;
+                    const isStrategy = q && typeof q === "object" && "options" in q;
 
                     return (
                       <div

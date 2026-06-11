@@ -38,10 +38,11 @@ class InsightQuestion(BaseModel):
         default=None, description="The user's answer ('yes', 'no', or comment)."
     )
 class NullClarifications(BaseModel):
+    model_config = {"extra": "allow"}
+
     Q1_strategy: StrategyQuestion | None = None
     Q2_semantic_insight: InsightQuestion | None = None
     Q3_semantic_insight: InsightQuestion | None = None
-    Q4_allow_missing_confirmation: AllowMissingConfirmationQuestion | None = None
 
 class DuplicateClarifications(BaseModel):
     Q1_strategy: StrategyQuestion | None = None

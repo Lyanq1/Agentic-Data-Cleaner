@@ -145,11 +145,6 @@ async def run_pipeline(
                             }
                         })
                         
-            # Tell frontend that execution ended
-            await manager.broadcast_to_run(run_id, {
-                "event": "status_change",
-                "status": "completed"
-            })
         except Exception as e:
             logger.error(f"Pipeline execution error: {e}")
             await manager.broadcast_to_run(run_id, {
@@ -161,6 +156,19 @@ async def run_pipeline(
         
         snapshot = await graph.aget_state(config)
         final_state = snapshot.values if snapshot else initial_state
+
+        # Check if the graph has paused at an interrupt (meaning execution is not fully completed yet)
+        is_interrupted = bool(snapshot and snapshot.next)
+        if not is_interrupted:
+            await manager.broadcast_to_run(run_id, {
+                "event": "status_change",
+                "status": "completed"
+            })
+        else:
+            await manager.broadcast_to_run(run_id, {
+                "event": "status_change",
+                "status": "paused"
+            })
 
     raw_profile = final_state.get("statistical_profile")
     formatted_profile = _format_profile_for_frontend(raw_profile)

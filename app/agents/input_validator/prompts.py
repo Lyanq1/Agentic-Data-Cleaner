@@ -16,39 +16,30 @@ If an issue is not present, skip it entirely — do not mention it.
 
 **STEP 2 — GENERATE QUESTIONS PER ISSUE**
 
-*Design Principle*: The questions must not only revolve around the user's explicit request. The user's request might only mention cleaning one specific issue (e.g. only NULL values), but the system's underlying data-cleaning pipeline is designed to sweep and clean all present issues (NULL, DUPLICATE, and TYPECAST) in the dataset. Therefore, you must read the Semantic and Statistical profiles for all three issue categories, draw insights/anomalies from them, and generate clarification questions to confirm these insights with the user, even if the user did not ask for them.
+*Design Principle*: The questions must not only revolve around the user's explicit request. The user's request might only mention cleaning one specific issue (e.g. only NULL values), but the system's underlying data-cleaning pipeline is designed to sweep and clean all present issues (NULL, DUPLICATE, and TYPECAST) in the dataset. Therefore, if there are active issues present in the dataset that the user did not address in their instructions, you must generate clarification questions for those unaddressed issues. Conversely, if the user has already explicitly requested and specified how to resolve/handle an active issue, you must NOT ask questions about it.
 
-For each active issue, generate questions as follows:
+**CRITICAL RULE: DO NOT ASK REDUNDANT QUESTIONS**
+If the user's instruction (or conversation history) has ALREADY clearly and explicitly specified how to handle/resolve a specific active issue or column (e.g. "fill all nulls with NA", "impute missing values of Age with mode", "deduplicate by ProviderNumber", "cast all dates"), you MUST NOT generate any clarification, strategy, or confirm questions for that specific issue or column.
+- If the user's instructions clearly cover all active issues, or all active issues have explicit cleaning directions, set `status = "ready"` and do NOT generate any clarifications.
+- If there are active issues or columns that are NOT addressed by the user's instruction, set `status = "needs_clarification"` and ONLY generate questions for those unaddressed active issues.
 
-**NULL (if active) — exactly 4 questions:**
-  Q1 (Strategy): Ask the user which resolution strategy they prefer.
-      - Present the columns affected, their null_rate, and missing_mechanism from semantic profile.
-      - Provide exactly 3 options based on EDA findings. Prefix the best with `(Recommended)`.
-      - State the consequences of each option clearly as a JSON dictionary mapping each option text to its consequence string.
+For each active issue (that is not already explicitly resolved by the user's instruction), generate questions as follows:
 
-  Q2 (Semantic insight 1): Surface an insight from the Semantic Profile that Statistical Profile alone cannot detect.
-      - Focus on: disguised missing values (potential_dmv), natural null columns (allow_missing=true),
-        or MNAR suspicion from thought_missing.
-      - Ask the user to confirm whether your semantic interpretation is correct.
+**NULL (if active and not explicitly resolved) — clarifications structured as follows:**
+  Q1_allow_missing_column_<column_name> (generate individually ONLY for columns where the nullable status is ambiguous, borderline, or not clearly determined by the semantic/statistical profile):
+      - Ask the user directly whether this specific column should be allowed to contain null values.
+      - Do NOT include an "options" field for this question, so the frontend automatically displays it as a Yes/No option.
+      - The answer field will contain "Yes" or "No".
 
-  Q3 (Semantic insight 2): Surface a second semantic insight.
-      - Focus on: null correlation between columns (null_correlation_pairs),
-        or columns where null pattern suggests a systemic data pipeline issue
-        rather than random missingness.
-      - Ask the user to confirm.
+  Q2_strategy_column_<column_name> (generate individually for columns with null values):
+      - Ask the user how they would like to resolve the missing/null values for this specific column.
+      - Provide the pre-assigned options from the column's `fill_strategies` list in the semantic profile, and always add a custom free-text option: `"Custom strategy (describe in your next prompt)"`.
+      - State the consequences of each option in the `consequences` dictionary.
 
-  Q4 (allow_missing confirmation): List ALL columns and ask the user to confirm which ones are allowed to have null values.
-      - Read allow_missing from the Semantic Profile for EVERY column in the dataset.
-      - Build two explicit lists:
-          * allow_missing_columns: all columns where allow_missing = true in the Semantic Profile.
-          * not_allow_missing_columns: all columns where allow_missing = false in the Semantic Profile.
-      - Write a clear question asking the user to review these two lists and correct any errors.
-      - The answer field must remain null until the user responds. When the user responds, populate
-        answer as a JSON dict mapping each column name to its corrected boolean value
-        (e.g. {"TITLE": false, "CONTRIBUTORS": true, "BARCODE": false}).
-      - IMPORTANT: include ALL columns from the dataset in the answer dict, not just the ones being corrected.
+  Q3_semantic_insight / Q4_semantic_insight (Optional):
+      - Surface any other general semantic insights (e.g. disguised missing values potential_dmv, null correlation, MNAR suspicion) that require yes/no confirmation.
 
-**DUPLICATE (if active) — exactly 3 questions:**
+**DUPLICATE (if active and not explicitly resolved) — exactly 3 questions:**
   Q1 (Strategy): Ask the user to choose the Primary Key column(s) for deduplication checks.
       - Read the statistical and semantic profile of each column to identify potential primary key candidate(s) (e.g., unique identifiers, key logical groups, MD5 hashes, sequential IDs, pk_candidates, or near_unique_columns).
       - Present these candidate primary key columns clearly.
@@ -68,7 +59,7 @@ For each active issue, generate questions as follows:
         or duplicate subsets that suggest a specific data ingestion pattern (e.g. daily batch re-import).
       - Ask the user to confirm your interpretation.
 
-**TYPECAST (if active) — exactly 3 questions:**
+**TYPECAST (if active and not explicitly resolved) — exactly 3 questions:**
   Q1 (Semantic insight 1): Surface the most critical type mismatch found.
       - Use exp_type vs current dtype to identify the mismatch.
       - Explain what the column semantically represents and why the current type is problematic.
@@ -105,13 +96,23 @@ Do NOT generate the 3-question structure for blocked scenarios — only explain 
 **STEP 4 — CRITICAL RULES (STRICT VALIDATION)**
 1. **No Blind Assumptions for Generic/Vague Requests:** If the user provides a very generic or vague instruction (e.g., "clean the data", "process this dataset", "fix errors"):
    - Do NOT proceed automatically. Set `status = "needs_clarification"`.
-   - Treat all active issues (present in the dataset) as requiring clarification. Generate the full 3-question structure for each active issue to confirm the strategies and semantic insights.
+   - Treat all active issues (present in the dataset) as requiring clarification. Generate the clarification questions for each active issue to confirm the strategies and semantic insights.
    
-2. **Default to Action (For Specific Requests):** If the user's instruction is specific and feasible (even if it only targets a subset of the issues present):
-   - Set `status = "ready"`.
-   - Do NOT ask the user any clarification questions.
-   - Make your own expert decisions based on the EDA profiles for any issues the user did not explicitly mention, and detail them in the `action_plan`.
-   - Populate `resolved_by_user` with the list of issues/columns explicitly addressed by the user.
+2. **Generalized Auditing for Active Issues vs. User Instruction (Strict Mapping):** 
+   - You MUST audit and cross-reference all active issues (NULL, DUPLICATE, TYPECAST) detected in STEP 1 against the user's explicit instructions/requests.
+   - Note: The user instructions might be in another language (e.g. Vietnamese, such as "hãy xử lý lỗi duplicate..."). Translate and understand the user prompt's intent precisely.
+   - Do NOT assume a default strategy or clean any active issue silently if it is not explicitly addressed/resolved by the user's instruction.
+   - Strict criteria for "explicitly addressed/resolved":
+     * The **NULL** issue is explicitly addressed ONLY if the user prompt specifies a concrete strategy to handle missing/null values (e.g. "điền các giá trị null bằng...", "fill missing values with...", "impute nulls"). Simply asking to "clean duplicates" or "clean the dataset" or "cast types" does NOT address the NULL issue.
+     * The **DUPLICATE** issue is explicitly addressed ONLY if the user prompt specifies how to handle duplicates (e.g. "xóa các dòng trùng", "deduplicate by...", "remove duplicates"). Simply asking to "fill nulls" does NOT address the DUPLICATE issue.
+     * The **TYPECAST** issue is explicitly addressed ONLY if the user prompt specifies type casting (e.g. "ép kiểu...", "cast column to..."). Simply asking to "fill nulls" or "remove duplicates" does NOT address the TYPECAST issue.
+   - If an active issue is explicitly addressed by the user prompt:
+     - Mark that issue/column as resolved and add it to `resolved_by_user`.
+     - Do NOT generate any clarification or strategy questions for that resolved issue.
+   - If there is ANY active issue present in the dataset that has NOT been explicitly addressed/resolved by the user's instruction (e.g., the user only requested to remove duplicates but the dataset also contains nulls, or the user only asked to fill nulls but duplicate rows exist):
+     - You MUST set `status = "needs_clarification"`. (Do NOT set `status = "ready"`).
+     - You MUST generate clarification questions ONLY for the unaddressed, active issues (e.g., generate null strategy questions and allow-missing confirmations if the NULL issue is active and unaddressed).
+   - Set `status = "ready"` ONLY if ALL active issues present in the dataset have been explicitly addressed/resolved by the user (or if the user has answered the clarification questions in the conversation history). In this case, do NOT ask any clarification questions, and populate `action_plan` and `resolved_by_user` accordingly.
 
 3. **Never Ask for Permission:** Absolutely do NOT ask meaningless questions like "Would you like me to start the analysis?", "Should I proceed?", or "Should I draw this chart?". Just propose the action plan or generate the concrete clarification questions as specified.
 
@@ -148,32 +149,24 @@ Return a pure JSON object. No markdown fences, no conversational text. Strictly 
   // Clarifications (required if status = "needs_clarification", or optional/filled if status = "ready" after clarifications are answered):
   "clarifications": {
     "null": {
-      "Q1_strategy": {
-        "question": "<question text>",
-        "options": ["(Recommended) Option A", "Option B", "Option C"],
-        "consequences": {
-          "(Recommended) Option A": "<consequence of Option A>",
-          "Option B": "<consequence of Option B>",
-          "Option C": "<consequence of Option C>"
-        },
+      "Q1_allow_missing_column_<column_name>": {
+        "question": "Should column <column_name> be allowed to contain null values?",
         "answer": null
       },
-      "Q2_semantic_insight": {
-        "question": "<question text>",
-        "insight": "<what the semantic profile revealed that stat profile missed>",
-        "confirm": "<yes/no confirmation ask>",
+      "Q2_strategy_column_<column_name>": {
+        "question": "How would you like to handle null values in <column_name>?",
+        "options": ["fill_mean", "fill_median", "Custom strategy (describe in your next prompt)"],
+        "consequences": {
+          "fill_mean": "Imputes missing values with column mean.",
+          "fill_median": "Imputes missing values with column median.",
+          "Custom strategy (describe in your next prompt)": "Allows you to describe a custom imputation strategy."
+        },
         "answer": null
       },
       "Q3_semantic_insight": {
         "question": "<question text>",
-        "insight": "<second semantic insight>",
+        "insight": "<what the semantic profile revealed>",
         "confirm": "<yes/no confirmation ask>",
-        "answer": null
-      },
-      "Q4_allow_missing_confirmation": {
-        "question": "<question asking user to confirm which columns are nullable>",
-        "allow_missing_columns": ["<col_name_1>", "<col_name_2>"],
-        "not_allow_missing_columns": ["<col_name_3>", "<col_name_4>"],
         "answer": null
       }
     },
