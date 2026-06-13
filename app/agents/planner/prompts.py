@@ -7,6 +7,10 @@ Your job is to read the Dataset Statistical Profile, the Dataset Semantic Profil
 ### **CRITICAL: HOW TO USE THE INPUT VALIDATION DECISION**
 The `Input Validation Decision` JSON contains decisions, rules, and answered clarification questions from the user/input validator. You must strictly incorporate these into your plan and forward them to the specific worker tasks in the `inputs` section (`relevant_clarifications` and `relevant_action_plan`):
 
+0. **Language Support & Parsing:**
+   - The user instructions or the `action_plan` strings might be in another language (e.g., Vietnamese). You must internally translate them to English to understand the intent, but you MUST preserve the original language if you are copying strings directly to `relevant_action_plan` or `rationale`.
+   - IMPORTANT: Your final output JSON keys MUST remain in English as defined by the schema. Do not translate the JSON structure.
+
 1. **Action Plan (`action_plan`):**
    - Look at the `action_plan` field. If it defines strategies (e.g. `{"null": "Impute column 'age' with mean"}`), you must translate these strategies exactly into the column configurations within the tasks.
    - For each task, populate `inputs.relevant_action_plan` with the corresponding string value from the `action_plan` dict (e.g., `action_plan.null` goes to `null_handling`'s `relevant_action_plan`).
@@ -14,10 +18,23 @@ The `Input Validation Decision` JSON contains decisions, rules, and answered cla
 2. **Resolved Issues (`resolved_by_user`):**
    - Integrate any resolved columns or issues listed here as active columns to clean.
 
-3. **Clarification Answers (`clarifications`):**
+ 3. **Clarification Answers (`clarifications`):**
    - Search the `clarifications` dictionary for any questions that have an `answer` (which is not null).
    - **Deduplication Strategy Answers:** If `duplicate.Q1_strategy.answer` is present, use the column specified in the answer as your primary key. For example, if the answer is `"Use user_id"`, set `"primary_keys": ["user_id"]`.
-   - **Null Handling Strategy Answers:** If `null.Q1_strategy.answer` is present, map the target column to the strategy specified in the answer (e.g., if answer is `"Impute with mean"`, use `"fill_mean"`).
+   - **Null Handling Strategy Answers:**
+     * For each column `<col>`, check if there is a column-specific strategy answer like `null.Q2_strategy_column_<col>.answer`.
+     * Map the chosen answer to the corresponding target strategy in the task's `strategy.per_column.<col>`:
+       - `"fill_mean"` -> `"fill_mean"`
+       - `"fill_median"` -> `"fill_median"`
+       - `"fill_mode"` -> `"fill_mode"`
+       - `"fill_llm"` -> `"fill_llm"`
+       - `"drop_row"` -> `"drop_row"`
+       - `"keep_null"` -> `"leave_as_is"`
+       - `"fill_constant"` -> `"fill_value"` (also set `fill_value` accordingly)
+       - If the user provided a custom prompt / free-text instructions, use your engineering judgment to map it to the most appropriate strategy (e.g., if they request to fill with `0`, use `"fill_value"` with `fill_value = 0`).
+   - **Allow-Missing Confirmations:**
+     * Read the individual yes/no question answers (like `null.Q1_allow_missing_column_<col>.answer` where "Yes" means allow_missing=true, "No" means allow_missing=false).
+     * Incorporate these user choices as the source of truth for which columns are allowed to have missing values.
    - **Semantic Insights:** If the user confirmed a semantic insight (e.g., answering `"yes"` to a check), ensure your plan addresses it.
    - **Clarification Mapping to Worker Tasks:** For each worker task, find any questions under `clarifications` (e.g., under `duplicate` for `deduplication`, `null` for `null_handling`, and `typecast` for `type_casting`) that have a non-null `answer`. Populate `inputs.relevant_clarifications` with a list of objects containing `question` (the text of the question) and `user_answer` (the user's answer text).
 

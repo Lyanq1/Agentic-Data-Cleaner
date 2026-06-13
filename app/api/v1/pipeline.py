@@ -25,6 +25,7 @@ router = APIRouter()
 async def api_run_pipeline(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(..., description="Dataset file (CSV, TSV, Excel, JSON, JSONL)"),
+    clean_file: UploadFile | None = File(None, description="Optional ground truth file for testing"),
     user_prompt: str = Form(default="", description="Optional cleaning instruction"),
 ):
     """Upload a dataset, convert to canonical Parquet, then run profiler → input_validator.
@@ -41,6 +42,22 @@ async def api_run_pipeline(
     except IngestionError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    clean_dataset_path = None
+    if clean_file:
+        clean_contents = await clean_file.read()
+        try:
+            ingestion.validate(clean_file.filename, clean_contents)
+            # Write directly to disk to avoid bottlenecking the process with parsing
+            from app.config.config import get_settings
+            from pathlib import Path
+            upload_dir = Path(get_settings().upload_dir)
+            upload_dir.mkdir(parents=True, exist_ok=True)
+            clean_path = upload_dir / f"clean_{clean_file.filename}"
+            clean_path.write_bytes(clean_contents)
+            clean_dataset_path = str(clean_path)
+        except IngestionError as e:
+            logger.warning(f"Failed to process clean file: {e}")
+
     # Run pipeline in background
     run_id = uuid.uuid4().hex[:12]
     background_tasks.add_task(
@@ -51,6 +68,7 @@ async def api_run_pipeline(
         user_prompt=user_prompt,
         original_filename=result.original_filename,
         data_schema=result.data_schema,
+        clean_dataset_path=clean_dataset_path,
     )
 
     return {
