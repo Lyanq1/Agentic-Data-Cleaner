@@ -122,7 +122,7 @@ const buildExecutionFlow = (
       id: `${meta.taskId}-validator`,
       kind: "Validator",
       kindClass: VALIDATOR_META.kindClass,
-      label: "Pandera Gate",
+      label: "Output Validators",
       description: `Validate ${meta.label.toLowerCase()} output before the next worker runs.`,
       statusLabel: validatorStatus,
       statusClass: statusStyles[validatorStatus],
