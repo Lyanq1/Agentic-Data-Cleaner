@@ -25,6 +25,28 @@ class PandasValidationErrors(Exception):
         self.failure_cases = [{"check": err.check, "message": err.message} for err in errors]
 
 
+def _extract_null_strategy_per_column(task: TaskDetail) -> dict[str, str]:
+    """Extract the per-column null strategy mapping from the planner task.
+
+    Returns a dict of {col_name: strategy_string}, e.g. {"Address2": "drop_column"}.
+    Returns an empty dict if the task has no null strategy or is not a null_handling task.
+    """
+    if task.task_id != "null_handling" or not task.strategy:
+        return {}
+    strategy_raw = task.strategy
+    if hasattr(strategy_raw, "model_dump"):
+        strategy_dict = strategy_raw.model_dump()
+    elif isinstance(strategy_raw, dict):
+        strategy_dict = strategy_raw
+    else:
+        return {}
+    per_column: dict[str, Any] = strategy_dict.get("per_column", {})
+    return {
+        col: (cfg.get("strategy", "") if isinstance(cfg, dict) else "")
+        for col, cfg in per_column.items()
+    }
+
+
 def validate_dataframe(
     dataframe: pd.DataFrame,
     task: TaskDetail,
@@ -36,6 +58,9 @@ def validate_dataframe(
     verification = task.verification
     if not verification:
         return
+
+    # Read the per-column null strategy from the planner so checks are strategy-aware.
+    null_strategy_per_column = _extract_null_strategy_per_column(task)
 
     # Check rule: duplicate_rows_eq_0 (from success metrics)
     if verification.success_metrics and verification.success_metrics.get("duplicate_rows") == 0:
@@ -64,16 +89,40 @@ def validate_dataframe(
                         PandasValidationError(rule, f"Column '{col}' contains duplicate values.")
                     )
         elif rule in ("null_rate_lt", "null_rate_lte") and col:
-            if col in dataframe.columns:
-                threshold = float(threshold_val if threshold_val is not None else 0.0)
-                actual_null_rate = dataframe[col].isna().mean()
-                if actual_null_rate > threshold:
+            col_strategy = null_strategy_per_column.get(col, "")
+
+            if col_strategy == "drop_column":
+                # Planner planned to drop this column — verify it was actually removed.
+                if col in dataframe.columns:
                     errors.append(
                         PandasValidationError(
                             rule,
-                            f"Column '{col}' null rate {actual_null_rate} exceeds threshold {threshold}.",
+                            f"Column '{col}' was planned for drop_column but still exists in the dataframe.",
                         )
                     )
+                # Column is gone → check passes.
+
+            elif col not in dataframe.columns:
+                # Column was not in the plan as drop_column but was auto-dropped by the worker
+                # (e.g. fill_mode on a 100%-null column falls back to drop). Accept this silently.
+                pass
+
+            else:
+                # Column exists and was planned for a fill strategy → check null rate.
+                threshold = float(threshold_val if threshold_val is not None else 0.0)
+                actual_null_rate = dataframe[col].isna().mean()
+                if col_strategy in ("leave_as_is", "keep_null"):
+                    # Column is intentionally allowed to keep nulls — skip null_rate check.
+                    pass
+                elif actual_null_rate > threshold:
+                    errors.append(
+                        PandasValidationError(
+                            rule,
+                            f"Column '{col}' null rate {actual_null_rate:.4f} exceeds threshold "
+                            f"{threshold} (strategy='{col_strategy or 'unknown'}').",
+                        )
+                    )
+
         elif rule in ("dataframe_no_exact_duplicates", "no_duplicate_rows"):
             if dataframe.duplicated().any():
                 errors.append(
