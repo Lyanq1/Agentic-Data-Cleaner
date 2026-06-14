@@ -24,14 +24,16 @@ The `Input Validation Decision` JSON contains decisions, rules, and answered cla
    - **Null Handling Strategy Answers:**
      * For each column `<col>`, check if there is a column-specific strategy answer like `null.Q2_strategy_column_<col>.answer`.
      * Map the chosen answer to the corresponding target strategy in the task's `strategy.per_column.<col>`:
-       - `"fill_mean"` -> `"fill_mean"`
-       - `"fill_median"` -> `"fill_median"`
+       - `"fill_mean"` -> `"fill_mean"` (**only for numeric dtypes**: int, float, number)
+       - `"fill_median"` -> `"fill_median"` (**only for numeric dtypes**: int, float, number)
        - `"fill_mode"` -> `"fill_mode"`
        - `"fill_llm"` -> `"fill_llm"`
        - `"drop_row"` -> `"drop_row"`
+       - `"drop_column"` -> `"drop_column"`
        - `"keep_null"` -> `"leave_as_is"`
        - `"fill_constant"` -> `"fill_value"` (also set `fill_value` accordingly)
        - If the user provided a custom prompt / free-text instructions, use your engineering judgment to map it to the most appropriate strategy (e.g., if they request to fill with `0`, use `"fill_value"` with `fill_value = 0`).
+     * **CRITICAL dtype guard:** If a column's `dtype` in the Statistical Profile is `string`, `object`, `mixed`, or any non-numeric type, you MUST NOT assign `fill_mean` or `fill_median` to it. Use `fill_mode`, `fill_value`, `fill_llm`, `drop_row`, or `drop_column` instead. Assigning a numeric strategy to a text column will always fail at runtime.
    - **Allow-Missing Confirmations:**
      * Read the individual yes/no question answers (like `null.Q1_allow_missing_column_<col>.answer` where "Yes" means allow_missing=true, "No" means allow_missing=false).
      * Incorporate these user choices as the source of truth for which columns are allowed to have missing values.
@@ -110,11 +112,20 @@ Your output must provide task-specific, structured cleaning configurations in th
      ```json
      {
        "<col_name>": {
-         "strategy": "fill_mean" | "fill_median" | "fill_mode" | "fill_value" | "drop_row",
+         "strategy": "fill_mean" | "fill_median" | "fill_mode" | "fill_value" | "fill_llm" | "drop_row" | "drop_column" | "leave_as_is",
          "fill_value": null | <value>
        }
      }
      ```
+   Strategy semantics:
+   - `fill_mean`: Impute with the column arithmetic mean (**numeric dtypes only**: int, float).
+   - `fill_median`: Impute with the column median (**numeric dtypes only**: int, float).
+   - `fill_mode`: Impute with the most-frequent value (any dtype).
+   - `fill_value`: Impute with a fixed constant; set `fill_value` to the target value.
+   - `fill_llm`: Request LLM-assisted imputation (worker falls back to mode if LLM is unavailable).
+   - `drop_row`: Drop every row that contains a null in this column.
+   - `drop_column`: Remove the entire column from the dataset (use when null_rate is very high, e.g. > 70%, or the column has no analytical value).
+   - `leave_as_is`: Intentionally retain nulls (use when `allow_missing = true`).
 
 3. **Type Casting Strategy (`TypeStrategy`) Schema:**
    Must contain:
@@ -363,7 +374,10 @@ You must return a single, pure JSON object conforming exactly to the structure b
         },
         "strategy": {
           "per_column": {
-            "<col_name>": { "strategy": "fill_mean" }
+            "<numeric_col>": { "strategy": "fill_mean", "fill_value": null },
+            "<text_col>": { "strategy": "fill_mode", "fill_value": null },
+            "<nullable_col>": { "strategy": "leave_as_is", "fill_value": null },
+            "<constant_col>": { "strategy": "fill_value", "fill_value": "Unknown" }
           }
         }
       }
