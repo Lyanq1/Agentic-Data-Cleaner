@@ -10,6 +10,7 @@ def create_llm(
     provider: str | None = None,
     model: str | None = None,
     temperature: float | None = None,
+    callbacks: list | None = None,
 ) -> BaseChatModel:
     settings = get_settings()
     provider = provider or settings.default_llm_provider
@@ -22,6 +23,7 @@ def create_llm(
             "model": model,
             "temperature": temperature,
             "api_key": settings.openai_api_key,
+            "callbacks": callbacks,
         }
         if settings.openai_base_url:
             kwargs["base_url"] = settings.openai_base_url
@@ -34,6 +36,7 @@ def create_llm(
             model=model,
             temperature=temperature,
             api_key=settings.anthropic_api_key,
+            callbacks=callbacks,
         )
     else:
         raise ValueError(f"Unsupported LLM provider: {provider!r}")

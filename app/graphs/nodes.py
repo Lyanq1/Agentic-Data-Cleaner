@@ -28,6 +28,14 @@ def _agent_log(agent: str, message: str, level: str = "info") -> dict[str, Any]:
     }
 
 
+def _get_agent_token_metrics(agent: Any) -> dict[str, int]:
+    """Safely retrieve token metrics from an agent if available."""
+    tracker = getattr(agent, "token_tracker", None)
+    if tracker and hasattr(tracker, "get_metrics"):
+        return tracker.get_metrics()
+    return {"total_tokens": 0, "prompt_tokens": 0, "completion_tokens": 0}
+
+
 # Data profiling node (runs statistical EDA on the uploaded dataset)
 async def profiler_node(state: GlobalState) -> dict[str, Any]:
     """Run statistical EDA on the uploaded dataset.
@@ -81,7 +89,11 @@ async def semantic_profile_node(state: GlobalState) -> dict[str, Any]:
         logger.info("semantic_profile_node: Semantic profile already exists in state, skipping.")
         return {}
     agent = SemanticProfilerAgent()
-    return await agent.run(state)
+    result = await agent.run(state)
+    return {
+        **result,
+        "token_metrics": _get_agent_token_metrics(agent),
+    }
 
 
 # Input validation node (analyzes data profile and reports validation status)
@@ -99,6 +111,7 @@ async def input_validator_node(state: GlobalState) -> dict[str, Any]:
             _agent_log("input_validator", "Running data quality and user intent validation..."),
             _agent_log("input_validator", "Data quality and user intent validation completed."),
         ],
+        "token_metrics": _get_agent_token_metrics(agent),
     }
 
 
@@ -119,6 +132,7 @@ async def planner_node(state: GlobalState) -> dict[str, Any]:
             _agent_log("planner", "Generating execution plan..."),
             _agent_log("planner", "Execution plan generated."),
         ],
+        "token_metrics": _get_agent_token_metrics(agent),
     }
 
 # Deduplication Worker stub node
@@ -149,6 +163,7 @@ async def dedup_agent_node(state: GlobalState) -> dict[str, Any]:
         "current_step": "deduplication",
         "completed_steps": "deduplication",
         "agent_logs": agent_logs,
+        "token_metrics": _get_agent_token_metrics(agent),
     }
 
 
@@ -180,6 +195,7 @@ async def null_agent_node(state: GlobalState) -> dict[str, Any]:
         "current_step": "null_handling",
         "completed_steps": "null_handling",
         "agent_logs": agent_logs,
+        "token_metrics": _get_agent_token_metrics(agent),
     }
 
 
@@ -211,6 +227,7 @@ async def type_agent_node(state: GlobalState) -> dict[str, Any]:
         "current_step": "type_casting",
         "completed_steps": "type_casting",
         "agent_logs": agent_logs,
+        "token_metrics": _get_agent_token_metrics(agent),
     }
 
 
@@ -289,6 +306,7 @@ async def validator_node(state: GlobalState) -> dict[str, Any]:
                 "ValidatorAgent failed to execute.",
                 "error",
             ),
+            "token_metrics": _get_agent_token_metrics(agent),
         }
         
     validator_result = result.get("validator_agent_result")
@@ -339,6 +357,7 @@ async def validator_node(state: GlobalState) -> dict[str, Any]:
                 "validator",
                 f"Task '{task_id}' passed validation.",
             ),
+            "token_metrics": _get_agent_token_metrics(agent),
         }
 
     # If Failed
@@ -381,6 +400,7 @@ async def validator_node(state: GlobalState) -> dict[str, Any]:
                 f"Task '{task_id}' failed validation. Action: replan. Routing to planner.",
                 "warning",
             ),
+            "token_metrics": _get_agent_token_metrics(agent),
         }
 
     logger.warning(
@@ -402,6 +422,7 @@ async def validator_node(state: GlobalState) -> dict[str, Any]:
             f"Task '{task_id}' failed validation; retry {retry_count}/{max_retries}. Action: retry_worker.",
             "warning",
         ),
+        "token_metrics": _get_agent_token_metrics(agent),
     }
 
 
@@ -538,10 +559,20 @@ async def report_agent_node(state: GlobalState) -> dict[str, Any]:
         except Exception as exc:
             logger.error(f"report_agent_node: failed to evaluate F1 metrics: {exc}")
 
+    token_metrics = state.get("token_metrics", {})
+    total_tokens = token_metrics.get("total_tokens", 0)
+    prompt_tokens = token_metrics.get("prompt_tokens", 0)
+    completion_tokens = token_metrics.get("completion_tokens", 0)
+    
+    logs = [
+        _agent_log("report_agent", f"Total LLM tokens consumed: {total_tokens} (Prompt: {prompt_tokens}, Completion: {completion_tokens})"),
+        _agent_log("report_agent", "Final report is ready.")
+    ]
+
     return {
         "current_step": "reporting",
         "completed_steps": "reporting",
-        "agent_logs": _agent_log("report_agent", "Final report is ready."),
+        "agent_logs": logs,
         "f1_metrics": f1_metrics,
     }
 

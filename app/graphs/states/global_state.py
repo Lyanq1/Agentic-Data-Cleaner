@@ -24,6 +24,13 @@ def append_list(
         return left + right
     return left + [right]
 
+def sum_metrics(left: dict[str, int] | None, right: dict[str, int] | None) -> dict[str, int]:
+    if not left:
+        left = {"total_tokens": 0, "prompt_tokens": 0, "completion_tokens": 0}
+    if not right:
+        return left
+    return {k: left.get(k, 0) + right.get(k, 0) for k in set(left) | set(right)}
+
 ### TypedDict for the LangGraph State ###
 class GlobalState(TypedDict):
     # Core Routing & Messages
@@ -81,6 +88,9 @@ class GlobalState(TypedDict):
     
     # Evaluation Metrics
     f1_metrics: dict[str, Any] | None
+
+    # Token Usage Metrics
+    token_metrics: Annotated[dict[str, int], sum_metrics]
 
 
 class AgentStatus:

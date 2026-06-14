@@ -187,6 +187,7 @@ async def run_pipeline(
         "execution_plan": final_state.get("execution_plan").model_dump() if final_state.get("execution_plan") and hasattr(final_state.get("execution_plan"), "model_dump") else final_state.get("execution_plan"),
         "completed_steps": final_state.get("completed_steps", []),
         "f1_metrics": final_state.get("f1_metrics"),
+        "token_metrics": final_state.get("token_metrics"),
     }
 
 
@@ -237,6 +238,7 @@ async def get_pipeline_state(run_id: str) -> dict[str, Any] | None:
         "completed_steps": state.get("completed_steps", []),
         "errors": state.get("global_errors", []),
         "f1_metrics": state.get("f1_metrics"),
+        "token_metrics": state.get("token_metrics"),
         "next_node": snapshot.next,  # which node would run next (empty if done)
     }
 
