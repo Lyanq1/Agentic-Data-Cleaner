@@ -33,10 +33,57 @@ class DedupDecision(BaseModel):
 
     mode: Literal["exact_full_row", "exact_key"]
     key_columns: list[str] = Field(default_factory=list)
-    column_roles: dict[str, str] = Field(default_factory=dict)
+    column_semantics: dict[str, dict[str, Any]] = Field(default_factory=dict)
     ignore_columns: list[str] = Field(default_factory=list)
+    fuzzy_plan: dict[str, Any] | None = None
     confidence: float | None = None
     reasoning_summary: str = ""
+
+
+class ColumnSemanticDescriptor(BaseModel):
+    semantic_label: str = ""
+    comparison_intent: str = ""
+    normalization_intent: str = ""
+    identifier_intent: str = ""
+    blocking_intent: str = ""
+
+
+class BlockKeySpec(BaseModel):
+    columns: list[str] = Field(default_factory=list)
+    transform: str = "normalized_prefix"
+    required: bool = False
+
+
+class EvidenceSpec(BaseModel):
+    target_blocking_specs: list[str] = Field(default_factory=list)
+    support_columns: list[str] = Field(default_factory=list)
+    reject_columns: list[str] = Field(default_factory=list)
+    minimum_support_matches: int = 0
+    hard_reject_on_conflict: bool = True
+
+
+class BlockingSpec(BaseModel):
+    spec_id: str = ""
+    target_columns: list[str] = Field(default_factory=list)
+    semantic_label: str = ""
+    comparison_intent: str = ""
+    blocking_intent: str = ""
+    strategy: str = "token_blocking"
+    block_keys: list[BlockKeySpec] = Field(default_factory=list)
+    sub_block_columns: list[str] = Field(default_factory=list)
+    similarity_metric: str = "jaccard"
+    similarity_threshold: float = 0.5
+    max_bucket_size: int = 500
+    oversized_bucket_strategy: str = "sub_block"
+
+
+class FuzzyExecutionPlan(BaseModel):
+    enabled: bool = False
+    entity_scope: str | None = None
+    blocking_specs: list[BlockingSpec] = Field(default_factory=list)
+    evidence_specs: list[EvidenceSpec] = Field(default_factory=list)
+    candidate_resolution_policy: str = "preview_only"
+    notes: list[str] = Field(default_factory=list)
 
 
 class ValidatedDedupDecision(BaseModel):
@@ -44,8 +91,9 @@ class ValidatedDedupDecision(BaseModel):
 
     mode: Literal["exact_full_row", "exact_key"]
     key_columns: list[str] = Field(default_factory=list)
-    column_roles: dict[str, str] = Field(default_factory=dict)
+    column_semantics: dict[str, ColumnSemanticDescriptor] = Field(default_factory=dict)
     ignore_columns: list[str] = Field(default_factory=list)
+    fuzzy_plan: FuzzyExecutionPlan | None = None
     decision_source: Literal["llm", "planner_fallback", "profile_fallback", "safe_default"]
     confidence: float | None = None
     reasoning_summary: str = ""
@@ -58,8 +106,12 @@ class ValidatedDedupDecision(BaseModel):
 
         return DedupDecisionTrace(
             decision_source=self.decision_source,
-            column_roles=dict(self.column_roles),
+            column_semantics={
+                column: descriptor.model_dump(mode="json")
+                for column, descriptor in self.column_semantics.items()
+            },
             ignore_columns=list(self.ignore_columns),
+            fuzzy_plan=self.fuzzy_plan.model_dump(mode="json") if self.fuzzy_plan else None,
             confidence=self.confidence,
             reasoning_summary=self.reasoning_summary,
             validation_notes=list(self.validation_notes),
@@ -72,10 +124,15 @@ class FuzzyCandidate(BaseModel):
 
     row_index_a: int
     row_index_b: int
+    blocking_spec_id: str
     field: str
     similarity_score: float
     blocking_key: str
-    candidate_type: Literal["company_name", "person_name", "address", "cross_script_name"]
+    semantic_label: str
+    cross_script: bool = False
+    support_matches: list[str] = Field(default_factory=list)
+    reject_conflicts: list[str] = Field(default_factory=list)
+    resolution: Literal["supported", "review", "rejected"] = "review"
 
 
 class FuzzyCandidateSet(BaseModel):
@@ -84,6 +141,9 @@ class FuzzyCandidateSet(BaseModel):
     candidates: list[FuzzyCandidate] = Field(default_factory=list)
     oversized_buckets: list[str] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
+    supported_count: int = 0
+    review_count: int = 0
+    rejected_count: int = 0
 
     @property
     def total_count(self) -> int:
@@ -106,7 +166,7 @@ class AppliedHitlResult(BaseModel):
 
 @dataclass(slots=True)
 class FuzzyBlockingConfig:
-    """Static fuzzy blocking configuration for slice 2."""
+    """Deterministic fallback defaults for fuzzy execution planning."""
 
     company_ngram_size: int = 3
     person_ngram_size: int = 2

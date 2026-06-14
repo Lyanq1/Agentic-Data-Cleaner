@@ -7,7 +7,11 @@ from typing import Any
 
 import pandas as pd
 
-from app.agents.deduplication.column_roles import infer_column_role
+from app.agents.deduplication.column_roles import (
+    infer_column_semantics,
+    resolve_normalization_handler,
+)
+from app.agents.deduplication.models import ColumnSemanticDescriptor
 from app.agents.deduplication.normalizers import normalize_email, normalize_phone
 from app.graphs.states.profiler_state import StatisticalProfile
 from app.graphs.states.profiles import SemanticProfile
@@ -17,18 +21,19 @@ def _normalize_key_series(
     column_name: str,
     series: pd.Series,
     *,
-    explicit_roles: dict[str, str] | None = None,
+    explicit_semantics: dict[str, ColumnSemanticDescriptor] | None = None,
     semantic_profile: SemanticProfile | None = None,
 ) -> tuple[pd.Series, bool]:
-    role = infer_column_role(
+    descriptor = infer_column_semantics(
         column_name,
-        explicit_roles=explicit_roles,
+        explicit_semantics=explicit_semantics,
         semantic_profile=semantic_profile,
     )
-    if role == "phone":
+    handler = resolve_normalization_handler(descriptor)
+    if handler == "phone":
         normalized = series.map(normalize_phone)
         return normalized.where(normalized.notna(), series.astype(str)), True
-    if role == "email":
+    if handler == "email":
         normalized = series.map(normalize_email)
         return normalized.where(normalized.notna(), series.astype(str)), True
     return series.astype(str), False
@@ -45,7 +50,7 @@ def build_normalized_key_frame(
     df: pd.DataFrame,
     key_columns: list[str],
     *,
-    explicit_roles: dict[str, str] | None = None,
+    explicit_semantics: dict[str, ColumnSemanticDescriptor] | None = None,
     semantic_profile: SemanticProfile | None = None,
 ) -> pd.DataFrame:
     """Build a normalized comparison frame for the requested key columns."""
@@ -57,7 +62,7 @@ def build_normalized_key_frame(
         normalized_series, _ = _normalize_key_series(
             column,
             working[column],
-            explicit_roles=explicit_roles,
+            explicit_semantics=explicit_semantics,
             semantic_profile=semantic_profile,
         )
         working[compare_name] = normalized_series.fillna("")
@@ -70,7 +75,7 @@ class ExactKeyDedupConfig:
     """Execution policy for exact key dedup."""
 
     key_columns: list[str]
-    column_roles: dict[str, str] = field(default_factory=dict)
+    column_semantics: dict[str, ColumnSemanticDescriptor] = field(default_factory=dict)
     semantic_profile: SemanticProfile | None = None
     statistical_profile: StatisticalProfile | None = None
     keep_rule: str = "keep_most_complete"
@@ -101,7 +106,7 @@ def execute_exact_key_dedup(df: pd.DataFrame, config: ExactKeyDedupConfig) -> Co
         normalized_series, changed = _normalize_key_series(
             column,
             working[column],
-            explicit_roles=config.column_roles,
+            explicit_semantics=config.column_semantics,
             semantic_profile=config.semantic_profile,
         )
         working[compare_name] = normalized_series.fillna("")
@@ -157,7 +162,7 @@ def has_normalized_key_duplicates(
     df: pd.DataFrame,
     key_columns: list[str],
     *,
-    explicit_roles: dict[str, str] | None = None,
+    explicit_semantics: dict[str, ColumnSemanticDescriptor] | None = None,
     semantic_profile: SemanticProfile | None = None,
 ) -> bool:
     """Check whether duplicates remain under normalized key comparison semantics."""
@@ -167,7 +172,7 @@ def has_normalized_key_duplicates(
     compare_frame = build_normalized_key_frame(
         df,
         key_columns,
-        explicit_roles=explicit_roles,
+        explicit_semantics=explicit_semantics,
         semantic_profile=semantic_profile,
     )
     return bool(compare_frame.duplicated(keep=False).any())

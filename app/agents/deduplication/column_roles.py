@@ -1,33 +1,25 @@
-"""Column role inference for dedup normalization and fuzzy blocking."""
+"""Flexible semantic descriptors with private deterministic intent resolvers."""
 
 from __future__ import annotations
 
-from typing import Literal
-
+from app.agents.deduplication.models import ColumnSemanticDescriptor
 from app.graphs.states.profiles import ColumnSemanticProfileDetail, SemanticProfile
 
-ColumnRole = Literal["phone", "email", "address", "company_name", "person_name"]
-VALID_COLUMN_ROLES: set[str] = {"phone", "email", "address", "company_name", "person_name"}
 
-
-def infer_column_role(
+def infer_column_semantics(
     column_name: str,
     *,
-    explicit_roles: dict[str, str] | None = None,
+    explicit_semantics: dict[str, ColumnSemanticDescriptor] | None = None,
     semantic_profile: SemanticProfile | None = None,
-) -> ColumnRole | None:
-    """Infer the semantic role of a column for dedup operations.
+) -> ColumnSemanticDescriptor | None:
+    """Infer flexible semantic descriptors for a column.
 
-    The primary source of truth is the LLM-selected role plan. Semantic-profile
-    metadata is a conservative fallback. Column-name keyword matching is
-    intentionally not used here because it does not generalize safely across
-    datasets.
+    The LLM-facing contract is intentionally flexible. The deterministic runtime
+    later resolves these descriptors into private execution handlers.
     """
 
-    if explicit_roles:
-        explicit_role = explicit_roles.get(column_name)
-        if explicit_role in VALID_COLUMN_ROLES:
-            return explicit_role  # type: ignore[return-value]
+    if explicit_semantics and column_name in explicit_semantics:
+        return explicit_semantics[column_name]
 
     detail = semantic_profile.columns.get(column_name) if semantic_profile else None
     if detail is None:
@@ -35,7 +27,81 @@ def infer_column_role(
     return _infer_from_semantic_detail(detail)
 
 
-def _infer_from_semantic_detail(detail: ColumnSemanticProfileDetail) -> ColumnRole | None:
+def resolve_normalization_handler(descriptor: ColumnSemanticDescriptor | None) -> str:
+    if descriptor is None:
+        return "text"
+
+    intent_evidence = " ".join(
+        [
+            descriptor.normalization_intent,
+            descriptor.identifier_intent,
+            descriptor.comparison_intent,
+            descriptor.semantic_label,
+        ]
+    ).casefold()
+    if any(marker in intent_evidence for marker in ["phone", "telephone", "mobile", "contact number"]):
+        return "phone"
+    if any(marker in intent_evidence for marker in ["email", "e-mail", "mailbox"]):
+        return "email"
+    if any(marker in intent_evidence for marker in ["domain", "website", "url", "web"]):
+        return "domain"
+    if any(marker in intent_evidence for marker in ["identifier", "registration", "license", "tax", "provider id"]):
+        return "identifier"
+    return "text"
+
+
+def resolve_name_family(descriptor: ColumnSemanticDescriptor | None) -> str:
+    if descriptor is None:
+        return "generic_text"
+
+    intent_evidence = " ".join(
+        [
+            descriptor.comparison_intent,
+            descriptor.blocking_intent,
+            descriptor.semantic_label,
+        ]
+    ).casefold()
+    if any(marker in intent_evidence for marker in ["organization", "company", "vendor", "provider", "facility", "school", "hospital", "clinic", "site"]):
+        return "organization_name"
+    if any(marker in intent_evidence for marker in ["person", "contact", "customer", "individual", "patient", "full name"]):
+        return "person_name"
+    if any(marker in intent_evidence for marker in ["address", "location", "street", "postal", "city", "district", "ward"]):
+        return "address"
+    return "generic_text"
+
+
+def descriptor_is_hard_identifier(descriptor: ColumnSemanticDescriptor | None) -> bool:
+    if descriptor is None:
+        return False
+    evidence = " ".join(
+        [
+            descriptor.identifier_intent,
+            descriptor.normalization_intent,
+            descriptor.comparison_intent,
+            descriptor.semantic_label,
+        ]
+    ).casefold()
+    return any(
+        marker in evidence
+        for marker in [
+            "phone",
+            "email",
+            "registration identifier",
+            "license identifier",
+            "tax identifier",
+            "provider identifier",
+            "business identifier",
+            "customer identifier",
+        ]
+    )
+
+
+def descriptor_is_name_like(descriptor: ColumnSemanticDescriptor | None) -> bool:
+    family = resolve_name_family(descriptor)
+    return family in {"organization_name", "person_name"}
+
+
+def _infer_from_semantic_detail(detail: ColumnSemanticProfileDetail) -> ColumnSemanticDescriptor | None:
     logical_group = detail.logical_group.casefold().strip()
     description = detail.description.casefold().strip()
     allow_missing_reason = detail.allow_missing_reason.casefold().strip()
@@ -61,22 +127,60 @@ def _infer_from_semantic_detail(detail: ColumnSemanticProfileDetail) -> ColumnRo
     )
 
     if _semantic_mentions_email(evidence, expected_pattern):
-        return "email"
+        return ColumnSemanticDescriptor(
+            semantic_label=detail.description or "email field",
+            comparison_intent="email-like identifier",
+            normalization_intent="email canonicalization",
+            identifier_intent="contact identifier",
+            blocking_intent="exact identifier matching",
+        )
     if _semantic_mentions_phone(evidence, expected_pattern):
-        return "phone"
-    if logical_group in {"location", "address"}:
-        return "address"
-    if logical_group in {"organization", "company", "vendor", "provider", "agency", "site"}:
-        return "company_name"
-    if logical_group in {"person", "contact", "customer", "identity"} and "identifier" not in evidence:
-        return "person_name"
-    if _semantic_mentions_address(evidence):
-        return "address"
-    if _semantic_mentions_company(evidence):
-        return "company_name"
-    if _semantic_mentions_person(evidence):
-        return "person_name"
-    return None
+        return ColumnSemanticDescriptor(
+            semantic_label=detail.description or "phone field",
+            comparison_intent="phone-like identifier",
+            normalization_intent="phone canonicalization",
+            identifier_intent="contact identifier",
+            blocking_intent="exact identifier matching",
+        )
+    if logical_group in {"location", "address"} or _semantic_mentions_address(evidence):
+        return ColumnSemanticDescriptor(
+            semantic_label=detail.description or "address field",
+            comparison_intent="address-like location",
+            normalization_intent="address text normalization",
+            identifier_intent="supporting location context",
+            blocking_intent="location-aware fuzzy blocking",
+        )
+    if logical_group in {"organization", "company", "vendor", "provider", "agency", "site"} or _semantic_mentions_company(evidence):
+        return ColumnSemanticDescriptor(
+            semantic_label=detail.description or "organization name",
+            comparison_intent="organization-like entity name",
+            normalization_intent="organization name normalization",
+            identifier_intent="entity name context",
+            blocking_intent="organization-name fuzzy blocking",
+        )
+    if logical_group in {"person", "contact", "customer", "identity"} and "identifier" not in evidence or _semantic_mentions_person(evidence):
+        return ColumnSemanticDescriptor(
+            semantic_label=detail.description or "person name",
+            comparison_intent="person-like entity name",
+            normalization_intent="person name normalization",
+            identifier_intent="person identity context",
+            blocking_intent="person-name fuzzy blocking",
+        )
+    if any(marker in evidence for marker in ["identifier", "registration", "license", "tax code", "provider id", "customer id"]):
+        return ColumnSemanticDescriptor(
+            semantic_label=detail.description or "identifier field",
+            comparison_intent="identifier-like field",
+            normalization_intent="exact identifier normalization",
+            identifier_intent="business identifier",
+            blocking_intent="exact identifier matching",
+        )
+    return ColumnSemanticDescriptor(
+        semantic_label=detail.description or "text field",
+        comparison_intent="generic text similarity",
+        normalization_intent="generic text normalization",
+        identifier_intent="supporting context",
+        blocking_intent="generic fuzzy blocking",
+    )
 
 
 def _semantic_mentions_email(evidence: str, expected_pattern: str) -> bool:
@@ -103,12 +207,12 @@ def _semantic_mentions_address(evidence: str) -> bool:
 def _semantic_mentions_company(evidence: str) -> bool:
     return any(
         marker in evidence
-        for marker in ["company", "organization", "business", "agency", "provider", "vendor", "site"]
+        for marker in ["company", "organization", "business", "agency", "provider", "vendor", "site", "school", "hospital", "clinic", "facility"]
     )
 
 
 def _semantic_mentions_person(evidence: str) -> bool:
     return any(
         marker in evidence
-        for marker in ["person", "contact", "director", "customer name", "full name", "individual"]
+        for marker in ["person", "contact", "director", "customer name", "full name", "individual", "patient"]
     )

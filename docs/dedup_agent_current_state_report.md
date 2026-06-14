@@ -28,21 +28,29 @@ The deduplication worker is a **hybrid tool-calling agent**.
 - LLM responsibilities:
   - choose `exact_full_row` or `exact_key`
   - suggest key columns
-  - suggest semantic handler roles such as:
-    - `phone`
-    - `email`
-    - `address`
-    - `company_name`
-    - `person_name`
+  - suggest `column_semantics` descriptors such as:
+    - `semantic_label`
+    - `comparison_intent`
+    - `normalization_intent`
+    - `identifier_intent`
+    - `blocking_intent`
   - use the bounded duplicate-inspection tool during planning
+  - when fuzzy is enabled, produce a dataset-specific `fuzzy_plan` that decides:
+    - which fuzzy fields to block on
+    - which handler strategy each field should use
+    - which sub-block columns should split oversized buckets
+    - which support/reject evidence fields should classify candidates
 
 - deterministic Python responsibilities:
   - validate the LLM decision
   - apply safe fallback rules
+  - privately resolve semantic intents into deterministic execution handlers
   - normalize comparison values
+  - validate and sanitize the `fuzzy_plan`
   - build duplicate preview metrics
   - wait for HITL review when required
   - execute actual dedup only after strategy confirmation
+  - execute fuzzy candidate generation from the validated plan
   - write parquet output
   - write validation summaries
 
@@ -88,16 +96,154 @@ Fuzzy blocking still exists, but it is not the primary HITL surface anymore.
 Current fuzzy behavior:
 
 - runs only when planner strategy signals fuzzy/entity-style intent
-- uses normalized text blocking
-- uses n-gram / shingle similarity
-- caps oversized buckets
-- produces candidate summaries only
+- uses a plan-driven `fuzzy_plan` chosen by the LLM
+- uses the bounded `profile_fuzzy_columns` tool when the agent needs more dataset-specific fuzzy context
+- executes dynamic block keys instead of one fixed blocking rule
+- supports plan-driven oversized-bucket handling:
+  - `sub_block`
+  - `top_k_rank`
+  - `truncate`
+- classifies candidates deterministically as:
+  - `supported`
+  - `review`
+  - `rejected`
+- persists the fuzzy plan in `decision_trace` so reruns can reuse the same orchestration context
+- still produces candidate summaries only, not final fuzzy auto-merges
 
 Current fuzzy non-goals:
 
 - no direct row merge
 - no sidecar artifact
 - no LLM pair classifier
+- no dedicated MinHash backend yet; `minhash_lsh` is currently a plan option that falls back to deterministic shingle execution
+
+### `fuzzy_plan`
+
+When fuzzy blocking is enabled, the LLM now proposes a dataset-specific
+execution plan instead of relying on one fixed fuzzy configuration.
+
+Current shape:
+
+```python
+FuzzyExecutionPlan(
+    enabled=True | False,
+    entity_scope="freeform dataset-specific scope or None",
+    blocking_specs=[...],
+    evidence_specs=[...],
+    candidate_resolution_policy="freeform policy label",
+    notes=[...]
+)
+```
+
+This was added to push fuzzy behavior away from hardcoded field heuristics.
+
+Why it exists:
+
+- different datasets need different fuzzy fields
+- different datasets need different block keys
+- different datasets need different oversized-bucket split strategies
+- different datasets need different evidence columns for confirming or rejecting a fuzzy candidate
+
+#### `blocking_specs`
+
+Each `BlockingSpec` tells deterministic code:
+
+- a stable `spec_id` for referencing the blocking rule
+- which target columns to fuzzy-match
+- a freeform `semantic_label` chosen for the current dataset
+- a freeform `comparison_intent`
+- a freeform `blocking_intent`
+- which execution strategy to use, for example:
+  - `token_blocking`
+  - `ngram_blocking`
+  - `word_shingle_blocking`
+  - `minhash_lsh`
+- which block-key transforms to apply
+- how to handle oversized buckets
+
+This is important because fuzzy behavior is now driven by an explicit plan
+instead of one hardcoded routine.
+
+Important distinction:
+
+- `semantic_label` is intentionally flexible and dataset-specific
+- `comparison_intent` and `blocking_intent` are also flexible and dataset-specific
+- deterministic runtime privately resolves those intents into a bounded set of
+  executable comparator families
+
+#### `block_keys`
+
+Each block key is a deterministic transform chosen by the plan, for example:
+
+- `normalized_prefix`
+- `sorted_token_prefix`
+- `domain`
+- `area_code`
+- `year`
+- `exact_normalized`
+
+Why this was added:
+
+- some datasets split best by city or source
+- some split best by email domain or phone area
+- some do not have those columns at all
+
+So the plan chooses the available, meaningful split logic from the dataset,
+and deterministic code executes it.
+
+Important distinction:
+
+- the dataset-dependent decision of **which columns** to use comes from the LLM plan
+- the transform labels remain a bounded execution vocabulary because they are
+  stable mechanical operations, not business semantics
+
+#### `sub_block_columns`
+
+This is the plan-driven answer to skewed blocking.
+
+Instead of hardcoding:
+
+- region
+- year
+- source
+
+the LLM can choose whichever columns are actually useful in the current dataset.
+
+Deterministic code then uses those columns to split oversized buckets.
+
+#### `evidence_specs`
+
+These tell deterministic code how to classify a fuzzy candidate:
+
+- which `blocking_specs` they apply to
+- which columns support a candidate
+- which columns reject a candidate on conflict
+- how many support matches are needed
+
+Current deterministic outcomes are:
+
+- `supported`
+- `review`
+- `rejected`
+
+This is the bridge between:
+
+- fuzzy candidate generation
+- later HITL or future pair-level resolution
+
+#### `candidate_resolution_policy`
+
+This tells the agent how conservative to be after fuzzy candidate generation.
+
+Current values:
+
+- `preview_only`
+- `hitl_required`
+
+Current implementation remains conservative:
+
+- fuzzy candidates are summarized
+- they are not auto-merged into final parquet output
 
 ---
 
@@ -197,7 +343,7 @@ Purpose:
 
 Why it exists:
 - helps user reason about business identity
-- easier to understand than raw `column_roles`
+- easier to understand than raw internal semantic descriptors
 - gives semantic guidance without exposing internal planner jargon
 
 Important note:
@@ -346,8 +492,6 @@ They are easy for users to understand:
 These replaced older row-case-style review payloads because those were internal
 workflow details, not good user-facing business controls.
 
-because those are internal workflow concepts, not good user-facing business controls.
-
 ---
 
 ## State Contract
@@ -449,8 +593,9 @@ Why it was added:
 Still stores audit metadata only:
 
 - `decision_source`
-- `column_roles`
+- `column_semantics`
 - `ignore_columns`
+- `fuzzy_plan`
 - `confidence`
 - `reasoning_summary`
 - `validation_notes`
@@ -479,6 +624,7 @@ Current dedup usage:
   - decision source
   - unresolved collision counts/types
   - fuzzy candidate count
+  - fuzzy candidate classification counts
   - whether a pending strategy review exists
   - proposed key columns when review is pending
 - `replan_hints`
@@ -515,7 +661,7 @@ Request body:
 
 Behavior:
 
-- if duplicates are found and no HITL feedback exists:
+- if no HITL feedback exists:
   - build strategy review
   - do not clean yet
   - return `hitl_status = "pending"`
@@ -591,7 +737,9 @@ Verified locally:
 ## Current Limits
 
 - fuzzy candidates are not yet promoted into a richer user-facing review UI
+- fuzzy candidates are not yet auto-merged into final dataset mutation
 - there is no LLM-assisted pair resolution yet
+- there is no dedicated MinHash/LSH execution backend yet
 - `hitl_checkpoint` is metadata only in the current slice
 - internal debug override still exists for migration/testing
 

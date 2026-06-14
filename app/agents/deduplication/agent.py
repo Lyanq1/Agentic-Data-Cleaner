@@ -14,14 +14,24 @@ import pandas as pd
 from langchain_core.messages import SystemMessage, ToolMessage
 
 from app.agents.base import BaseAgent
-from app.agents.deduplication.column_roles import infer_column_role
+from app.agents.deduplication.column_roles import (
+    descriptor_is_hard_identifier,
+    descriptor_is_name_like,
+    infer_column_semantics,
+    resolve_name_family,
+)
 from app.agents.deduplication.models import (
     AppliedHitlResult,
+    BlockKeySpec,
+    BlockingSpec,
+    ColumnSemanticDescriptor,
     DedupDecision,
     DeduplicationHitlFeedback,
     DeduplicationAgentInput,
+    EvidenceSpec,
     FuzzyBlockingConfig,
     FuzzyCandidateSet,
+    FuzzyExecutionPlan,
     ValidatedDedupDecision,
 )
 from app.agents.deduplication.prompt import (
@@ -53,7 +63,7 @@ from app.graphs.states.workers import (
     WorkerStateDetail,
     WorkerStates,
 )
-from app.tools.data.dedup import inspect_duplicate_candidates
+from app.tools.data.dedup import inspect_duplicate_candidates, profile_fuzzy_columns
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +77,7 @@ class DeduplicationAgent(BaseAgent):
         "Selects a deduplication strategy with tool-assisted LLM reasoning, then runs "
         "exact full-row and exact key-based deduplication deterministically."
     )
-    tools = [inspect_duplicate_candidates]
+    tools = [inspect_duplicate_candidates, profile_fuzzy_columns]
 
     def __init__(self) -> None:
         super().__init__()
@@ -142,7 +152,7 @@ class DeduplicationAgent(BaseAgent):
             pending_strategy_review = self._build_strategy_review(df, validated_decision, dedup_input)
 
         preview_has_duplicates = pending_strategy_review.preview.duplicate_rows > 0
-        should_wait_for_hitl = preview_has_duplicates and applied_hitl is None
+        should_wait_for_hitl = applied_hitl is None
 
         if should_wait_for_hitl:
             notes.append("Dedup strategy review is pending human confirmation before cleaning.")
@@ -265,7 +275,7 @@ class DeduplicationAgent(BaseAgent):
                 pending_strategy_review=False,
                 proposed_key_columns=execution["effective_key_columns"],
             ),
-            "hitl_status": "approved" if applied_hitl is not None or not preview_has_duplicates else state.get("hitl_status"),
+            "hitl_status": "approved" if applied_hitl is not None else state.get("hitl_status"),
             "hitl_checkpoint": None,
             "hitl_feedback": None,
             "current_step": "deduplication",
@@ -333,8 +343,9 @@ class DeduplicationAgent(BaseAgent):
             return ValidatedDedupDecision(
                 mode="exact_full_row",
                 key_columns=[],
-                column_roles={},
+                column_semantics={},
                 ignore_columns=[],
+                fuzzy_plan=self._build_default_fuzzy_plan(df, dedup_input, column_semantics={}),
                 decision_source="planner_fallback",
                 confidence=1.0,
                 reasoning_summary="Debug override was invalid, so the agent fell back to exact full-row dedup.",
@@ -345,8 +356,13 @@ class DeduplicationAgent(BaseAgent):
         return ValidatedDedupDecision(
             mode="exact_key",
             key_columns=key_columns,
-            column_roles=self._resolve_column_roles(key_columns, dedup_input),
+            column_semantics=self._resolve_column_semantics(key_columns, dedup_input),
             ignore_columns=[],
+            fuzzy_plan=self._build_default_fuzzy_plan(
+                df,
+                dedup_input,
+                column_semantics=self._resolve_column_semantics(key_columns, dedup_input),
+            ),
             decision_source="planner_fallback",
             confidence=1.0,
             reasoning_summary="Used the service-layer debug override for key-based dedup testing.",
@@ -379,12 +395,35 @@ class DeduplicationAgent(BaseAgent):
             "user_prompt": dedup_input.user_prompt or "",
             "dataset_schema": dedup_input.dataset_schema or {},
             "table_summary": semantic_profile.get("table_summary"),
-            "available_column_roles": ["phone", "email", "address", "company_name", "person_name"],
+            "available_column_semantic_examples": [
+                "phone-like identifier",
+                "email-like identifier",
+                "organization-like entity name",
+                "person-like entity name",
+                "address-like location",
+                "identifier-like field",
+                "generic text similarity",
+            ],
+            "available_fuzzy_strategies": [
+                "token_blocking",
+                "ngram_blocking",
+                "word_shingle_blocking",
+                "minhash_lsh",
+            ],
+            "available_block_key_transforms": [
+                "normalized_prefix",
+                "sorted_token_prefix",
+                "domain",
+                "area_code",
+                "year",
+                "exact_normalized",
+            ],
             "pk_candidates": statistical_profile.get("pk_candidates", []),
             "near_unique_columns": statistical_profile.get("near_unique_columns", []),
             "high_null_columns": statistical_profile.get("high_null_columns", []),
             "planner_task": planner_task,
             "suggested_candidate_sets": self._build_suggested_candidate_sets(dedup_input),
+            "suggested_fuzzy_columns": self._build_suggested_fuzzy_columns(dedup_input),
             "fuzzy_enabled": dedup_input.fuzzy_enabled,
             "columns": columns,
         }
@@ -405,7 +444,7 @@ class DeduplicationAgent(BaseAgent):
             return DedupDecision(
                 mode="exact_full_row",
                 key_columns=[],
-                column_roles={},
+                column_semantics={},
                 ignore_columns=[],
                 confidence=0.0,
                 reasoning_summary="The LLM decision could not be parsed, so deterministic fallback will be used.",
@@ -444,25 +483,32 @@ class DeduplicationAgent(BaseAgent):
         dedup_input: DeduplicationAgentInput,
     ) -> ValidatedDedupDecision:
         null_rates = self._column_null_rates(dedup_input.statistical_profile)
-        sanitized_llm_roles = self._sanitize_llm_column_roles(
-            decision.column_roles,
+        sanitized_llm_semantics = self._sanitize_llm_column_semantics(
+            decision.column_semantics,
             df.columns,
             dedup_input,
+        )
+        validated_fuzzy_plan = self._validate_fuzzy_plan(
+            decision.fuzzy_plan,
+            sanitized_llm_semantics,
+            df,
+            dedup_input,
+            ignore_columns=decision.ignore_columns,
         )
         requested = self._dedupe_columns(
             [column for column in decision.key_columns if column not in set(decision.ignore_columns)]
         )
-        resolved_column_roles = self._resolve_column_roles(
+        resolved_column_semantics = self._resolve_column_semantics(
             requested,
             dedup_input,
-            llm_roles=sanitized_llm_roles,
+            llm_semantics=sanitized_llm_semantics,
         )
         missing = [column for column in requested if column not in df.columns]
         if missing:
             return self._fallback_decision(
                 df,
                 dedup_input,
-                column_roles=sanitized_llm_roles,
+                column_semantics=sanitized_llm_semantics,
                 validation_notes=[f"LLM selected missing columns: {missing}"],
                 reasoning_summary=decision.reasoning_summary or "The LLM selected invalid columns.",
             )
@@ -480,7 +526,7 @@ class DeduplicationAgent(BaseAgent):
             return self._fallback_decision(
                 df,
                 dedup_input,
-                column_roles=sanitized_llm_roles,
+                column_semantics=sanitized_llm_semantics,
                 validation_notes=validation_notes + ["No usable key columns remained after validation."],
                 reasoning_summary=decision.reasoning_summary or "The LLM key set collapsed during validation.",
             )
@@ -491,8 +537,9 @@ class DeduplicationAgent(BaseAgent):
             return ValidatedDedupDecision(
                 mode="exact_full_row",
                 key_columns=[],
-                column_roles=sanitized_llm_roles,
+                column_semantics=sanitized_llm_semantics,
                 ignore_columns=list(decision.ignore_columns),
+                fuzzy_plan=validated_fuzzy_plan,
                 decision_source="safe_default",
                 confidence=decision.confidence,
                 reasoning_summary=decision.reasoning_summary or "Technical row identifiers are not used as the only dedup key.",
@@ -503,13 +550,13 @@ class DeduplicationAgent(BaseAgent):
             return self._fallback_decision(
                 df,
                 dedup_input,
-                column_roles=sanitized_llm_roles,
+                column_semantics=sanitized_llm_semantics,
                 validation_notes=validation_notes + ["All candidate key columns were null in more than 80% of rows."],
                 reasoning_summary=decision.reasoning_summary or "The LLM key set was too sparse to trust.",
             )
 
         if decision.mode == "exact_key":
-            if self._is_name_only_key(filtered, dedup_input, column_roles=resolved_column_roles):
+            if self._is_name_only_key(filtered, dedup_input, column_semantics=resolved_column_semantics):
                 unresolved_count = self._count_name_only_collision_rows(df, filtered)
                 unresolved_collisions.append(
                     {
@@ -524,19 +571,19 @@ class DeduplicationAgent(BaseAgent):
                 return self._fallback_decision(
                     df,
                     dedup_input,
-                    column_roles=sanitized_llm_roles,
+                    column_semantics=sanitized_llm_semantics,
                     validation_notes=validation_notes,
                     reasoning_summary=decision.reasoning_summary or "Name-only keys are not safe for automatic deduplication.",
                     unresolved_collisions=unresolved_collisions,
                 )
-            if len(filtered) == 1 and self._is_weak_single_key(filtered[0], dedup_input, column_roles=resolved_column_roles):
+            if len(filtered) == 1 and self._is_weak_single_key(filtered[0], dedup_input, column_semantics=resolved_column_semantics):
                 unresolved_collisions.append(
                     {
                         "collision_type": "weak_phone_only"
                         if self._looks_like_phone_identifier(
                             filtered[0],
                             dedup_input,
-                            column_roles=resolved_column_roles,
+                            column_semantics=resolved_column_semantics,
                         )
                         else "weak_single_key",
                         "affected_row_count": self._count_duplicate_rows(df, filtered),
@@ -549,7 +596,7 @@ class DeduplicationAgent(BaseAgent):
                 return self._fallback_decision(
                     df,
                     dedup_input,
-                    column_roles=sanitized_llm_roles,
+                    column_semantics=sanitized_llm_semantics,
                     validation_notes=validation_notes,
                     reasoning_summary=decision.reasoning_summary or "Weak single-field keys are not safe for automatic deduplication.",
                     unresolved_collisions=unresolved_collisions,
@@ -559,8 +606,9 @@ class DeduplicationAgent(BaseAgent):
             return ValidatedDedupDecision(
                 mode="exact_key",
                 key_columns=filtered,
-                column_roles=sanitized_llm_roles,
+                column_semantics=sanitized_llm_semantics,
                 ignore_columns=list(decision.ignore_columns),
+                fuzzy_plan=validated_fuzzy_plan,
                 decision_source="llm",
                 confidence=decision.confidence,
                 reasoning_summary=decision.reasoning_summary,
@@ -573,8 +621,9 @@ class DeduplicationAgent(BaseAgent):
         return ValidatedDedupDecision(
             mode="exact_full_row",
             key_columns=[],
-            column_roles=sanitized_llm_roles,
+            column_semantics=sanitized_llm_semantics,
             ignore_columns=list(decision.ignore_columns),
+            fuzzy_plan=validated_fuzzy_plan,
             decision_source="llm",
             confidence=decision.confidence,
             reasoning_summary=decision.reasoning_summary,
@@ -587,7 +636,7 @@ class DeduplicationAgent(BaseAgent):
         df: pd.DataFrame,
         dedup_input: DeduplicationAgentInput,
         *,
-        column_roles: dict[str, str] | None,
+        column_semantics: dict[str, ColumnSemanticDescriptor] | None,
         validation_notes: list[str],
         reasoning_summary: str,
         unresolved_collisions: list[dict[str, Any]] | None = None,
@@ -597,13 +646,18 @@ class DeduplicationAgent(BaseAgent):
         if planner_task:
             strategy = self._to_dict(planner_task.strategy) or {}
             primary_keys = self._dedupe_columns(strategy.get("primary_keys") or [])
-            planner_primary_roles = self._resolve_column_roles(primary_keys, dedup_input)
-            if primary_keys and not self._is_name_only_key(primary_keys, dedup_input, column_roles=planner_primary_roles) and self._candidate_has_duplicates(df, primary_keys, dedup_input):
+            planner_primary_semantics = self._resolve_column_semantics(primary_keys, dedup_input)
+            if primary_keys and not self._is_name_only_key(primary_keys, dedup_input, column_semantics=planner_primary_semantics) and self._candidate_has_duplicates(df, primary_keys, dedup_input):
                 return ValidatedDedupDecision(
                     mode="exact_key",
                     key_columns=primary_keys,
-                    column_roles=self._merge_column_roles(column_roles, planner_primary_roles),
+                    column_semantics=self._merge_column_semantics(column_semantics, planner_primary_semantics),
                     ignore_columns=[],
+                    fuzzy_plan=self._build_default_fuzzy_plan(
+                        df,
+                        dedup_input,
+                        column_semantics=self._merge_column_semantics(column_semantics, planner_primary_semantics),
+                    ),
                     decision_source="planner_fallback",
                     confidence=None,
                     reasoning_summary=reasoning_summary,
@@ -611,13 +665,18 @@ class DeduplicationAgent(BaseAgent):
                     unresolved_collisions=unresolved_collisions,
                 )
             planner_columns = self._dedupe_columns(planner_task.columns)
-            planner_column_roles = self._resolve_column_roles(planner_columns, dedup_input)
-            if planner_columns and not self._is_name_only_key(planner_columns, dedup_input, column_roles=planner_column_roles) and self._candidate_has_duplicates(df, planner_columns, dedup_input):
+            planner_column_semantics = self._resolve_column_semantics(planner_columns, dedup_input)
+            if planner_columns and not self._is_name_only_key(planner_columns, dedup_input, column_semantics=planner_column_semantics) and self._candidate_has_duplicates(df, planner_columns, dedup_input):
                 return ValidatedDedupDecision(
                     mode="exact_key",
                     key_columns=planner_columns,
-                    column_roles=self._merge_column_roles(column_roles, planner_column_roles),
+                    column_semantics=self._merge_column_semantics(column_semantics, planner_column_semantics),
                     ignore_columns=[],
+                    fuzzy_plan=self._build_default_fuzzy_plan(
+                        df,
+                        dedup_input,
+                        column_semantics=self._merge_column_semantics(column_semantics, planner_column_semantics),
+                    ),
                     decision_source="planner_fallback",
                     confidence=None,
                     reasoning_summary=reasoning_summary,
@@ -633,13 +692,18 @@ class DeduplicationAgent(BaseAgent):
                 candidate_sets.append([column])
 
             for candidate in candidate_sets:
-                candidate_roles = self._resolve_column_roles(candidate, dedup_input)
+                candidate_semantics = self._resolve_column_semantics(candidate, dedup_input)
                 if self._candidate_has_duplicates(df, candidate, dedup_input):
                     return ValidatedDedupDecision(
                         mode="exact_key",
                         key_columns=candidate,
-                        column_roles=self._merge_column_roles(column_roles, candidate_roles),
+                        column_semantics=self._merge_column_semantics(column_semantics, candidate_semantics),
                         ignore_columns=[],
+                        fuzzy_plan=self._build_default_fuzzy_plan(
+                            df,
+                            dedup_input,
+                            column_semantics=self._merge_column_semantics(column_semantics, candidate_semantics),
+                        ),
                         decision_source="profile_fallback",
                         confidence=None,
                         reasoning_summary=reasoning_summary,
@@ -650,8 +714,13 @@ class DeduplicationAgent(BaseAgent):
         return ValidatedDedupDecision(
             mode="exact_full_row",
             key_columns=[],
-            column_roles=dict(column_roles or {}),
+            column_semantics=dict(column_semantics or {}),
             ignore_columns=[],
+            fuzzy_plan=self._build_default_fuzzy_plan(
+                df,
+                dedup_input,
+                column_semantics=dict(column_semantics or {}),
+            ),
             decision_source="safe_default",
             confidence=None,
             reasoning_summary=reasoning_summary,
@@ -710,7 +779,7 @@ class DeduplicationAgent(BaseAgent):
                 deduped_df,
                 ExactKeyDedupConfig(
                     key_columns=validated_decision.key_columns,
-                    column_roles=validated_decision.column_roles,
+                    column_semantics=validated_decision.column_semantics,
                     semantic_profile=dedup_input.semantic_profile,
                     statistical_profile=dedup_input.statistical_profile,
                     keep_rule=validated_decision.keep_rule,
@@ -834,7 +903,7 @@ class DeduplicationAgent(BaseAgent):
             normalized_keys = build_normalized_key_frame(
                 df,
                 validated_decision.key_columns,
-                explicit_roles=validated_decision.column_roles,
+                explicit_semantics=validated_decision.column_semantics,
                 semantic_profile=dedup_input.semantic_profile,
             )
             working = df.join(normalized_keys)
@@ -900,16 +969,17 @@ class DeduplicationAgent(BaseAgent):
             raise ValueError(f"HITL feedback selected unknown key columns: {missing_columns}")
 
         keep_rule = hitl_feedback.keep_rule or pending_strategy_review.keep_rule
-        resolved_roles = self._resolve_column_roles(
+        resolved_semantics = self._resolve_column_semantics(
             requested_key_columns,
             dedup_input,
-            llm_roles=validated_decision.column_roles,
+            llm_semantics=validated_decision.column_semantics,
         )
         updated_decision = ValidatedDedupDecision(
             mode="exact_key" if requested_key_columns else "exact_full_row",
             key_columns=requested_key_columns,
-            column_roles=resolved_roles,
+            column_semantics=resolved_semantics,
             ignore_columns=ignored_columns,
+            fuzzy_plan=validated_decision.fuzzy_plan,
             decision_source=validated_decision.decision_source,
             confidence=validated_decision.confidence,
             reasoning_summary=validated_decision.reasoning_summary,
@@ -1006,8 +1076,12 @@ class DeduplicationAgent(BaseAgent):
         return ValidatedDedupDecision(
             mode=mode,
             key_columns=list(result.key_columns),
-            column_roles=dict(trace.column_roles),
+            column_semantics={
+                column: ColumnSemanticDescriptor.model_validate(descriptor)
+                for column, descriptor in trace.column_semantics.items()
+            },
             ignore_columns=list(trace.ignore_columns),
+            fuzzy_plan=FuzzyExecutionPlan.model_validate(trace.fuzzy_plan) if trace.fuzzy_plan else None,
             decision_source=trace.decision_source,
             confidence=trace.confidence,
             reasoning_summary=trace.reasoning_summary,
@@ -1041,7 +1115,7 @@ class DeduplicationAgent(BaseAgent):
         return has_normalized_key_duplicates(
             df,
             columns,
-            explicit_roles=self._resolve_column_roles(columns, dedup_input),
+            explicit_semantics=self._resolve_column_semantics(columns, dedup_input),
             semantic_profile=dedup_input.semantic_profile,
         )
 
@@ -1051,12 +1125,12 @@ class DeduplicationAgent(BaseAgent):
         validated_decision: ValidatedDedupDecision,
         dedup_input: DeduplicationAgentInput,
     ) -> FuzzyCandidateSet:
+        if not validated_decision.fuzzy_plan or not validated_decision.fuzzy_plan.enabled:
+            return FuzzyCandidateSet(notes=["Fuzzy planning was disabled for this dataset."])
         return run_fuzzy_blocking(
             df,
+            plan=validated_decision.fuzzy_plan,
             key_columns=validated_decision.key_columns,
-            ignore_columns=validated_decision.ignore_columns,
-            column_roles=validated_decision.column_roles,
-            semantic_profile=dedup_input.semantic_profile,
             config=FuzzyBlockingConfig(),
         )
 
@@ -1069,53 +1143,57 @@ class DeduplicationAgent(BaseAgent):
     def _count_name_only_collision_rows(self, df: pd.DataFrame, key_columns: list[str]) -> int:
         return self._count_duplicate_rows(df, key_columns)
 
-    def _resolve_column_roles(
+    def _resolve_column_semantics(
         self,
         columns: list[str],
         dedup_input: DeduplicationAgentInput,
         *,
-        llm_roles: dict[str, str] | None = None,
-    ) -> dict[str, str]:
-        resolved: dict[str, str] = {}
+        llm_semantics: dict[str, ColumnSemanticDescriptor] | None = None,
+    ) -> dict[str, ColumnSemanticDescriptor]:
+        resolved: dict[str, ColumnSemanticDescriptor] = {}
         for column in columns:
-            role = infer_column_role(
+            descriptor = infer_column_semantics(
                 column,
-                explicit_roles=llm_roles,
+                explicit_semantics=llm_semantics,
                 semantic_profile=dedup_input.semantic_profile,
             )
-            if role is not None:
-                resolved[column] = role
+            if descriptor is not None:
+                resolved[column] = descriptor
         return resolved
 
     @staticmethod
-    def _merge_column_roles(
-        primary: dict[str, str] | None,
-        secondary: dict[str, str] | None,
-    ) -> dict[str, str]:
+    def _merge_column_semantics(
+        primary: dict[str, ColumnSemanticDescriptor] | None,
+        secondary: dict[str, ColumnSemanticDescriptor] | None,
+    ) -> dict[str, ColumnSemanticDescriptor]:
         merged = dict(primary or {})
         merged.update(secondary or {})
         return merged
 
-    def _sanitize_llm_column_roles(
+    def _sanitize_llm_column_semantics(
         self,
-        llm_roles: dict[str, str] | None,
+        raw_semantics: dict[str, dict[str, Any]] | None,
         available_columns: Any,
         dedup_input: DeduplicationAgentInput,
-    ) -> dict[str, str]:
-        sanitized: dict[str, str] = {}
-        if not llm_roles:
+    ) -> dict[str, ColumnSemanticDescriptor]:
+        sanitized: dict[str, ColumnSemanticDescriptor] = {}
+        if not raw_semantics:
             return sanitized
         available = set(available_columns)
-        for column, role_name in llm_roles.items():
+        for column, payload in raw_semantics.items():
             if column not in available:
                 continue
-            role = infer_column_role(
+            try:
+                descriptor = ColumnSemanticDescriptor.model_validate(payload)
+            except Exception:
+                continue
+            resolved = infer_column_semantics(
                 column,
-                explicit_roles={column: role_name},
+                explicit_semantics={column: descriptor},
                 semantic_profile=dedup_input.semantic_profile,
             )
-            if role is not None:
-                sanitized[column] = role
+            if resolved is not None:
+                sanitized[column] = resolved
         return sanitized
 
     def _is_name_only_key(
@@ -1123,14 +1201,14 @@ class DeduplicationAgent(BaseAgent):
         key_columns: list[str],
         dedup_input: DeduplicationAgentInput,
         *,
-        column_roles: dict[str, str] | None = None,
+        column_semantics: dict[str, ColumnSemanticDescriptor] | None = None,
     ) -> bool:
         if not key_columns:
             return False
-        if not all(self._is_name_like_column(column, dedup_input, column_roles=column_roles) for column in key_columns):
+        if not all(self._is_name_like_column(column, dedup_input, column_semantics=column_semantics) for column in key_columns):
             return False
         return not any(
-            self._is_hard_identifier_column(column, dedup_input, column_roles=column_roles)
+            self._is_hard_identifier_column(column, dedup_input, column_semantics=column_semantics)
             for column in key_columns
         )
 
@@ -1139,28 +1217,28 @@ class DeduplicationAgent(BaseAgent):
         column_name: str,
         dedup_input: DeduplicationAgentInput,
         *,
-        column_roles: dict[str, str] | None = None,
+        column_semantics: dict[str, ColumnSemanticDescriptor] | None = None,
     ) -> bool:
-        role = infer_column_role(
+        descriptor = infer_column_semantics(
             column_name,
-            explicit_roles=column_roles,
+            explicit_semantics=column_semantics,
             semantic_profile=dedup_input.semantic_profile,
         )
-        return role in {"company_name", "person_name"}
+        return descriptor_is_name_like(descriptor)
 
     def _is_hard_identifier_column(
         self,
         column_name: str,
         dedup_input: DeduplicationAgentInput,
         *,
-        column_roles: dict[str, str] | None = None,
+        column_semantics: dict[str, ColumnSemanticDescriptor] | None = None,
     ) -> bool:
-        role = infer_column_role(
+        descriptor = infer_column_semantics(
             column_name,
-            explicit_roles=column_roles,
+            explicit_semantics=column_semantics,
             semantic_profile=dedup_input.semantic_profile,
         )
-        if role in {"phone", "email"}:
+        if descriptor_is_hard_identifier(descriptor):
             return True
         profile = dedup_input.semantic_profile.columns.get(column_name) if dedup_input.semantic_profile else None
         if profile:
@@ -1182,23 +1260,30 @@ class DeduplicationAgent(BaseAgent):
         column_name: str,
         dedup_input: DeduplicationAgentInput,
         *,
-        column_roles: dict[str, str] | None = None,
+        column_semantics: dict[str, ColumnSemanticDescriptor] | None = None,
     ) -> bool:
-        role = infer_column_role(
+        descriptor = infer_column_semantics(
             column_name,
-            explicit_roles=column_roles,
+            explicit_semantics=column_semantics,
             semantic_profile=dedup_input.semantic_profile,
         )
-        return role == "phone"
+        return "phone" in " ".join(
+            [
+                descriptor.normalization_intent,
+                descriptor.identifier_intent,
+                descriptor.comparison_intent,
+                descriptor.semantic_label,
+            ]
+        ).casefold() if descriptor else False
 
     def _is_weak_single_key(
         self,
         column_name: str,
         dedup_input: DeduplicationAgentInput,
         *,
-        column_roles: dict[str, str] | None = None,
+        column_semantics: dict[str, ColumnSemanticDescriptor] | None = None,
     ) -> bool:
-        return not self._is_hard_identifier_column(column_name, dedup_input, column_roles=column_roles)
+        return not self._is_hard_identifier_column(column_name, dedup_input, column_semantics=column_semantics)
 
     def _validate_output(
         self,
@@ -1215,7 +1300,7 @@ class DeduplicationAgent(BaseAgent):
         if key_columns and has_normalized_key_duplicates(
             deduped_df,
             key_columns,
-            explicit_roles=self._resolve_column_roles(key_columns, dedup_input),
+            explicit_semantics=self._resolve_column_semantics(key_columns, dedup_input),
             semantic_profile=dedup_input.semantic_profile,
         ):
             failed_rules.append("key_duplicates_still_present")
@@ -1388,6 +1473,310 @@ class DeduplicationAgent(BaseAgent):
             seen.add(normalized)
             unique_suggestions.append(list(candidate))
         return unique_suggestions[:8]
+
+    def _build_suggested_fuzzy_columns(self, dedup_input: DeduplicationAgentInput) -> list[str]:
+        available_columns = list((dedup_input.dataset_schema or {}).keys())
+        candidates: list[str] = []
+        for column in available_columns:
+            descriptor = infer_column_semantics(column, semantic_profile=dedup_input.semantic_profile)
+            if resolve_name_family(descriptor) in {"organization_name", "person_name", "address"}:
+                candidates.append(column)
+        return self._dedupe_columns(candidates)[:10]
+
+    def _validate_fuzzy_plan(
+        self,
+        raw_plan: dict[str, Any] | None,
+        llm_semantics: dict[str, ColumnSemanticDescriptor],
+        df: pd.DataFrame,
+        dedup_input: DeduplicationAgentInput,
+        *,
+        ignore_columns: list[str],
+    ) -> FuzzyExecutionPlan | None:
+        if not dedup_input.fuzzy_enabled:
+            return None
+
+        candidate_plan: FuzzyExecutionPlan | None = None
+        if raw_plan:
+            try:
+                candidate_plan = FuzzyExecutionPlan.model_validate(raw_plan)
+            except Exception:
+                candidate_plan = None
+
+        if candidate_plan is None or not candidate_plan.enabled:
+            return self._build_default_fuzzy_plan(
+                df,
+                dedup_input,
+                column_semantics=llm_semantics,
+                ignore_columns=ignore_columns,
+            )
+
+        ignored = set(ignore_columns)
+        valid_specs: list[BlockingSpec] = []
+        for spec in candidate_plan.blocking_specs:
+            targets = self._dedupe_columns(
+                [column for column in spec.target_columns if column in df.columns and column not in ignored]
+            )
+            if not targets:
+                continue
+
+            block_keys = []
+            for block_key in spec.block_keys:
+                columns = self._dedupe_columns(
+                    [column for column in block_key.columns if column in df.columns and column not in ignored]
+                )
+                if columns:
+                    block_keys.append(block_key.model_copy(update={"columns": columns}))
+
+            sub_block_columns = self._dedupe_columns(
+                [
+                    column
+                    for column in spec.sub_block_columns
+                    if column in df.columns and column not in ignored and column not in targets
+                ]
+            )
+
+            valid_specs.append(
+                BlockingSpec(
+                    spec_id=spec.spec_id or self._derive_blocking_spec_id(spec, targets),
+                    target_columns=targets,
+                    semantic_label=spec.semantic_label or spec.comparison_intent or spec.blocking_intent,
+                    comparison_intent=spec.comparison_intent,
+                    blocking_intent=spec.blocking_intent,
+                    strategy=spec.strategy,
+                    block_keys=block_keys,
+                    sub_block_columns=sub_block_columns,
+                    similarity_metric=spec.similarity_metric,
+                    similarity_threshold=self._clamp_similarity_threshold(
+                        spec.similarity_threshold,
+                        comparison_intent=spec.comparison_intent,
+                    ),
+                    max_bucket_size=max(50, spec.max_bucket_size),
+                    oversized_bucket_strategy=spec.oversized_bucket_strategy,
+                )
+            )
+
+        if not valid_specs:
+            return self._build_default_fuzzy_plan(
+                df,
+                dedup_input,
+                column_semantics=llm_semantics,
+                ignore_columns=ignore_columns,
+            )
+
+        evidence_specs: list[EvidenceSpec] = []
+        valid_spec_ids = {spec.spec_id for spec in valid_specs}
+        for spec in candidate_plan.evidence_specs:
+            support_columns = self._dedupe_columns(
+                [column for column in spec.support_columns if column in df.columns and column not in ignored]
+            )
+            reject_columns = self._dedupe_columns(
+                [column for column in spec.reject_columns if column in df.columns and column not in ignored]
+            )
+            target_blocking_specs = [
+                spec_id for spec_id in spec.target_blocking_specs if spec_id in valid_spec_ids
+            ]
+            evidence_specs.append(
+                EvidenceSpec(
+                    target_blocking_specs=target_blocking_specs,
+                    support_columns=support_columns,
+                    reject_columns=reject_columns,
+                    minimum_support_matches=max(0, spec.minimum_support_matches),
+                    hard_reject_on_conflict=spec.hard_reject_on_conflict,
+                )
+            )
+
+        return FuzzyExecutionPlan(
+            enabled=True,
+            entity_scope=candidate_plan.entity_scope,
+            blocking_specs=valid_specs,
+            evidence_specs=evidence_specs,
+            candidate_resolution_policy=candidate_plan.candidate_resolution_policy,
+            notes=list(candidate_plan.notes),
+        )
+
+    def _build_default_fuzzy_plan(
+        self,
+        df: pd.DataFrame,
+        dedup_input: DeduplicationAgentInput,
+        *,
+        column_semantics: dict[str, ColumnSemanticDescriptor] | None,
+        ignore_columns: list[str] | None = None,
+    ) -> FuzzyExecutionPlan | None:
+        if not dedup_input.fuzzy_enabled:
+            return None
+
+        ignored = set(ignore_columns or [])
+        target_specs: list[BlockingSpec] = []
+        for column in df.columns:
+            if column in ignored:
+                continue
+            descriptor = infer_column_semantics(
+                column,
+                explicit_semantics=column_semantics,
+                semantic_profile=dedup_input.semantic_profile,
+            )
+            family = resolve_name_family(descriptor)
+            if family not in {"organization_name", "person_name", "address"}:
+                continue
+            strategy = "word_shingle_blocking" if family == "address" else "ngram_blocking"
+            sub_block_columns = self._pick_fuzzy_support_columns(
+                df,
+                dedup_input,
+                excluded_columns={column, *ignored},
+            )
+            target_specs.append(
+                BlockingSpec(
+                    spec_id=f"{family}:{column}".replace(" ", "_"),
+                    target_columns=[column],
+                    semantic_label=descriptor.semantic_label if descriptor else family,
+                    comparison_intent=descriptor.comparison_intent if descriptor else family,
+                    blocking_intent=descriptor.blocking_intent if descriptor else "generic fuzzy blocking",
+                    strategy=strategy,
+                    block_keys=[
+                        self._default_block_key_spec(family)
+                    ],
+                    sub_block_columns=sub_block_columns[:2],
+                    similarity_metric="jaccard",
+                    similarity_threshold=self._default_fuzzy_threshold(family),
+                    max_bucket_size=FuzzyBlockingConfig().max_bucket_size,
+                    oversized_bucket_strategy="sub_block",
+                )
+            )
+
+        if not target_specs:
+            return FuzzyExecutionPlan(
+                enabled=False,
+                notes=["No address/name/company columns were suitable for fuzzy planning."],
+            )
+
+        support_columns = self._pick_fuzzy_support_columns(df, dedup_input, excluded_columns=ignored)
+        reject_columns = [
+            column
+            for column in support_columns
+            if self._is_hard_identifier_column(column, dedup_input)
+        ]
+        evidence_specs = [
+            EvidenceSpec(
+                target_blocking_specs=[
+                    spec.spec_id for spec in target_specs if self._resolve_internal_execution_family(spec.comparison_intent) == "organization_name"
+                ],
+                support_columns=support_columns[:3],
+                reject_columns=reject_columns[:2],
+                minimum_support_matches=1,
+                hard_reject_on_conflict=True,
+            ),
+            EvidenceSpec(
+                target_blocking_specs=[
+                    spec.spec_id for spec in target_specs if self._resolve_internal_execution_family(spec.comparison_intent) == "person_name"
+                ],
+                support_columns=support_columns[:3],
+                reject_columns=reject_columns[:2],
+                minimum_support_matches=1,
+                hard_reject_on_conflict=True,
+            ),
+            EvidenceSpec(
+                target_blocking_specs=[
+                    spec.spec_id for spec in target_specs if self._resolve_internal_execution_family(spec.comparison_intent) == "address"
+                ],
+                support_columns=support_columns[:3],
+                reject_columns=reject_columns[:2],
+                minimum_support_matches=1,
+                hard_reject_on_conflict=False,
+            ),
+            EvidenceSpec(
+                target_blocking_specs=[
+                    spec.spec_id for spec in target_specs if self._resolve_internal_execution_family(spec.comparison_intent) == "person_name"
+                ],
+                support_columns=support_columns[:3],
+                reject_columns=reject_columns[:2],
+                minimum_support_matches=1,
+                hard_reject_on_conflict=True,
+            ),
+        ]
+        return FuzzyExecutionPlan(
+            enabled=True,
+            entity_scope="mixed",
+            blocking_specs=target_specs,
+            evidence_specs=evidence_specs,
+            candidate_resolution_policy="preview_only",
+            notes=["Used semantic/profile-driven fuzzy fallback planning because no valid LLM fuzzy plan was available."],
+        )
+
+    @staticmethod
+    def _default_block_key_spec(family: str) -> BlockKeySpec:
+        transform = "sorted_token_prefix" if family == "address" else "normalized_prefix"
+        return BlockKeySpec(columns=[], transform=transform, required=False)
+
+    @staticmethod
+    def _default_fuzzy_threshold(family: str | None) -> float:
+        if family == "address":
+            return FuzzyBlockingConfig().address_threshold
+        if family == "person_name":
+            return FuzzyBlockingConfig().person_threshold
+        return FuzzyBlockingConfig().company_threshold
+
+    def _pick_fuzzy_support_columns(
+        self,
+        df: pd.DataFrame,
+        dedup_input: DeduplicationAgentInput,
+        *,
+        excluded_columns: set[str],
+    ) -> list[str]:
+        scored: list[tuple[float, str]] = []
+        for column in df.columns:
+            if column in excluded_columns:
+                continue
+            if self._looks_like_technical_id(column, dedup_input):
+                continue
+            score = 0.0
+            if self._is_hard_identifier_column(column, dedup_input):
+                score += 5.0
+            descriptor = infer_column_semantics(column, semantic_profile=dedup_input.semantic_profile)
+            if descriptor_is_hard_identifier(descriptor):
+                score += 3.0
+            stat_column = self._get_statistical_column(dedup_input, column)
+            if stat_column:
+                score += max(0.0, 1.0 - float(stat_column.null_rate))
+                score += min(float(stat_column.unique_ratio), 1.0)
+            if score > 0:
+                scored.append((score, column))
+        scored.sort(key=lambda item: (-item[0], item[1]))
+        return [column for _, column in scored[:5]]
+
+    def _clamp_similarity_threshold(self, value: float, *, comparison_intent: str) -> float:
+        if not 0.0 <= value <= 1.0:
+            return self._default_fuzzy_threshold(self._resolve_internal_execution_family(comparison_intent))
+        return value
+
+    @staticmethod
+    def _resolve_internal_execution_family(comparison_intent: str | None) -> str:
+        family = (comparison_intent or "").strip().casefold()
+        aliases = {
+            "organization_name": "organization_name",
+            "organization": "organization_name",
+            "company_name": "organization_name",
+            "company": "organization_name",
+            "organization-like entity name": "organization_name",
+            "organization entity name": "organization_name",
+            "facility-like entity name": "organization_name",
+            "person_name": "person_name",
+            "person": "person_name",
+            "person-like entity name": "person_name",
+            "person entity name": "person_name",
+            "address": "address",
+            "location": "address",
+            "address-like location": "address",
+            "address text similarity": "address",
+            "location-like address": "address",
+            "generic_text": "generic_text",
+            "text": "generic_text",
+        }
+        return aliases.get(family, "generic_text")
+
+    def _derive_blocking_spec_id(self, spec: BlockingSpec, targets: list[str]) -> str:
+        semantic_label = (spec.semantic_label or spec.comparison_intent or "fuzzy").replace(" ", "_")
+        target_stub = "_".join(targets[:2]).replace(" ", "_")
+        return f"{semantic_label}:{target_stub}"
 
     def _looks_like_technical_id(self, column_name: str, dedup_input: DeduplicationAgentInput) -> bool:
         normalized = column_name.strip().lower()

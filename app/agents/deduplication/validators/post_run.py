@@ -46,7 +46,7 @@ def build_validation_results(
     if pending_strategy_review:
         metrics_observed["pending_strategy_review"] = True
         metrics_observed["proposed_key_columns"] = proposed_key_columns
-        replan_hints["hitl_reason"] = "Dedup strategy requires human review before cleaning."
+        replan_hints["hitl_reason"] = "Dedup strategy review is required before cleaning."
         recommended_next_action = "hitl"
 
     return [
