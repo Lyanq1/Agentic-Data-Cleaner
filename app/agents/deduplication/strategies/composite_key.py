@@ -73,6 +73,7 @@ class ExactKeyDedupConfig:
     column_roles: dict[str, str] = field(default_factory=dict)
     semantic_profile: SemanticProfile | None = None
     statistical_profile: StatisticalProfile | None = None
+    keep_rule: str = "keep_most_complete"
     notes: list[str] = field(default_factory=list)
     unresolved_collisions: list[dict[str, Any]] = field(default_factory=list)
 
@@ -117,25 +118,36 @@ def execute_exact_key_dedup(df: pd.DataFrame, config: ExactKeyDedupConfig) -> Co
             deduped_df=df,
             key_duplicate_count=0,
             duplicate_group_count=0,
-            kept_strategy="first",
+            kept_strategy=config.keep_rule if config.keep_rule in {"keep_first", "keep_last", "keep_most_complete"} else "keep_first",
             notes=normalized_notes,
             unresolved_collisions=list(config.unresolved_collisions),
         )
 
-    # Prefer rows with fewer nulls; preserve stable order for ties.
+    keep_rule = config.keep_rule if config.keep_rule in {"keep_first", "keep_last", "keep_most_complete"} else "keep_most_complete"
     working["__null_score__"] = working.isna().sum(axis=1)
     working["__stable_order__"] = range(len(working))
-    sort_columns = compare_columns + ["__null_score__", "__stable_order__"]
-    ranked = working.sort_values(sort_columns, kind="stable")
+    if keep_rule == "keep_first":
+        working["__selection_order__"] = working["__stable_order__"]
+        ranked = working.sort_values(compare_columns + ["__selection_order__"], kind="stable")
+    elif keep_rule == "keep_last":
+        working["__selection_order__"] = -working["__stable_order__"]
+        ranked = working.sort_values(compare_columns + ["__selection_order__"], kind="stable")
+    else:
+        working["__selection_order__"] = working["__stable_order__"]
+        ranked = working.sort_values(
+            compare_columns + ["__null_score__", "__selection_order__"],
+            kind="stable",
+        )
+
     keep_mask = ~ranked.duplicated(subset=compare_columns, keep="first")
     kept = ranked.loc[keep_mask].sort_values("__stable_order__", kind="stable")
 
-    drop_columns = compare_columns + ["__null_score__", "__stable_order__"]
+    drop_columns = compare_columns + ["__null_score__", "__stable_order__", "__selection_order__"]
     return CompositeKeyExecutionResult(
         deduped_df=kept.drop(columns=drop_columns, errors="ignore"),
         key_duplicate_count=key_duplicate_count,
         duplicate_group_count=duplicate_group_count,
-        kept_strategy="most_complete",
+        kept_strategy=keep_rule,
         notes=normalized_notes,
         unresolved_collisions=list(config.unresolved_collisions),
     )

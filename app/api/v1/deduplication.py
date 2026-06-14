@@ -36,9 +36,9 @@ async def api_run_dedup(request: DedupRunRequest):
     return result
 
 
-@router.post("/dedup/review/{run_id}", summary="Submit HITL review decisions for a dedup run")
+@router.post("/dedup/review/{run_id}", summary="Submit HITL strategy review choices for a dedup run")
 async def api_submit_dedup_review(run_id: str, request: DeduplicationHitlFeedback):
-    """Persist human review decisions for a dedup run without rerunning the agent."""
+    """Persist human strategy review choices for a dedup run without rerunning the agent."""
     try:
         result = await submit_dedup_hitl_feedback(run_id=run_id, feedback=request)
     except ValueError as exc:

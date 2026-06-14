@@ -242,7 +242,7 @@ async def submit_dedup_hitl_feedback(
     run_id: str,
     feedback: DeduplicationHitlFeedback,
 ) -> dict[str, Any] | None:
-    """Validate and persist HITL decisions for a dedup review cycle."""
+    """Validate and persist HITL strategy feedback for a dedup review cycle."""
 
     raw_state = await get_pipeline_raw_state(run_id)
     if raw_state is None:
@@ -253,19 +253,17 @@ async def submit_dedup_hitl_feedback(
         raise ValueError("No deduplication_result is available for this run.")
 
     existing_result = DeduplicationResult.model_validate(existing_result_raw)
-    pending_review_cases = existing_result.pending_review_cases
-    if not pending_review_cases:
-        raise ValueError("There are no pending dedup review cases for this run.")
+    pending_strategy_review = existing_result.pending_strategy_review
+    if pending_strategy_review is None:
+        raise ValueError("There is no pending dedup strategy review for this run.")
 
-    pending_case_ids = {case.case_id for case in pending_review_cases}
-    accepted_decisions = [
-        decision for decision in feedback.decisions if decision.case_id in pending_case_ids
-    ]
-    unknown_case_ids = [
-        decision.case_id for decision in feedback.decisions if decision.case_id not in pending_case_ids
-    ]
+    available_columns = set((raw_state.get("dataset_schema") or {}).keys())
+    requested_columns = set(feedback.key_columns or []) | set(feedback.identifier_columns or []) | set(feedback.ignored_columns or [])
+    unknown_columns = sorted(column for column in requested_columns if column and available_columns and column not in available_columns)
+    if unknown_columns:
+        raise ValueError(f"Unknown columns in HITL feedback: {unknown_columns}")
 
-    persisted_feedback = DeduplicationHitlFeedback(decisions=accepted_decisions)
+    persisted_feedback = feedback
     config = {"configurable": {"thread_id": run_id}}
     updates = {
         "hitl_feedback": persisted_feedback.model_dump_json(),
@@ -280,7 +278,6 @@ async def submit_dedup_hitl_feedback(
     persisted_state = await get_pipeline_state(run_id)
     return {
         "run_id": run_id,
-        "accepted_decision_count": len(accepted_decisions),
-        "unknown_case_ids": unknown_case_ids,
+        "accepted_override": True,
         "state": persisted_state,
     }

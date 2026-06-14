@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from app.graphs.states.planning import TaskDetail
 from app.graphs.states.profiler_state import StatisticalProfile
 from app.graphs.states.profiles import SemanticProfile
-from app.graphs.states.workers import DedupDecisionTrace, DeduplicationReviewCase
+from app.graphs.states.workers import DedupDecisionTrace, DedupStrategyReview
 
 
 class DeduplicationAgentInput(BaseModel):
@@ -49,6 +49,7 @@ class ValidatedDedupDecision(BaseModel):
     decision_source: Literal["llm", "planner_fallback", "profile_fallback", "safe_default"]
     confidence: float | None = None
     reasoning_summary: str = ""
+    keep_rule: Literal["keep_most_complete", "keep_first", "keep_last"] = "keep_most_complete"
     validation_notes: list[str] = Field(default_factory=list)
     unresolved_collisions: list[dict[str, Any]] = Field(default_factory=list)
 
@@ -89,23 +90,18 @@ class FuzzyCandidateSet(BaseModel):
         return len(self.candidates)
 
 
-class DeduplicationHitlDecision(BaseModel):
-    case_id: str
-    decision: Literal["merge", "do_not_merge"]
-    reason: str | None = None
-
-
 class DeduplicationHitlFeedback(BaseModel):
-    decisions: list[DeduplicationHitlDecision] = Field(default_factory=list)
+    key_columns: list[str] | None = None
+    identifier_columns: list[str] | None = None
+    ignored_columns: list[str] | None = None
+    keep_rule: Literal["keep_most_complete", "keep_first", "keep_last"] | None = None
+    note: str | None = None
 
 
 class AppliedHitlResult(BaseModel):
-    deduped_df: Any
-    applied_case_ids: list[str] = Field(default_factory=list)
-    rejected_case_ids: list[str] = Field(default_factory=list)
-    unknown_case_ids: list[str] = Field(default_factory=list)
+    validated_decision: ValidatedDedupDecision
     notes: list[str] = Field(default_factory=list)
-    remaining_review_cases: list[DeduplicationReviewCase] = Field(default_factory=list)
+    pending_strategy_review: DedupStrategyReview | None = None
 
 
 @dataclass(slots=True)
@@ -119,8 +115,3 @@ class FuzzyBlockingConfig:
     person_threshold: float = 0.4
     address_threshold: float = 0.6
     max_bucket_size: int = 500
-
-
-@dataclass(slots=True)
-class HitlConfig:
-    max_review_cases: int = 50

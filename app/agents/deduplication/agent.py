@@ -22,7 +22,6 @@ from app.agents.deduplication.models import (
     DeduplicationAgentInput,
     FuzzyBlockingConfig,
     FuzzyCandidateSet,
-    HitlConfig,
     ValidatedDedupDecision,
 )
 from app.agents.deduplication.prompt import (
@@ -47,8 +46,10 @@ from app.graphs.states.output_validation import ValidationResultItem
 from app.graphs.states.planning import ExecutionPlan, TaskDetail
 from app.graphs.states.profiler_state import StatisticalProfile
 from app.graphs.states.workers import (
+    DedupPreviewGroup,
+    DedupPreviewSummary,
     DeduplicationResult,
-    DeduplicationReviewCase,
+    DedupStrategyReview,
     WorkerStateDetail,
     WorkerStates,
 )
@@ -104,68 +105,110 @@ class DeduplicationAgent(BaseAgent):
                 context = self._build_decision_context(dedup_input)
                 raw_decision = await self._invoke_dedup_decision_llm(context)
                 validated_decision = self._validate_dedup_decision(raw_decision, df, dedup_input)
-
-            execution = self._execute_validated_decision(df, validated_decision, dedup_input)
-            notes = list(execution["notes"])
-            if reused_decision:
-                notes.append("Reused the previous dedup decision because the context hash matched.")
-            elif used_debug_override:
-                notes.append("Used the service-layer debug override instead of invoking the LLM.")
-            fuzzy_candidates = FuzzyCandidateSet()
-            if dedup_input.fuzzy_enabled:
-                fuzzy_candidates = self._run_fuzzy_blocking(
-                    execution["deduped_df"],
-                    validated_decision,
-                    dedup_input,
-                )
-                notes.extend(fuzzy_candidates.notes)
-
-            if existing_result and existing_result.pending_review_cases and not hitl_feedback.decisions:
-                pending_review_cases = list(existing_result.pending_review_cases)
-            else:
-                pending_review_cases = self._collect_review_cases(
-                    execution["deduped_df"],
-                    execution["effective_key_columns"],
-                    execution["unresolved_collisions"],
-                    fuzzy_candidates,
-                    dedup_input,
-                    validated_decision,
-                )
-
-            if hitl_feedback.decisions:
-                applied_hitl = self._apply_hitl_feedback(
-                    execution["deduped_df"],
-                    pending_review_cases,
-                    hitl_feedback,
-                )
-                execution["deduped_df"] = applied_hitl.deduped_df
-                execution["after_row_count"] = len(applied_hitl.deduped_df)
-                execution["dropped_row_count"] = execution["before_row_count"] - execution["after_row_count"]
-                notes.extend(applied_hitl.notes)
-                pending_review_cases = applied_hitl.remaining_review_cases
-            else:
-                applied_hitl = None
-
-            if pending_review_cases:
-                notes.append(f"{len(pending_review_cases)} ambiguous case(s) require human review.")
-
-            failed_rules = self._validate_output(
-                execution["deduped_df"],
-                execution["before_row_count"],
-                execution["effective_key_columns"],
-                dedup_input,
-            )
-
-            output_path = self._write_output_dataframe(
-                execution["deduped_df"],
-                dedup_input.project_id,
-            )
         except Exception as exc:
             return self._failure_update(
                 state,
                 f"DeduplicationAgent: failed during execution: {exc}",
                 failed_rules=["dedup_execution_failed"],
             )
+
+        notes: list[str] = []
+        if reused_decision:
+            notes.append("Reused the previous dedup decision because the context hash matched.")
+        elif used_debug_override:
+            notes.append("Used the service-layer debug override instead of invoking the LLM.")
+
+        pending_strategy_review = self._coerce_pending_strategy_review(existing_result)
+        applied_hitl = None
+        if hitl_feedback.key_columns is not None or hitl_feedback.keep_rule is not None or hitl_feedback.ignored_columns is not None or hitl_feedback.identifier_columns is not None:
+            if pending_strategy_review is None:
+                return self._failure_update(
+                    state,
+                    "DeduplicationAgent: received HITL feedback but no pending strategy review exists.",
+                    failed_rules=["missing_pending_strategy_review"],
+                )
+            applied_hitl = self._apply_hitl_feedback(
+                validated_decision,
+                pending_strategy_review,
+                hitl_feedback,
+                df,
+                dedup_input,
+            )
+            validated_decision = applied_hitl.validated_decision
+            notes.extend(applied_hitl.notes)
+            pending_strategy_review = applied_hitl.pending_strategy_review
+
+        if pending_strategy_review is None:
+            pending_strategy_review = self._build_strategy_review(df, validated_decision, dedup_input)
+
+        preview_has_duplicates = pending_strategy_review.preview.duplicate_rows > 0
+        should_wait_for_hitl = preview_has_duplicates and applied_hitl is None
+
+        if should_wait_for_hitl:
+            notes.append("Dedup strategy review is pending human confirmation before cleaning.")
+            result = DeduplicationResult(
+                applied_modes=[],
+                key_columns=list(pending_strategy_review.proposed_key_columns),
+                keep_strategy=pending_strategy_review.keep_rule,
+                source_path=dedup_input.dataset_path,
+                output_path=dedup_input.dataset_path,
+                before_row_count=len(df),
+                after_row_count=len(df),
+                dropped_row_count=0,
+                full_row_duplicate_count=0,
+                key_duplicate_count=0,
+                duplicate_group_count=pending_strategy_review.preview.duplicate_groups,
+                notes=notes,
+                decision_trace=validated_decision.to_trace(context_hash=context_hash),
+                pending_strategy_review=pending_strategy_review,
+            )
+            worker_states = self._coerce_worker_states(state)
+            worker_states.dedup_agent = WorkerStateDetail(status="done", retries=0, error_log=[])
+            worker_states.last_completed_agent = self.name
+            return {
+                "deduplication_result": result,
+                "worker_states": worker_states,
+                "validation_results": build_validation_results(
+                    agent_name=self.name,
+                    timestamp=self._timestamp(),
+                    before_row_count=len(df),
+                    after_row_count=len(df),
+                    decision_source=validated_decision.decision_source,
+                    failed_rules=[],
+                    unresolved_collisions=validated_decision.unresolved_collisions,
+                    fuzzy_candidate_count=0,
+                    fuzzy_notes=[],
+                    pending_strategy_review=True,
+                    proposed_key_columns=list(pending_strategy_review.proposed_key_columns),
+                ),
+                "hitl_status": "pending",
+                "hitl_checkpoint": state.get("current_task_idx"),
+                "current_step": "deduplication",
+                "completed_steps": "deduplication",
+            }
+
+        execution = self._execute_validated_decision(df, validated_decision, dedup_input)
+        notes.extend(execution["notes"])
+        fuzzy_candidates = FuzzyCandidateSet()
+        if dedup_input.fuzzy_enabled:
+            fuzzy_candidates = self._run_fuzzy_blocking(
+                execution["deduped_df"],
+                validated_decision,
+                dedup_input,
+            )
+            notes.extend(fuzzy_candidates.notes)
+
+        failed_rules = self._validate_output(
+            execution["deduped_df"],
+            execution["before_row_count"],
+            execution["effective_key_columns"],
+            dedup_input,
+        )
+
+        output_path = self._write_output_dataframe(
+            execution["deduped_df"],
+            dedup_input.project_id,
+        )
 
         if failed_rules:
             return self._failure_update(
@@ -188,7 +231,7 @@ class DeduplicationAgent(BaseAgent):
             duplicate_group_count=execution["duplicate_group_count"],
             notes=notes,
             decision_trace=validated_decision.to_trace(context_hash=context_hash),
-            pending_review_cases=pending_review_cases,
+            pending_strategy_review=None,
         )
 
         worker_states = self._coerce_worker_states(state)
@@ -219,12 +262,12 @@ class DeduplicationAgent(BaseAgent):
                 unresolved_collisions=execution["unresolved_collisions"],
                 fuzzy_candidate_count=fuzzy_candidates.total_count,
                 fuzzy_notes=fuzzy_candidates.notes,
-                pending_review_case_count=len(pending_review_cases),
-                pending_review_case_ids=[case.case_id for case in pending_review_cases],
+                pending_strategy_review=False,
+                proposed_key_columns=execution["effective_key_columns"],
             ),
-            "hitl_status": self._determine_hitl_status(state, pending_review_cases, applied_hitl),
-            "hitl_checkpoint": state.get("current_task_idx") if pending_review_cases else None,
-            "hitl_feedback": None if hitl_feedback.decisions else state.get("hitl_feedback"),
+            "hitl_status": "approved" if applied_hitl is not None or not preview_has_duplicates else state.get("hitl_status"),
+            "hitl_checkpoint": None,
+            "hitl_feedback": None,
             "current_step": "deduplication",
             "completed_steps": "deduplication",
         }
@@ -659,7 +702,7 @@ class DeduplicationAgent(BaseAgent):
 
         key_duplicate_count = 0
         duplicate_group_count = int(full_row_result["duplicate_group_count"])
-        keep_strategy = "first"
+        keep_strategy = validated_decision.keep_rule if validated_decision.mode == "exact_key" else "keep_first"
         effective_key_columns: list[str] = []
         unresolved_collisions = list(validated_decision.unresolved_collisions)
         if validated_decision.mode == "exact_key" and validated_decision.key_columns:
@@ -670,6 +713,7 @@ class DeduplicationAgent(BaseAgent):
                     column_roles=validated_decision.column_roles,
                     semantic_profile=dedup_input.semantic_profile,
                     statistical_profile=dedup_input.statistical_profile,
+                    keep_rule=validated_decision.keep_rule,
                     notes=[],
                     unresolved_collisions=unresolved_collisions,
                 ),
@@ -731,316 +775,199 @@ class DeduplicationAgent(BaseAgent):
             logger.warning("DeduplicationAgent: ignoring invalid hitl_feedback payload: %s", exc)
             return DeduplicationHitlFeedback()
 
-    def _collect_review_cases(
+    @staticmethod
+    def _coerce_pending_strategy_review(
+        existing_result: DeduplicationResult | None,
+    ) -> DedupStrategyReview | None:
+        if existing_result is None:
+            return None
+        return existing_result.pending_strategy_review
+
+    def _build_strategy_review(
         self,
         df: pd.DataFrame,
-        effective_key_columns: list[str],
-        unresolved_collisions: list[dict[str, Any]],
-        fuzzy_candidates: FuzzyCandidateSet,
-        dedup_input: DeduplicationAgentInput,
         validated_decision: ValidatedDedupDecision,
-    ) -> list[DeduplicationReviewCase]:
-        config = HitlConfig()
-        cases: dict[str, DeduplicationReviewCase] = {}
+        dedup_input: DeduplicationAgentInput,
+    ) -> DedupStrategyReview:
+        proposed_key_columns = list(validated_decision.key_columns)
+        suggested_identifier_columns = self._suggested_identifier_columns(dedup_input)
+        ignored_columns = [
+            column
+            for column in (dedup_input.dataset_schema or {}).keys()
+            if self._looks_like_technical_id(column, dedup_input)
+        ]
+        warnings = list(validated_decision.validation_notes)
+        preview = self._build_preview_summary(
+            df,
+            validated_decision,
+            dedup_input,
+        )
+        if validated_decision.unresolved_collisions:
+            warnings.extend(
+                self._collision_rationale(collision.get("collision_type"), collision.get("key_columns") or proposed_key_columns)
+                for collision in validated_decision.unresolved_collisions
+            )
+        questions = [
+            "Which columns should define the same entity?",
+            "Which columns should be treated as reliable identifiers?",
+            "Which columns should be ignored because they are technical or not trustworthy for deduplication?",
+            "How should one row be kept from each duplicate group?",
+        ]
+        return DedupStrategyReview(
+            proposed_mode=validated_decision.mode,
+            proposed_key_columns=proposed_key_columns,
+            suggested_identifier_columns=suggested_identifier_columns,
+            ignored_columns=ignored_columns,
+            keep_rule=validated_decision.keep_rule,
+            questions=questions,
+            warnings=self._dedupe_strings(warnings),
+            preview=preview,
+        )
 
-        for collision in unresolved_collisions:
-            key_columns = list(collision.get("key_columns") or effective_key_columns)
-            if not key_columns or any(column not in df.columns for column in key_columns):
-                continue
-            candidate_type = self._map_collision_to_review_type(collision.get("collision_type"))
+    def _build_preview_summary(
+        self,
+        df: pd.DataFrame,
+        validated_decision: ValidatedDedupDecision,
+        dedup_input: DeduplicationAgentInput,
+    ) -> DedupPreviewSummary:
+        if validated_decision.mode == "exact_key" and validated_decision.key_columns:
             normalized_keys = build_normalized_key_frame(
                 df,
-                key_columns,
+                validated_decision.key_columns,
                 explicit_roles=validated_decision.column_roles,
                 semantic_profile=dedup_input.semantic_profile,
             )
-            grouped = df.join(normalized_keys)
+            working = df.join(normalized_keys)
             compare_columns = list(normalized_keys.columns)
-            for _, group in grouped.groupby(compare_columns, dropna=False):
-                if len(group) < 2:
-                    continue
-                source_rows = df.loc[group.index]
-                conflicting_fields = self._select_conflicting_fields(
-                    source_rows,
-                    matching_fields=key_columns,
-                    dedup_input=dedup_input,
-                    column_roles=validated_decision.column_roles,
-                )
-                review_case = self._build_review_case(
-                    source_rows,
-                    dedup_input=dedup_input,
-                    candidate_type=candidate_type,
-                    matching_fields=key_columns,
-                    conflicting_fields=conflicting_fields,
-                    agent_rationale=self._collision_rationale(collision.get("collision_type"), key_columns),
-                    column_roles=validated_decision.column_roles,
-                    suggested_action="do_not_merge" if candidate_type in {"name_only", "cross_script_name"} else None,
-                )
-                cases.setdefault(review_case.case_id, review_case)
-
-        for candidate in fuzzy_candidates.candidates:
-            if candidate.row_index_a not in df.index or candidate.row_index_b not in df.index:
-                continue
-            source_rows = df.loc[[candidate.row_index_a, candidate.row_index_b]]
-            conflicting_fields = self._select_conflicting_fields(
-                source_rows,
-                matching_fields=[candidate.field],
-                dedup_input=dedup_input,
-                column_roles=validated_decision.column_roles,
+            duplicate_mask = working.duplicated(subset=compare_columns, keep=False)
+            duplicate_rows = int(working.duplicated(subset=compare_columns, keep="first").sum())
+            duplicate_group_count = self._count_duplicate_groups(working.loc[duplicate_mask], compare_columns)
+            sample_groups: list[DedupPreviewGroup] = []
+            if duplicate_mask.any():
+                grouped = working.loc[duplicate_mask].groupby(compare_columns, dropna=False)
+                for _, group in grouped:
+                    if len(sample_groups) >= 5:
+                        break
+                    sample_rows = []
+                    for _, row in df.loc[group.index].head(2).iterrows():
+                        sample_rows.append(
+                            {
+                                column: self._json_safe_value(row[column])
+                                for column in self._preview_visible_columns(validated_decision.key_columns, df.columns)
+                            }
+                        )
+                    group_key = {
+                        column: self._json_safe_value(group.iloc[0][compare_name])
+                        for column, compare_name in zip(validated_decision.key_columns, compare_columns, strict=False)
+                    }
+                    sample_groups.append(
+                        DedupPreviewGroup(
+                            group_key=group_key,
+                            row_count=int(len(group)),
+                            sample_rows=sample_rows,
+                        )
+                    )
+            return DedupPreviewSummary(
+                duplicate_rows=duplicate_rows,
+                duplicate_groups=duplicate_group_count,
+                sample_groups=sample_groups,
             )
-            review_case = self._build_review_case(
-                source_rows,
-                dedup_input=dedup_input,
-                candidate_type=(
-                    "cross_script_name"
-                    if candidate.candidate_type == "cross_script_name"
-                    else "fuzzy_candidate"
-                ),
-                matching_fields=[candidate.field],
-                conflicting_fields=conflicting_fields,
-                agent_rationale=(
-                    f"Fuzzy blocking found a near-duplicate candidate on '{candidate.field}' "
-                    f"with similarity {candidate.similarity_score:.2f}."
-                ),
-                column_roles=validated_decision.column_roles,
-            )
-            cases.setdefault(review_case.case_id, review_case)
 
-        prioritized = sorted(
-            cases.values(),
-            key=lambda case: (self._review_priority(case.candidate_type), case.case_id),
+        full_row_result = execute_full_row_dedup(df)
+        return DedupPreviewSummary(
+            duplicate_rows=int(full_row_result["full_row_duplicate_count"]),
+            duplicate_groups=int(full_row_result["duplicate_group_count"]),
+            sample_groups=[],
         )
-        if len(prioritized) > config.max_review_cases:
-            prioritized = prioritized[: config.max_review_cases]
-        return prioritized
 
     def _apply_hitl_feedback(
         self,
-        df: pd.DataFrame,
-        pending_review_cases: list[DeduplicationReviewCase],
+        validated_decision: ValidatedDedupDecision,
+        pending_strategy_review: DedupStrategyReview,
         hitl_feedback: DeduplicationHitlFeedback,
+        df: pd.DataFrame,
+        dedup_input: DeduplicationAgentInput,
     ) -> AppliedHitlResult:
-        working = df.copy()
-        cases_by_id = {case.case_id: case for case in pending_review_cases}
-        remaining_cases = dict(cases_by_id)
-        applied_case_ids: list[str] = []
-        rejected_case_ids: list[str] = []
-        unknown_case_ids: list[str] = []
-        notes: list[str] = []
+        requested_key_columns = self._dedupe_columns(
+            list(hitl_feedback.key_columns or pending_strategy_review.proposed_key_columns)
+        )
+        ignored_columns = self._dedupe_columns(
+            list(hitl_feedback.ignored_columns or pending_strategy_review.ignored_columns)
+        )
+        requested_key_columns = [column for column in requested_key_columns if column not in set(ignored_columns)]
+        missing_columns = [column for column in requested_key_columns if column not in df.columns]
+        if missing_columns:
+            raise ValueError(f"HITL feedback selected unknown key columns: {missing_columns}")
 
-        for decision in hitl_feedback.decisions:
-            review_case = cases_by_id.get(decision.case_id)
-            if review_case is None:
-                unknown_case_ids.append(decision.case_id)
-                notes.append(f"Review case {decision.case_id} was not found in pending_review_cases.")
-                continue
-
-            matched_indices = self._locate_review_case_rows(working, review_case)
-            if decision.decision == "merge":
-                if len(matched_indices) >= 2:
-                    keep_index = self._choose_most_complete_index(working.loc[matched_indices])
-                    drop_indices = [index for index in matched_indices if index != keep_index]
-                    working = working.drop(index=drop_indices)
-                    applied_case_ids.append(decision.case_id)
-                    human_note = f" Human note: {decision.reason}" if decision.reason else ""
-                    notes.append(
-                        f"Case {decision.case_id} approved for merge by human; kept row {keep_index} and dropped "
-                        f"{len(drop_indices)} row(s).{human_note}"
-                    )
-                else:
-                    notes.append(
-                        f"Case {decision.case_id} was approved for merge but matching rows were not found in the current dataframe."
-                    )
-            else:
-                rejected_case_ids.append(decision.case_id)
-                human_note = f" Human note: {decision.reason}" if decision.reason else ""
-                notes.append(f"Case {decision.case_id} was marked do_not_merge by human.{human_note}")
-
-            remaining_cases.pop(decision.case_id, None)
-
+        keep_rule = hitl_feedback.keep_rule or pending_strategy_review.keep_rule
+        resolved_roles = self._resolve_column_roles(
+            requested_key_columns,
+            dedup_input,
+            llm_roles=validated_decision.column_roles,
+        )
+        updated_decision = ValidatedDedupDecision(
+            mode="exact_key" if requested_key_columns else "exact_full_row",
+            key_columns=requested_key_columns,
+            column_roles=resolved_roles,
+            ignore_columns=ignored_columns,
+            decision_source=validated_decision.decision_source,
+            confidence=validated_decision.confidence,
+            reasoning_summary=validated_decision.reasoning_summary,
+            keep_rule=keep_rule,
+            validation_notes=list(validated_decision.validation_notes),
+            unresolved_collisions=list(validated_decision.unresolved_collisions),
+        )
+        notes = ["Applied human-reviewed dedup strategy before cleaning."]
+        if hitl_feedback.identifier_columns:
+            notes.append(
+                "Human confirmed identifier columns: "
+                + ", ".join(self._dedupe_columns(hitl_feedback.identifier_columns))
+                + "."
+            )
+        if hitl_feedback.note:
+            notes.append(f"Human note: {hitl_feedback.note}")
         return AppliedHitlResult(
-            deduped_df=working,
-            applied_case_ids=applied_case_ids,
-            rejected_case_ids=rejected_case_ids,
-            unknown_case_ids=unknown_case_ids,
+            validated_decision=updated_decision,
             notes=notes,
-            remaining_review_cases=list(remaining_cases.values()),
+            pending_strategy_review=None,
         )
 
-    def _build_review_case(
-        self,
-        source_rows: pd.DataFrame,
-        *,
-        dedup_input: DeduplicationAgentInput,
-        candidate_type: str,
-        matching_fields: list[str],
-        conflicting_fields: list[str],
-        agent_rationale: str,
-        column_roles: dict[str, str],
-        suggested_action: str | None = None,
-    ) -> DeduplicationReviewCase:
-        visible_columns = self._select_review_columns(
-            source_rows,
-            matching_fields=matching_fields,
-            conflicting_fields=conflicting_fields,
-            dedup_input=dedup_input,
-            column_roles=column_roles,
-        )
-        row_fingerprints = [self._fingerprint_row(row) for _, row in source_rows.iterrows()]
-        row_data: list[dict[str, Any]] = []
-        for row_index, (_, row) in enumerate(source_rows.iterrows()):
-            snapshot = {"row_index": int(source_rows.index[row_index])}
-            for column in visible_columns:
-                snapshot[column] = self._json_safe_value(row[column])
-            row_data.append(snapshot)
-
-        case_id = self._build_review_case_id(
-            run_id=dedup_input.project_id or "unknown_run",
-            candidate_type=candidate_type,
-            row_fingerprints=row_fingerprints,
-            matching_fields=matching_fields,
-        )
-        return DeduplicationReviewCase(
-            case_id=case_id,
-            candidate_type=candidate_type,  # type: ignore[arg-type]
-            row_fingerprints=row_fingerprints,
-            row_indices=[int(index) for index in source_rows.index.tolist()],
-            row_data=row_data,
-            matching_fields=list(matching_fields),
-            conflicting_fields=list(conflicting_fields),
-            agent_rationale=agent_rationale,
-            suggested_action=suggested_action,  # type: ignore[arg-type]
-        )
-
-    def _select_review_columns(
-        self,
-        source_rows: pd.DataFrame,
-        *,
-        matching_fields: list[str],
-        conflicting_fields: list[str],
-        dedup_input: DeduplicationAgentInput,
-        column_roles: dict[str, str],
-    ) -> list[str]:
-        columns = self._dedupe_columns(list(matching_fields) + list(conflicting_fields))
-        role_rank = {"phone": 0, "email": 1, "person_name": 2, "company_name": 3, "address": 4}
-        additional = []
-        for column in source_rows.columns:
-            if column in columns:
-                continue
-            role = infer_column_role(
-                column,
-                explicit_roles=column_roles,
-                semantic_profile=dedup_input.semantic_profile,
-            )
-            rank = role_rank.get(role or "", 99)
-            additional.append((rank, column))
-        additional.sort(key=lambda item: (item[0], item[1]))
-        for _, column in additional:
-            if len(columns) >= len(matching_fields) + len(conflicting_fields) + 3:
-                break
-            columns.append(column)
-        return columns
-
-    def _select_conflicting_fields(
-        self,
-        source_rows: pd.DataFrame,
-        *,
-        matching_fields: list[str],
-        dedup_input: DeduplicationAgentInput,
-        column_roles: dict[str, str],
-    ) -> list[str]:
-        candidates: list[tuple[int, str]] = []
-        role_rank = {"phone": 0, "email": 1, "person_name": 2, "company_name": 3, "address": 4}
-        for column in source_rows.columns:
-            if column in matching_fields:
-                continue
-            normalized_values = {
-                str(self._json_safe_value(value)).strip()
-                for value in source_rows[column].tolist()
-                if str(self._json_safe_value(value)).strip()
-            }
-            if len(normalized_values) < 2:
-                continue
-            role = infer_column_role(
-                column,
-                explicit_roles=column_roles,
-                semantic_profile=dedup_input.semantic_profile,
-            )
-            candidates.append((role_rank.get(role or "", 99), column))
-        candidates.sort(key=lambda item: (item[0], item[1]))
-        return [column for _, column in candidates[:5]]
+    def _suggested_identifier_columns(self, dedup_input: DeduplicationAgentInput) -> list[str]:
+        available_columns = list((dedup_input.dataset_schema or {}).keys())
+        return [
+            column
+            for column in available_columns
+            if self._is_hard_identifier_column(column, dedup_input)
+        ][:8]
 
     @staticmethod
-    def _map_collision_to_review_type(collision_type: str | None) -> str:
-        if collision_type == "name_only":
-            return "name_only"
-        return "weak_single_key"
+    def _preview_visible_columns(key_columns: list[str], available_columns: Any) -> list[str]:
+        visible = list(key_columns)
+        for column in available_columns:
+            if column in visible:
+                continue
+            visible.append(column)
+            if len(visible) >= max(3, len(key_columns) + 2):
+                break
+        return visible
 
     @staticmethod
     def _collision_rationale(collision_type: str | None, key_columns: list[str]) -> str:
         if collision_type == "name_only":
             return f"Rows matched on name-like fields {key_columns} without a hard identifier."
+        if collision_type == "weak_phone_only":
+            return f"Rows matched on phone-like field {key_columns}, which may be shared or reused."
         return f"Rows matched on weak key fields {key_columns} and were not auto-merged."
 
     @staticmethod
-    def _review_priority(candidate_type: str) -> int:
-        priority = {
-            "weak_single_key": 0,
-            "name_only": 1,
-            "cross_script_name": 2,
-            "fuzzy_candidate": 3,
-        }
-        return priority.get(candidate_type, 99)
-
-    @staticmethod
-    def _build_review_case_id(
-        *,
-        run_id: str,
-        candidate_type: str,
-        row_fingerprints: list[str],
-        matching_fields: list[str],
-    ) -> str:
-        payload = json.dumps(
-            {
-                "run_id": run_id,
-                "candidate_type": candidate_type,
-                "row_fingerprints": sorted(row_fingerprints),
-                "matching_fields": sorted(matching_fields),
-            },
-            sort_keys=True,
-            ensure_ascii=False,
-        )
-        return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
-
-    def _locate_review_case_rows(
-        self,
-        df: pd.DataFrame,
-        review_case: DeduplicationReviewCase,
-    ) -> list[int]:
-        target = set(review_case.row_fingerprints)
-        matched_indices: list[int] = []
-        for index, row in df.iterrows():
-            if self._fingerprint_row(row) in target:
-                matched_indices.append(int(index))
-        return matched_indices
-
-    @staticmethod
-    def _choose_most_complete_index(source_rows: pd.DataFrame) -> int:
-        ranked = source_rows.assign(__null_score__=source_rows.isna().sum(axis=1))
-        ranked = ranked.sort_values(["__null_score__"], kind="stable")
-        return int(ranked.index[0])
-
-    def _determine_hitl_status(
-        self,
-        state: GlobalState,
-        pending_review_cases: list[DeduplicationReviewCase],
-        applied_hitl: AppliedHitlResult | None,
-    ) -> str | None:
-        if pending_review_cases:
-            return "pending"
-        if applied_hitl is not None:
-            return "approved"
-        return state.get("hitl_status")
+    def _dedupe_strings(values: list[str]) -> list[str]:
+        seen: set[str] = set()
+        ordered: list[str] = []
+        for value in values:
+            if value and value not in seen:
+                ordered.append(value)
+                seen.add(value)
+        return ordered
 
     @staticmethod
     def _fingerprint_row(row: pd.Series) -> str:
@@ -1084,6 +1011,7 @@ class DeduplicationAgent(BaseAgent):
             decision_source=trace.decision_source,
             confidence=trace.confidence,
             reasoning_summary=trace.reasoning_summary,
+            keep_rule=result.keep_strategy if result.keep_strategy in {"keep_most_complete", "keep_first", "keep_last"} else "keep_most_complete",
             validation_notes=list(trace.validation_notes),
             unresolved_collisions=[],
         )

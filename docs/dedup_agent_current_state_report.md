@@ -1,301 +1,612 @@
-  # Dedup Agent Current State Report
+# Dedup Agent Current State Report
 
-  ## Scope
+## Scope
 
-  This report reflects the current deduplication implementation in the repo after the hybrid refactor. It documents the live behavior, the state contract it uses, the testing path, and the remaining limitations.
+This report describes the **current live implementation** of the deduplication
+agent in this repo after the move to:
 
-  ## Current Dedup Worker
+- hybrid LLM + deterministic execution
+- pre-cleaning HITL strategy review
+- user-facing business fields instead of internal row-case review payloads
 
-  The deduplication worker is now a hybrid LLM tool-calling agent.
+It is intended to answer:
 
-  Responsibility split:
+- what the dedup agent does now
+- what state fields it reads and writes
+- what the current HITL contract is
+- why those HITL fields were added
+- what is still deferred
 
-  - LLM:
-    - chooses `exact_full_row` or `exact_key`
-    - suggests key columns
-    - returns a per-column semantic handler plan
-    - uses the bounded duplicate-inspection tool during strategy selection
-  - deterministic Python:
-    - validates the LLM decision
-    - applies fallback rules
-    - performs dataframe mutation
-    - writes parquet output
-    - generates fuzzy candidates
-    - writes validation results
+---
 
-  ## Supported Behavior
+## Current Dedup Worker
 
-  ### Exact deterministic dedup
+The deduplication worker is a **hybrid tool-calling agent**.
 
-  - exact full-row duplicate removal with `keep="first"`
-  - exact key / composite-key dedup
-  - LLM-role-first column handler dispatch
-  - semantic-profile inference only when the LLM did not provide a role
-  - comparison-only generic phone normalization
-  - comparison-only email normalization
-  - generic Unicode-safe text normalization for fuzzy blocking
-  - `most_complete` tie-breaking for key duplicate groups
-    - fewest nulls wins
-    - stable first occurrence wins ties
-  - HITL review-case emission for ambiguous cases
-  - HITL feedback consumption on rerun via `hitl_feedback`
+### Responsibility split
 
-  ### Unsafe deterministic cases now blocked
+- LLM responsibilities:
+  - choose `exact_full_row` or `exact_key`
+  - suggest key columns
+  - suggest semantic handler roles such as:
+    - `phone`
+    - `email`
+    - `address`
+    - `company_name`
+    - `person_name`
+  - use the bounded duplicate-inspection tool during planning
 
-  - single technical row IDs as the only dedup key
-  - single weak identifiers such as phone-only
-  - name-only key sets with no hard identifier support
-  - cross-script name-only auto-merges
+- deterministic Python responsibilities:
+  - validate the LLM decision
+  - apply safe fallback rules
+  - normalize comparison values
+  - build duplicate preview metrics
+  - wait for HITL review when required
+  - execute actual dedup only after strategy confirmation
+  - write parquet output
+  - write validation summaries
 
-  These cases are preserved, not merged, and surfaced through:
+The important architectural boundary is:
 
-  - `deduplication_result.notes`
-  - `deduplication_result.pending_review_cases`
-  - `validation_results[*].metrics_observed`
-  - `validation_results[*].replan_hints`
+- the LLM decides **what rule to use**
+- deterministic code decides **how to apply the rule**
 
-  ### Fuzzy blocking
+---
 
-  Fuzzy candidate generation is implemented but gated.
+## Supported Dedup Behavior
 
-  It runs only when the planner signals fuzzy/entity-style dedup intent through existing planning structures.
+### Exact deterministic dedup
+
+Currently supported:
+
+- exact full-row duplicate removal
+- exact key / composite-key dedup
+- generic phone normalization for comparison
+- generic email normalization for comparison
+- Unicode-safe text normalization for fuzzy blocking support
+- configurable keep rule for exact key dedup:
+  - `keep_most_complete`
+  - `keep_first`
+  - `keep_last`
+
+### Unsafe exact-key situations still blocked before execution
+
+Without human confirmation, the agent does not trust:
+
+- single technical row IDs as the only dedup key
+- weak single-field keys such as phone-only
+- name-only key sets without a hard identifier
+- cross-script name-only auto-merges
+
+Those concerns are surfaced in review warnings and validation hints instead of
+being auto-merged.
+
+### Fuzzy blocking
+
+Fuzzy blocking still exists, but it is not the primary HITL surface anymore.
 
 Current fuzzy behavior:
 
-- field-role detection prefers the LLM-selected role plan, then semantic profile
-- normalized text blocking
-  - n-gram / shingle similarity
-  - Jaccard scoring inside buckets
-  - oversized bucket capping
-  - candidate summary only
-
-  Current fuzzy non-goals:
-
-  - no row merge
-  - no sidecar artifact
-  - no LLM pair classification
-
-  ## HITL
-
-  HITL is now supported for ambiguous dedup cases.
-
-  Current behavior:
-
-  - pending review cases are persisted in:
-    - `deduplication_result.pending_review_cases`
-  - `validation_results` signals review requirement only:
-    - `recommended_next_action = "hitl"`
-    - pending case counts and IDs in `metrics_observed`
-  - human decisions are submitted as serialized JSON into:
-    - `GlobalState.hitl_feedback`
-  - on rerun, dedup consumes that feedback and:
-    - merges approved cases with `most_complete` keep logic
-    - leaves rejected cases unchanged
-    - removes resolved cases from `pending_review_cases`
-
-  `hitl_status` usage:
+- runs only when planner strategy signals fuzzy/entity-style intent
+- uses normalized text blocking
+- uses n-gram / shingle similarity
+- caps oversized buckets
+- produces candidate summaries only
 
-  - `"pending"` when review cases exist
-  - `"approved"` when submitted feedback resolves all pending cases
-  - `"rejected"` remains reserved and is not set by dedup in the current slice
+Current fuzzy non-goals:
 
-  ## State Contract
-
-  ### Existing top-level fields used
-
-  From `GlobalState`, the dedup agent reads:
-
-  - `dataset_path`
-  - `physical_dataframe_path`
-  - `dataset_schema`
-  - `user_prompt`
-  - `statistical_profile`
-  - `semantic_profile`
-  - `execution_plan`
-  - `task_list`
-  - `retry_count`
-  - `hitl_feedback`
-  - `worker_states`
-  - `deduplication_result`
+- no direct row merge
+- no sidecar artifact
+- no LLM pair classifier
 
-  The agent writes:
+---
 
-  - `deduplication_result`
-  - `physical_dataframe_path`
-  - `current_dataset_version`
-  - `worker_states`
-  - `validation_results`
-  - `current_step`
-  - `completed_steps`
-  - `global_errors` on failure
+## Current HITL Model
 
-  ### No redundant top-level dedup fields added
+The current HITL design is **strategy review before cleaning**.
 
-  No new top-level `GlobalState` field was introduced for:
+This means:
 
-  - decision trace
-  - fuzzy candidate path
-  - unresolved collisions
+1. the agent proposes how dedup should run
+2. the user reviews understandable business fields
+3. the user can modify those fields
+4. only after that does the agent perform cleaning
 
-  Those concerns are handled through existing structures instead.
+This is intentionally different from the previous row-case review design.
 
-  HITL-related top-level fields used:
+### Why this design was chosen
 
-  - `hitl_feedback`
-  - `hitl_status`
-  - `hitl_checkpoint`
+It reduces agent complexity and gives the user control over business logic:
 
-  ## Dedup Result Contract
+- the user reviews the dedup strategy **before parquet mutation**
+- the user can modify key columns directly
+- the user can change the keep rule using simple choices
+- the user does not need to understand internal row-case workflow payloads,
+  row fingerprints, or low-level merge decisions
 
-  The persisted dedup result remains:
+This matches the product goal better:
 
-  ```python
-  DeduplicationResult(
-      applied_modes=[...],
-      key_columns=[...],
-      keep_strategy="first" | "most_complete",
-      source_path="...",
-      output_path="...",
-      before_row_count=...,
-      after_row_count=...,
-      dropped_row_count=...,
-      full_row_duplicate_count=...,
-      key_duplicate_count=...,
-      duplicate_group_count=...,
-      notes=[...],
-      decision_trace=...,
-      pending_review_cases=[...]
-  )
-  ```
+- user decides understandable business logic
+- agent handles the mechanics
 
-  ### Decision trace remains minimal
+---
 
-  `decision_trace` stores audit metadata only:
+## Current User-Facing HITL Fields
 
-  - `decision_source`
-  - `column_roles`
-  - `ignore_columns`
-  - `confidence`
-  - `reasoning_summary`
-  - `validation_notes`
-  - `context_hash`
+The current review payload is stored as:
 
-  It does not duplicate:
+- `deduplication_result.pending_strategy_review`
 
-  - applied execution modes
-  - final key columns
-  - row counts
+This field was added carefully because it serves as the **durable source of
+truth** for a pending dedup review. It is attached to the dedup result instead
+of being stored as a top-level global queue.
 
-  Those remain on `DeduplicationResult`.
+### `pending_strategy_review`
 
-  ## Validation Result Contract
+Model:
 
-  The dedup agent uses the existing `ValidationResultItem` schema.
+```python
+DedupStrategyReview(
+    review_type="dedup_strategy_review",
+    proposed_mode="exact_full_row" | "exact_key",
+    proposed_key_columns=[...],
+    suggested_identifier_columns=[...],
+    ignored_columns=[...],
+    keep_rule="keep_most_complete" | "keep_first" | "keep_last",
+    questions=[...],
+    warnings=[...],
+    preview=DedupPreviewSummary(...)
+)
+```
 
-  It does not add `rule` or `severity`.
+### What each field is for
 
-  Current usage:
+#### `review_type`
 
-  - `failed_rules`
-    - row-count or duplicate-removal failures
-  - `metrics_observed`
-    - before/after row counts
-    - decision source
-    - unresolved collision counts/types
-    - fuzzy candidate count
-  - `replan_hints`
-    - safer follow-up guidance when unresolved collisions were detected
-    - fuzzy notes when fuzzy blocking ran
-    - HITL guidance when pending review cases exist
+Purpose:
+- identifies this review as a **strategy-level dedup review**
 
-  `validation_results` is not the source of truth for pending review lifecycle.
-  It is signaling and audit only.
+Why it exists:
+- keeps the contract explicit for frontend and future extensions
+- avoids ambiguous interpretation of the review payload
 
-  ## API And Testing Path
+#### `proposed_mode`
 
-  ### Public route
+Purpose:
+- shows whether the agent currently wants to run:
+  - `exact_full_row`
+  - `exact_key`
 
-  `POST /api/v1/dedup/run`
+Why it exists:
+- user should understand the broad dedup method
+- this is a high-level business-safe concept
 
-  Request body:
+#### `proposed_key_columns`
 
-  ```json
-  {
-    "run_id": "..."
-  }
-  ```
+Purpose:
+- shows which columns the agent proposes to use as the dedup key
 
-  ### Internal testing override
+Why it exists:
+- this is the most important business-facing dedup decision
+- user can change it directly
 
-  The service layer still supports a private debug override for key columns.
+#### `suggested_identifier_columns`
 
-  It is not part of the public route schema.
+Purpose:
+- shows which columns the agent believes are trustworthy identifiers
 
-  ### HITL feedback route
+Why it exists:
+- helps user reason about business identity
+- easier to understand than raw `column_roles`
+- gives semantic guidance without exposing internal planner jargon
 
-  `POST /api/v1/dedup/review/{run_id}`
+Important note:
+- these are suggestions, not forced execution inputs
+- the user can accept or ignore them
 
-  This persists accepted human decisions into `hitl_feedback`.
-  It does not rerun the dedup agent automatically.
+#### `ignored_columns`
 
-  ### State inspection
+Purpose:
+- shows columns the agent believes should not drive dedup
 
-  Use:
+Typical examples:
+- technical IDs
+- row IDs
+- unstable metadata
 
-  `GET /api/v1/pipeline/{run_id}/state`
+Why it exists:
+- users often know better than the model whether a column is technical,
+  synthetic, or not reliable
+- exposing this directly is more understandable than exposing internal
+  exclusion heuristics
 
-  Key fields to inspect:
+#### `keep_rule`
 
-  - `physical_dataframe_path`
-  - `deduplication_result`
-  - `deduplication_result.pending_review_cases`
-  - `worker_states`
-  - `validation_results`
-  - `current_dataset_version`
-  - `hitl_status`
+Purpose:
+- decides **which row survives** inside each duplicate group
 
-  ## Output File Behavior
+Why it exists:
+- it is business-understandable
+- it directly affects output quality
+- it is a natural multiple-choice control for users
 
-  Primary output path:
+Current supported values:
 
-  ```text
-  OUTPUT_DIR/{project_id}_deduplicated.parquet
-  ```
+- `keep_most_complete`
+  - keep the row with more non-empty values
+  - best default for cleaning datasets from mixed sources
+- `keep_first`
+  - keep the first row in current dataset order
+- `keep_last`
+  - keep the last row in current dataset order
 
-  If the configured output directory is not writable in the current environment, the worker falls back to:
+This field was added because:
+- user may trust source ordering
+- user may prefer completeness over ordering
+- this is simpler and safer than exposing low-level row merge internals
 
-  ```text
-  .tmp/agentic-data-cleaner/outputs/{project_id}_deduplicated.parquet
-  ```
+#### `questions`
 
-  ## Verification Status
+Purpose:
+- provide simple business questions for UI display
 
-  Verified locally after the refactor:
+Current examples:
+- Which columns should define the same entity?
+- Which columns should be treated as reliable identifiers?
+- Which columns should be ignored because they are technical or not trustworthy for deduplication?
+- How should one row be kept from each duplicate group?
 
-  - dedup package compiles successfully
-  - a smoke test with normalized `Phone + Email` duplicates removed one row correctly
-  - exact key dedup returned:
-    - `applied_modes = ["exact_key"]`
-    - `keep_strategy = "most_complete"`
-    - normalized comparison notes
+Why it exists:
+- guides the user toward the intended review decisions
+- reduces the need to expose internal agent terminology
 
-  ## Current Limits
+#### `warnings`
 
-  - fuzzy candidates are not persisted as a standalone artifact
-  - there is no LLM-assisted pair resolution yet
-  - `hitl_checkpoint` is written as forward-compatible metadata only; supervisor resume routing is not implemented here
-  - internal debug overrides are still available during migration and intentionally bypass the LLM path
+Purpose:
+- explain why the current strategy may need review
 
-  ## Bottom Line
+Examples:
+- weak single-key risk
+- name-only risk
+- high-null key columns removed
 
-  The current dedup agent is no longer a pure pandas worker.
+Why it exists:
+- keeps the user aware of why review was triggered
+- preserves important agent reasoning in a short, user-safe format
 
-  It is now:
+#### `preview`
 
-  - LLM-guided for strategy selection
-  - deterministic for execution
-  - dataset-agnostic in its normalization layer
-  - async HITL-capable for ambiguous cases
-  - repo-aligned in state usage
-  - non-redundant in persisted fields
-  - able to reject risky exact-key merges and surface them without inventing new schema
+Purpose:
+- shows the expected impact of the current proposed strategy before cleaning runs
+
+Model:
+
+```python
+DedupPreviewSummary(
+    duplicate_rows=...,
+    duplicate_groups=...,
+    sample_groups=[...]
+)
+```
+
+Why it exists:
+- lets the user validate the proposal before mutation
+- reduces blind approval of bad keys
+
+Fields:
+
+- `duplicate_rows`
+  - estimated number of rows that would be removed under the proposal
+- `duplicate_groups`
+  - estimated number of duplicate groups under the proposal
+- `sample_groups`
+  - small examples to help user verify the proposed logic
+
+---
+
+## HITL Feedback Contract
+
+Human review decisions come back through:
+
+- `GlobalState.hitl_feedback`
+
+This field already existed and remains:
+
+- `str | None`
+
+The agent now uses it actively.
+
+Stored payload:
+
+```python
+DeduplicationHitlFeedback(
+    key_columns=[...] | None,
+    identifier_columns=[...] | None,
+    ignored_columns=[...] | None,
+    keep_rule="keep_most_complete" | "keep_first" | "keep_last" | None,
+    note="..." | None
+)
+```
+
+### Why these fields were chosen
+
+They are easy for users to understand:
+
+- `key_columns`
+  - what defines a duplicate
+- `identifier_columns`
+  - what fields the user considers trustworthy identifiers
+- `ignored_columns`
+  - what should not be used
+- `keep_rule`
+  - how to choose the survivor row
+- `note`
+  - optional business explanation
+
+These replaced older row-case-style review payloads because those were internal
+workflow details, not good user-facing business controls.
+
+because those are internal workflow concepts, not good user-facing business controls.
+
+---
+
+## State Contract
+
+### Top-level `GlobalState` fields read by dedup
+
+- `dataset_path`
+- `physical_dataframe_path`
+- `dataset_schema`
+- `user_prompt`
+- `statistical_profile`
+- `semantic_profile`
+- `execution_plan`
+- `task_list`
+- `retry_count`
+- `hitl_feedback`
+- `worker_states`
+- `deduplication_result`
+
+### Top-level `GlobalState` fields written by dedup
+
+- `deduplication_result`
+- `physical_dataframe_path` when cleaning actually runs
+- `current_dataset_version` when cleaning actually runs
+- `worker_states`
+- `validation_results`
+- `hitl_status`
+- `hitl_checkpoint`
+- `hitl_feedback` cleared after successful consumption
+- `current_step`
+- `completed_steps`
+- `global_errors` on failure
+
+### HITL-related top-level fields
+
+#### `hitl_feedback`
+
+Purpose:
+- carries user-approved review choices back into the agent
+
+Why it stays top-level:
+- it is an inbound control input to the rerun
+
+#### `hitl_status`
+
+Current meanings:
+- `pending`
+  - waiting for user strategy review
+- `approved`
+  - review was applied and cleaning completed
+- `rejected`
+  - reserved for future use
+
+#### `hitl_checkpoint`
+
+Purpose:
+- marks where HITL was triggered
+
+Current reality:
+- this is forward-compatible metadata only
+- supervisor-based resume routing is not implemented here yet
+
+---
+
+## Dedup Result Contract
+
+Current persisted result:
+
+```python
+DeduplicationResult(
+    applied_modes=[...],
+    key_columns=[...],
+    keep_strategy="keep_most_complete" | "keep_first" | "keep_last" | "keep_first",
+    source_path="...",
+    output_path="...",
+    before_row_count=...,
+    after_row_count=...,
+    dropped_row_count=...,
+    full_row_duplicate_count=...,
+    key_duplicate_count=...,
+    duplicate_group_count=...,
+    notes=[...],
+    decision_trace=...,
+    pending_strategy_review=...
+)
+```
+
+### Important note on `pending_strategy_review`
+
+This is the **active durable review state**.
+
+Why it was added:
+- `validation_results` is append-only and not suitable as a mutable review queue
+- `pending_strategy_review` is typed, stable, and attached to the dedup outcome
+- frontend can read it from the existing state endpoint without needing a new top-level state field
+
+### `decision_trace`
+
+Still stores audit metadata only:
+
+- `decision_source`
+- `column_roles`
+- `ignore_columns`
+- `confidence`
+- `reasoning_summary`
+- `validation_notes`
+- `context_hash`
+
+It does not duplicate:
+
+- final row counts
+- final key columns
+- final keep strategy
+
+Those remain on `DeduplicationResult`.
+
+---
+
+## Validation Result Contract
+
+`ValidationResultItem` is still used, but only for signaling and audit.
+
+Current dedup usage:
+
+- `failed_rules`
+  - execution failures
+- `metrics_observed`
+  - before/after row counts
+  - decision source
+  - unresolved collision counts/types
+  - fuzzy candidate count
+  - whether a pending strategy review exists
+  - proposed key columns when review is pending
+- `replan_hints`
+  - human-readable explanation of why review is needed
+- `recommended_next_action`
+  - `hitl` when strategy review is pending
+
+Important design rule:
+
+- `validation_results` is **not** the source of truth for the pending review lifecycle
+- it is a signaling surface only
+
+This distinction matters because:
+- `validation_results` is append-only in this repo
+- pending review state must be durable and replaceable, not append-only
+
+---
+
+## API And Testing Path
+
+### Run dedup
+
+Route:
+
+`POST /api/v1/dedup/run`
+
+Request body:
+
+```json
+{
+  "run_id": "..."
+}
+```
+
+Behavior:
+
+- if duplicates are found and no HITL feedback exists:
+  - build strategy review
+  - do not clean yet
+  - return `hitl_status = "pending"`
+- if HITL feedback exists:
+  - apply approved strategy choices
+  - execute cleaning
+
+### Submit HITL strategy review
+
+Route:
+
+`POST /api/v1/dedup/review/{run_id}`
+
+Purpose:
+- store user-selected dedup business logic into `hitl_feedback`
+
+Important:
+- this route does not rerun dedup automatically
+- caller still triggers a normal `POST /api/v1/dedup/run`
+
+### Inspect current state
+
+Route:
+
+`GET /api/v1/pipeline/{run_id}/state`
+
+Key fields to inspect:
+
+- `deduplication_result`
+- `deduplication_result.pending_strategy_review`
+- `validation_results`
+- `hitl_status`
+- `physical_dataframe_path`
+- `current_dataset_version`
+
+---
+
+## Output File Behavior
+
+When cleaning actually runs:
+
+- primary output:
+  - `OUTPUT_DIR/{project_id}_deduplicated.parquet`
+- fallback:
+  - `.tmp/agentic-data-cleaner/outputs/{project_id}_deduplicated.parquet`
+
+When strategy review is still pending:
+
+- no cleaned parquet is written yet
+- `physical_dataframe_path` remains unchanged
+
+This is intentional because the user is reviewing the strategy **before**
+data mutation.
+
+---
+
+## Verification Status
+
+Verified locally:
+
+- dedup package compiles successfully
+- exact key dedup supports:
+  - `keep_most_complete`
+  - `keep_first`
+  - `keep_last`
+- strategy-review HITL flow works as designed:
+  - first run emits pending strategy review instead of cleaning immediately
+  - feedback is stored through `hitl_feedback`
+  - rerun consumes feedback and executes cleaning
+
+---
+
+## Current Limits
+
+- fuzzy candidates are not yet promoted into a richer user-facing review UI
+- there is no LLM-assisted pair resolution yet
+- `hitl_checkpoint` is metadata only in the current slice
+- internal debug override still exists for migration/testing
+
+---
+
+## Bottom Line
+
+The current dedup agent is:
+
+- LLM-guided for strategy selection
+- deterministic for execution
+- strategy-reviewed by humans **before** cleaning
+- user-facing in its HITL fields
+- repo-aligned in state usage
+- non-redundant in persisted fields
+
+The key change is that HITL now reviews **business-friendly strategy fields**
+instead of exposing internal row-case workflow fields.
