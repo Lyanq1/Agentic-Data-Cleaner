@@ -256,7 +256,8 @@ This means:
 1. the agent proposes how dedup should run
 2. the user reviews understandable business fields
 3. the user can modify those fields
-4. only after that does the agent perform cleaning
+4. the review endpoint only persists those choices
+5. only the next `POST /api/v1/dedup/run` performs cleaning
 
 This is intentionally different from the previous row-case review design.
 
@@ -267,6 +268,7 @@ It reduces agent complexity and gives the user control over business logic:
 - the user reviews the dedup strategy **before parquet mutation**
 - the user can modify key columns directly
 - the user can change the keep rule using simple choices
+- the review cycle is always explicit, even when the preview currently shows zero duplicate rows
 - the user does not need to understand internal row-case workflow payloads,
   row fingerprints, or low-level merge decisions
 
@@ -335,6 +337,12 @@ Purpose:
 Why it exists:
 - this is the most important business-facing dedup decision
 - user can change it directly
+
+Important note:
+- this list can be empty when the validated strategy has been downgraded to
+  `exact_full_row`
+- in that situation, the review is asking the user to provide a business key
+  instead of accepting a technical identifier like `Id`
 
 #### `suggested_identifier_columns`
 
@@ -438,6 +446,8 @@ DedupPreviewSummary(
 Why it exists:
 - lets the user validate the proposal before mutation
 - reduces blind approval of bad keys
+- still appears even when `duplicate_rows = 0`, because the repo now requires
+  explicit strategy review before any cleaning run
 
 Fields:
 
@@ -533,7 +543,8 @@ Purpose:
 - carries user-approved review choices back into the agent
 
 Why it stays top-level:
-- it is an inbound control input to the rerun
+- it is an inbound control input to the next dedup rerun
+- the review endpoint persists this field, but does not execute cleaning by itself
 
 #### `hitl_status`
 
@@ -541,7 +552,7 @@ Current meanings:
 - `pending`
   - waiting for user strategy review
 - `approved`
-  - review was applied and cleaning completed
+  - review was consumed by a later `dedup/run` and cleaning completed
 - `rejected`
   - reserved for future use
 
@@ -587,6 +598,11 @@ Why it was added:
 - `validation_results` is append-only and not suitable as a mutable review queue
 - `pending_strategy_review` is typed, stable, and attached to the dedup outcome
 - frontend can read it from the existing state endpoint without needing a new top-level state field
+
+Current behavior:
+- the first `POST /api/v1/dedup/run` always persists `pending_strategy_review`
+- this is true even when the preview currently shows `duplicate_rows = 0`
+- the field is cleared only after review feedback is consumed by a later dedup run
 
 ### `decision_trace`
 
@@ -665,6 +681,7 @@ Behavior:
   - build strategy review
   - do not clean yet
   - return `hitl_status = "pending"`
+  - persist `deduplication_result.pending_strategy_review` into checkpointed state
 - if HITL feedback exists:
   - apply approved strategy choices
   - execute cleaning
@@ -680,7 +697,9 @@ Purpose:
 
 Important:
 - this route does not rerun dedup automatically
+- it only persists review feedback into checkpointed state
 - caller still triggers a normal `POST /api/v1/dedup/run`
+- that next run is the step that consumes feedback and performs cleaning
 
 ### Inspect current state
 
@@ -696,6 +715,12 @@ Key fields to inspect:
 - `hitl_status`
 - `physical_dataframe_path`
 - `current_dataset_version`
+
+Important verification rule:
+- after the first `POST /api/v1/dedup/run`, `GET /api/v1/pipeline/{run_id}/state`
+  should show the same persisted `deduplication_result` and `pending_strategy_review`
+- if the state endpoint does not show them, then the review endpoint will not be
+  able to consume the review cycle correctly
 
 ---
 
