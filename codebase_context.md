@@ -166,10 +166,10 @@ Hệ thống định nghĩa 9 nodes chính trong [app/graphs/nodes.py](file:///U
 | **semantic_profile** | `semantic_profile_node` | Phân tích ngữ nghĩa của từng cột, nhóm logic, tìm mối liên hệ, và audit chất lượng dữ liệu ban đầu. | `SemanticProfilerAgent` |
 | **input_validator** | `input_validator_node` | Đối chiếu profile thống kê & ngữ nghĩa với yêu cầu làm sạch của người dùng, xác định có cần làm rõ thông tin hay không. | `InputValidatorAgent` |
 | **planner** | `planner_node` | Sinh kế hoạch dọn dẹp dữ liệu chi tiết (`ExecutionPlan`) gồm các task cho deduplication, null handling và type casting. | `PlannerAgent` |
-| **deduplication** | `deduplication_node` | Node thực hiện dọn dẹp các dòng trùng lặp (hiện tại là worker stub lưu pass-through dữ liệu). | `_persist_passthrough_worker_version` |
-| **null_handling** | `null_handling_node` | Node xử lý giá trị khuyết thiếu (hiện tại là worker stub). | `_persist_passthrough_worker_version` |
-| **type_casting** | `type_casting_node` | Node chuẩn hóa kiểu dữ liệu theo mong đợi ngữ nghĩa (hiện tại là worker stub). | `_persist_passthrough_worker_version` |
-| **validator** | `validator_node` | Kiểm thử chất lượng dữ liệu đầu ra của worker hiện tại bằng Custom Pandas Validator. | `validate_current_task()` |
+| **deduplication** | `deduplication_node` | Tác nhân con lai (Hybrid Sub-agent) sử dụng LLM để chọn chiến lược dedup (exact_key hoặc exact_full_row) kết hợp thực thi tất định bằng Pandas. | `DeduplicationAgent` |
+| **null_handling** | `null_handling_node` | Tác nhân tất định (Deterministic Agent) áp dụng các chiến lược điền/xóa null dựa trên cấu hình từ Planner. | `NullAgent` |
+| **type_casting** | `type_casting_node` | Tác nhân tất định (Deterministic Agent) ép kiểu dữ liệu dựa trên Semantic Profile và Planner's work order. | `TypeCastingAgent` |
+| **validator** | `validator_node` | Tác nhân đánh giá kết quả làm sạch bằng phương pháp lai (Hybrid): Chạy các rule Pandas tất định trước, sau đó dùng LLM (ReAct) để tổng hợp và đánh giá. | `ValidatorAgent`
 | **report_agent** | `report_agent_node` | Node xuất báo cáo tổng kết pipeline (hiện tại là stub). | Trả về trạng thái `reporting` |
 
 ### 4.2 Định Tuyến Có Điều Kiện (Conditional Edges)
@@ -320,14 +320,14 @@ Thay vì lưu file Parquet ad-hoc cho từng bước xử lý, hệ thống tri�
 
 ## 8. Cơ Chế Kiểm Thử Chất Lượng (Validator Node)
 
-Khác với các tài liệu cũ đề xuất sử dụng LLM để validate kết quả làm sạch, hệ thống hiện tại sử dụng **Custom Pandas Validator** để thực hiện kiểm thử tự động một cách nghiêm ngặt:
+Hệ thống sử dụng cơ chế **Kiểm thử Lai (Hybrid Validation)** kết hợp sự nghiêm ngặt của Pandas và khả năng suy luận của LLM (`ValidatorAgent`):
 
-1. **Sinh Luật Kiểm tra Động (`app/validators/pandas_validator.py`):**
+1. **Sinh Luật và Thực thi Kiểm tra Động (`app/tools/data/quality_control/validator.py`):**
    Đọc cấu hình dọn dẹp từ `TaskDetail` của planner kết hợp với thông tin ngữ nghĩa của `SemanticProfile` để chuyển hóa thành các bước kiểm tra (ví dụ duplicate_rows = 0, null_rate <= X) chạy trên data gốc bằng Pandas.
-2. **Thực thi Validate (`app/validators/runner.py`):**
-   Hàm `validate_current_task(state)` lấy DataFrame của phiên bản dữ liệu mới nhất từ `LineageService` và thực hiện validate dựa trên schema động đã xây dựng.
+2. **Đánh Giá bằng LLM ReAct Loop (`app/agents/result_validators/agent.py`):**
+   Kết quả của Pandas validation được nạp vào context của LLM (cùng với yêu cầu của user và kế hoạch của planner). LLM sau đó có thể gọi tool `perform_data_quality_check` để tự do khám phá thêm data. Cuối cùng, LLM trả về cấu trúc JSON `ValidatorOutput` đánh giá xem data có qua bài test hay không.
 3. **Phản hồi lỗi dọn dẹp:**
-   Nếu validation thất bại, validator bắt các lỗi `SchemaErrors`, trích xuất các quy tắc kiểm tra bị lỗi (`failed_rules`) và trả về `ValidationOutcome` chứa mã lỗi để graph điều phối thực hiện cơ chế **Self-correction (sửa sai tự động)** hoặc **Re-planning** bởi PlannerAgent.
+   Nếu validation thất bại, node này trả về các rules bị lỗi để graph điều phối thực hiện cơ chế **Self-correction (sửa sai tự động)** (gọi lại worker) hoặc **Re-planning** bởi PlannerAgent.
 
 ---
 
@@ -347,6 +347,7 @@ Tất cả các router được quản lý tập trung trong [app/api/v1/pipelin
 
 ## 10. Technical Debt & Cần Cải Thiện Trong Tương Lai
 
-1. **Worker Agents thực sự:** Hiện nay, các node `deduplication`, `null_handling` và `type_casting` mới chỉ là stubs ghi đè dữ liệu pass-through vào database. Cần triển khai các worker thực tế sinh code Pandas hoặc sử dụng thư viện chuyên dụng dựa trên cấu hình `strategy` do planner lập ra.
-2. **ResultValidator và Reporter Agents:** Các agent `result_validator` và `reporter` trong thư mục `app/agents/` hiện tại vẫn đang là stubs trả về giá trị TODO. Cần tích hợp chúng sâu vào pipeline LangGraph tương ứng với node `validator` và `report_agent_node`.
+1. **Sinh code tự động cho Workers:** Hiện tại `NullAgent` và `TypeCastingAgent` đang chạy dưới dạng Deterministic Executors (các hàm hardcode Pandas). Để tăng tính linh hoạt (Agentic), có thể nâng cấp chúng thành Code-generating Sub-agents như đã thiết kế cho `DeduplicationAgent` (sử dụng LLM kết hợp Tools để sinh code xử lý edge cases).
+2. **Reporter Agent:** Agent `reporter` trong thư mục `app/agents/reporter/` hiện tại vẫn đang là stub trả về giá trị TODO. Node `report_agent_node` hiện tại mới chỉ tự tính toán logic F1 metric nội bộ. Cần tích hợp `ReporterAgent` sâu vào pipeline bằng một LangChain/ReAct loop để sinh báo cáo tự nhiên.
 3. **Hỗ trợ Multi-file Ingestion:** Mặc dù API endpoints có nhắc đến upload multi-file nhưng backend hiện tại mới chỉ tập trung xử lý dọn dẹp đơn file (single session).
+
