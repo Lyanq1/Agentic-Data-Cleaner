@@ -1,7 +1,7 @@
 # Báo Cáo Tổng Hợp Codebase — Agentic Data Engineering
 
 > **Mục đích:** File context toàn diện cho AI (Gemini, Claude, GPT, v.v.) phân tích sâu repository HCMUS Capstone Project.  
-> **Ngày cập nhật:** 2026-06-05 (Cập nhật khớp 100% với cấu trúc và code thực tế hiện tại)  
+> **Ngày cập nhật:** 2026-06-14 (Cập nhật khớp 100% với cấu trúc và code thực tế hiện tại)  
 > **Repo:** `Agentic-Data-Cleaner` — Multi-Agent ETL/Data Engineering với Human-In-The-Loop  
 > **Package Python:** `app/`
 
@@ -85,18 +85,24 @@ Agentic-Data-Cleaner/
 │   │   ├── nodes.py              # Implementations của các node trong graph
 │   │   ├── edges.py              # Logic định tuyến phụ trợ
 │   │   ├── checkpointer.py       # AsyncPostgresSaver checkpointer cho LangGraph
-│   │   └── states/
-│   │       └── global_state.py   # GlobalState TypedDict (LangGraph) & các Pydantic helper models
+│   │   └── states/               # Tách biệt các Pydantic state model theo từng domain
+│   │       ├── global_state.py   # GlobalState TypedDict (LangGraph) + append_list helper
+│   │       ├── input_validation.py  # InputValidationResult, ClarificationIssues, NullClarifications, StrategyQuestion, InsightQuestion
+│   │       ├── planning.py       # ExecutionPlan, TaskDetail, TaskWrapper
+│   │       ├── profiles.py       # SemanticProfile, SemanticColumnDetail
+│   │       ├── profiler_state.py # StatisticalProfile, StatisticalColumnDetail
+│   │       ├── workers.py        # WorkerStates, WorkerStateDetail, DeduplicationResult, DedupDecisionTrace
+│   │       └── output_validation.py # ValidationResultItem
 │   │
 │   ├── agents/                   # Thư mục Multi-agent
 │   │   ├── __init__.py
 │   │   ├── base.py               # Lớp BaseAgent chứa BaseChatModel và bind tools
-│   │   ├── roles.py              # Enum AgentRole (profiler, planner, validator, null_agent, v.v.)
+│   │   ├── roles.py              # Enum AgentRole (profiler, planner, null_agent, dedup_agent, typecast_agent, v.v.)
 │   │   ├── registry.py           # AgentRegistry quản lý đăng ký/khởi tạo Agent tự động
 │   │   │
 │   │   ├── input_validator/      # Agent kiểm tra input và hỏi clarification
-│   │   │   ├── agent.py
-│   │   │   └── prompts.py
+│   │   │   ├── agent.py          # InputValidatorAgent — JSON mode LLM + _apply_allow_missing_overrides
+│   │   │   └── prompts.py        # INPUT_VALIDATOR_SYSTEM_PROMPT (3 issues: NULL/DUPLICATE/TYPECAST)
 │   │   │
 │   │   ├── planner/              # Agent lập kế hoạch làm sạch
 │   │   │   ├── agent.py
@@ -106,11 +112,28 @@ Agentic-Data-Cleaner/
 │   │   │   ├── profiler_agent.py
 │   │   │   └── prompts.py
 │   │   │
-│   │   ├── result_validator/     # Agent validator stub (TODO)
-│   │   │   └── agent.py
+│   │   ├── deduplication/        # Hybrid deduplication agent (LLM strategy + deterministic exec)
+│   │   │   ├── agent.py          # DeduplicationAgent — tool loop + validate + execute
+│   │   │   ├── models.py         # DedupDecision, ValidatedDedupDecision, DeduplicationAgentInput
+│   │   │   └── prompt.py         # build_dedup_messages(), DEDUP_DECISION_JSON_INSTRUCTION
 │   │   │
-│   │   └── reporter/             # Agent reporter stub (TODO)
-│   │       └── agent.py
+│   │   ├── null_agent/           # Deterministic null handling worker
+│   │   │   ├── agent.py          # NullAgent — drop_row / fill_value / leave_as_is strategies
+│   │   │   └── __init__.py
+│   │   │
+│   │   ├── type_agent/           # Deterministic type casting worker
+│   │   │   ├── agent.py          # TypeCastingAgent — per_column casting + LineageService
+│   │   │   ├── prompts.py
+│   │   │   └── __init__.py
+│   │   │
+│   │   ├── result_validators/    # Hybrid validator agent (Pandas rules + LLM ReAct)
+│   │   │   ├── agent.py
+│   │   │   ├── models.py
+│   │   │   └── prompts.py
+│   │   │
+│   │   └── reporter/             # Agent báo cáo tổng kết pipeline
+│   │       ├── agent.py
+│   │       └── prompts.py
 │   │
 │   ├── ingestion/                # Ingestion pipeline
 │   │   ├── __init__.py
@@ -131,20 +154,26 @@ Agentic-Data-Cleaner/
 │   │   ├── __init__.py
 │   │   ├── ingestion.py          # IngestionService quản lý validation và lưu trữ ban đầu
 │   │   ├── lineage_service.py    # LineageService đọc/ghi version dữ liệu từ Postgres JSONB
-│   │   ├── lineage_utils.py
+│   │   ├── lineage_utils.py      # resolve_lineage_session_id()
+│   │   ├── dataframe_order.py    # restore_original_column_order() tiện ích thứ tự cột
 │   │   └── pipeline.py           # run_pipeline(), get_pipeline_state()
 │   │
 │   └── tools/                    # Các module chứa tool phụ trợ
 │       ├── __init__.py
 │       ├── tool_registration.py  # Đăng ký tool cho agents
 │       └── data/
-│           └── eda/              # Tool thực hiện EDA thống kê
-│               ├── __init__.py
-│               ├── cli.py
-│               ├── models.py
-│               ├── profiler.py   # StatisticalProfiler phân tích data thô
-│               ├── tool.py       # perform_eda LangChain tool
-│               └── utils.py
+│           ├── eda/              # Tool thực hiện EDA thống kê
+│           │   ├── __init__.py
+│           │   ├── cli.py
+│           │   ├── models.py
+│           │   ├── profiler.py   # StatisticalProfiler phân tích data thô
+│           │   ├── tool.py       # perform_eda LangChain tool
+│           │   └── utils.py
+│           ├── dedup/            # Tool hỗ trợ DeduplicationAgent
+│           │   ├── __init__.py
+│           │   └── tool.py       # @tool inspect_duplicate_candidates — kiểm tra duplicate metrics cho candidate column sets
+│           └── quality_control/  # Tool hỗ trợ ValidatorAgent
+│               └── validator.py  # perform_data_quality_check
 │
 ├── frontend/                     # React App
 ├── tests/                        # Hệ thống test
@@ -204,57 +233,77 @@ builder.compile(
 
 ## 5. Trạng Thái Hệ Thống (`GlobalState`)
 
-Được định nghĩa trong [app/graphs/states/global_state.py](file:///Users/lyanhquan/code/Agentic-Data-Cleaner/app/graphs/states/global_state.py):
+Được định nghĩa trong [app/graphs/states/global_state.py](file:///Users/lyanhquan/code/Agentic-Data-Cleaner/app/graphs/states/global_state.py). Các state model phụ trợ đã được tách thành các file riêng trong `app/graphs/states/`:
 
 ```python
 class GlobalState(TypedDict):
     # Core Routing & Messages
     messages: Annotated[list[AnyMessage], add_messages]
-    next_node: Optional[str]
+    next_node: str | None
 
     # Project Context
-    project_id: Optional[str]
-    session_id: Optional[str]
-    dataset_path: Optional[str]
-    user_prompt: Optional[str]
+    project_id: str | None
+    session_id: str | None
+    dataset_path: str | None
+    clean_dataset_path: str | None       # ← Đường dẫn dataset sau khi làm sạch
+    original_filename: str | None        # ← Tên file gốc người dùng upload
+    user_prompt: str | None
 
     # Data Schema and Requirements
-    dataset_schema: Optional[Dict[str, Any]]
-    dataset_version: Optional[str]
-    raw_requirement_input: Optional[str]
+    dataset_schema: dict[str, Any] | None
+    dataset_version: str | None
+    raw_requirement_input: str | None
 
     # Data References & Progress
-    current_dataset_version: Optional[str]
-    physical_dataframe_path: Optional[str]
-    current_step: Optional[str]
-    completed_steps: Annotated[List[str], append_list]
+    current_dataset_version: str | None
+    physical_dataframe_path: str | None  # ← Cập nhật bởi mỗi worker sau khi ghi file mới
+    path_file_to_validate: str | None    # ← Đường dẫn file để validator đọc
+    current_step: str | None
+    completed_steps: Annotated[list[str], append_list]
 
     # Intelligence & Validation
-    statistical_profile: Optional[StatisticalProfile]
-    semantic_profile: Optional[SemanticProfile]
-    input_validation_result: Optional[InputValidationResult]
-    
+    statistical_profile: StatisticalProfile | None
+    semantic_profile: SemanticProfile | None
+    input_validation_result: InputValidationResult | None
+
     # Execution & Routing
-    execution_plan: Optional[ExecutionPlan]
-    task_list: List[str]
-    worker_states: Optional[WorkerStates]
-    validation_results: Annotated[List[ValidationResultItem], append_list]
-    
+    execution_plan: ExecutionPlan | None
+    task_list: list[str]
+    worker_states: WorkerStates | None
+    worker_outputs: dict[str, Any] | None  # ← Output chi tiết của từng worker agent
+    validation_results: Annotated[list[ValidationResultItem], append_list]
+    agent_logs: Annotated[list[dict[str, Any]], append_list]  # ← Log từ NullAgent & TypeCastingAgent
+    deduplication_result: DeduplicationResult | None  # ← Kết quả riêng của DeduplicationAgent
+
     # Control flow variables
-    current_task_idx: Optional[int]
-    retry_count: Optional[int]
-    last_validation_error: Optional[str]
-    failed_task_id: Optional[str]
-    replan_reason: Optional[str]
+    current_task_idx: int | None
+    retry_count: int | None
+    last_validation_error: str | None
+    failed_task_id: str | None
+    replan_reason: str | None
 
     # HITL Fields
-    hitl_checkpoint: Optional[int]
-    hitl_status: Optional[Literal["pending", "approved", "rejected"]]
-    hitl_feedback: Optional[str]
+    hitl_checkpoint: int | None
+    hitl_status: Literal["pending", "approved", "rejected"] | None
+    hitl_feedback: str | None
 
     # Global Shared Errors
-    global_errors: Annotated[List[str], append_list]
+    global_errors: Annotated[list[str], append_list]
+
+    # Evaluation Metrics
+    f1_metrics: dict[str, Any] | None   # ← F1 metric được tính bởi report_agent_node
 ```
+
+### State Models Phụ Trợ (các file tách biệt)
+
+| File | Models chính |
+| :--- | :--- |
+| `input_validation.py` | `InputValidationResult`, `ClarificationIssues`, `NullClarifications` (`extra="allow"` cho per-column Q), `DuplicateClarifications`, `TypecastClarifications`, `StrategyQuestion`, `InsightQuestion`, `ActionPlan`, `AllowMissingConfirmationQuestion` |
+| `planning.py` | `ExecutionPlan`, `TaskWrapper`, `TaskDetail` (chứa `strategy`, `columns`, `outputs`, `skip`) |
+| `profiles.py` | `SemanticProfile`, `SemanticColumnDetail` (chứa `allow_missing`, `expected_type`, `fill_strategies`, `potential_dmv`, v.v.) |
+| `profiler_state.py` | `StatisticalProfile`, `StatisticalColumnDetail` (chứa `null_rate`, `unique_ratio`, `pk_candidates`, `near_unique_columns`, v.v.) |
+| `workers.py` | `WorkerStates`, `WorkerStateDetail`, `DeduplicationResult`, `DedupDecisionTrace` |
+| `output_validation.py` | `ValidationResultItem` |
 
 ---
 
@@ -287,10 +336,18 @@ class GlobalState(TypedDict):
 #### B. InputValidatorAgent (`input_validator`)
 - **File:** [app/agents/input_validator/agent.py](file:///Users/lyanhquan/code/Agentic-Data-Cleaner/app/agents/input_validator/agent.py)
 - **Phương thức hoạt động:**
-  1. Sử dụng Prompt-based JSON mode (`self.llm.bind(response_format={"type": "json_object"})`) để đối chiếu các profile chất lượng dữ liệu với mong muốn dọn dẹp của người dùng.
-  2. Sinh ra cấu trúc JSON đầu ra khớp với model `InputValidationResult`.
-  3. Nếu có các điểm bất hợp lý trong dữ liệu, Agent sinh ra cấu trúc các câu hỏi làm rõ (`clarifications`) chứa các `StrategyQuestion` và `InsightQuestion` có các options cụ thể cho user lựa chọn.
-  4. Khi nhận được phản hồi của user từ API, Agent sẽ đọc lại lịch sử chat chứa câu trả lời để chuyển trạng thái thành `ready`, sinh ra `action_plan` và chuyển tiếp luồng tới planner.
+  1. Sử dụng Prompt-based JSON mode (`self.llm.bind(response_format={"type": "json_object"})`) để đối chiếu statistical profile và semantic profile với yêu cầu của người dùng.
+  2. Sinh ra cấu trúc JSON đầu ra khớp với Pydantic model `InputValidationResult` (parse bằng `model_validate_json`).
+  3. **Logic phát hiện 3 loại issues:**
+     - **NULL**: `null_count > 0` trong statistical profile HOẶC `potential_dmv` non-empty trong semantic profile.
+     - **DUPLICATE**: `duplicate_rows > 0` HOẶC `unique_ratio < 1.0` HOẶC có error_types liên quan.
+     - **TYPECAST**: `error_types` chứa `type_mismatch` HOẶC `expected_type` khác `dtype` thực tế.
+  4. **Cấu trúc câu hỏi per-issue:**
+     - **NULL**: Tạo question riêng cho **từng cột** có null: `Q1_allow_missing_column_<tên_cột>` (Yes/No, không có options) và `Q2_strategy_column_<tên_cột>` (các `fill_strategies` từ semantic profile + `fill_llm`/`keep_null` nếu dtype là string/object). `NullClarifications` có `extra="allow"` để chứa các key dynamic.
+     - **DUPLICATE**: 3 câu cố định — Q1 (chọn primary key với 3 options), Q2/Q3 (semantic insights).
+     - **TYPECAST**: 3 câu cố định — Q1/Q2/Q3 (type mismatch insights với `confirm` yes/no).
+  5. **Xử lý sau khi user trả lời:** Phát hiện `is_answered = True` khi tất cả câu hỏi trong `clarifications` đã có `answer`. Khi đó thêm SystemMessage yêu cầu LLM đặt `status = "ready"` và điền `action_plan`.
+  6. **`_apply_allow_missing_overrides`:** Sau khi user trả lời, Agent tự động vá `semantic_profile.columns[col].allow_missing` dựa trên câu trả lời "Yes"/"No" của user ở các câu `Q1_allow_missing_column_*`, rồi cập nhật lại `semantic_profile` vào state để planner và các worker sau dùng thông tin đúng.
 
 #### C. PlannerAgent (`planner`)
 - **File:** [app/agents/planner/agent.py](file:///Users/lyanhquan/code/Agentic-Data-Cleaner/app/agents/planner/agent.py)
@@ -301,6 +358,59 @@ class GlobalState(TypedDict):
      - **Null Handling:** Nếu phát hiện null hay disguised missing values.
      - **Type Casting:** Nếu kiểu dữ liệu thực tế sai lệch so với kiểu dữ liệu mong đợi của ngữ nghĩa.
   3. Buộc LLM sinh JSON khớp với Pydantic model `ExecutionPlan` chứa danh sách chi tiết các công việc (`task_list`), bao gồm config chiến lược dọn dẹp cụ thể cho từng cột (`strategy`), logic kiểm tra bằng Pandas và các metrics đo lường thành công.
+
+#### D. DeduplicationAgent (`dedup_agent`)
+- **File:** [app/agents/deduplication/agent.py](file:///Users/lyanhquan/code/Agentic-Data-Cleaner/app/agents/deduplication/agent.py)
+- **Kiến trúc:** Hybrid Sub-agent — LLM chọn strategy + Pandas thực thi tất định.
+- **Phương thức hoạt động:**
+  1. **Tool Loop (ReAct):** LLM được bind với tool `inspect_duplicate_candidates` (tối đa 3 vòng). Tool này nhận `candidate_column_sets` và trả về `duplicate_count` + `duplicate_group_count` để LLM có bằng chứng thực tế trước khi ra quyết định.
+  2. **LLM Decision (JSON mode):** Sau tool loop, LLM sinh `DedupDecision` với `mode` là `exact_full_row` hoặc `exact_key` hoặc `review_needed`, kèm `key_columns`, `confidence`, `reasoning_summary`.
+  3. **Validation & Fallback (tất định):** `_validate_dedup_decision` kiểm tra quyết định của LLM qua các bước:
+     - Cột bị thiếu trong DataFrame → fallback.
+     - Cột có `null_rate > 30%` → bị loại khỏi key set.
+     - Single-column technical ID (kết thúc bằng `_id`, logic group "identity") → downgrade sang `exact_full_row`.
+     - `confidence < 0.6` → log warning nhưng vẫn dùng.
+     - Fallback cascade: planner `strategy.primary_keys` → planner `task.columns` → `statistical_profile.pk_candidates` → `safe_default` (`exact_full_row`).
+  4. **Execution (tất định):** `_execute_validated_decision` chạy `df.drop_duplicates(keep="first")` cho full-row rồi tiếp tục `drop_duplicates(subset=key_columns)` cho exact-key. Ghi Parquet ra `{project_id}_deduplicated.parquet`.
+  5. **Context Hashing:** `_compute_context_hash` tính SHA-256 từ schema, null_rates, pk_candidates, semantic columns, user_prompt và planner task. Nếu hash khớp với lần chạy trước (lưu trong `deduplication_result.decision_trace`), tái sử dụng quyết định cũ, tránh gọi LLM lại.
+  6. **Debug Override:** Khi `planner_task.rationale == "Injected by the debug dedup endpoint."`, bỏ qua LLM và dùng cột từ planner task trực tiếp.
+- **Output state fields:** `deduplication_result`, `physical_dataframe_path`, `current_dataset_version = "deduplication_v1"`, `worker_states.dedup_agent`.
+
+#### E. NullAgent (`null_agent`)
+- **File:** [app/agents/null_agent/agent.py](file:///Users/lyanhquan/code/Agentic-Data-Cleaner/app/agents/null_agent/agent.py)
+- **Kiến trúc:** Deterministic Agent — không dùng LLM, không có `__init__` gọi `super()`.
+- **Phương thức hoạt động:**
+  1. Đọc `execution_plan` từ state, tìm task có `task_id == "null_handling"`.
+  2. Đọc `strategy.per_column` dict từ task — mỗi entry là `{column: {strategy: ..., fill_value: ...}}`.
+  3. **Xử lý từng cột theo strategy:**
+     - `drop_row`: Xóa toàn bộ row chứa null ở cột đó, log số row bị drop.
+     - `fill_value`: Fill null bằng `cfg["fill_value"]` (default `"Unknown"`), log số cell được fill.
+     - `leave_as_is` / `skip`: Giữ nguyên null, ghi vào `skipped_columns`.
+     - Bất kỳ strategy không nhận dạng được → xử lý như `leave_as_is`.
+  4. **Validate output:** Kiểm tra row count không tăng; nếu planner set `outputs.must_preserve_row_count=True` mà vẫn drop rows → fail.
+  5. Ghi Parquet ra `{project_id}_null_handled.parquet` với fallback dir.
+- **Output state fields:** `worker_outputs["null_agent"]`, `physical_dataframe_path`, `current_dataset_version = "null_handling_v1"`, `worker_states.null_agent`, `agent_logs`.
+
+#### F. TypeCastingAgent (`typecast_agent`)
+- **File:** [app/agents/type_agent/agent.py](file:///Users/lyanhquan/code/Agentic-Data-Cleaner/app/agents/type_agent/agent.py)
+- **Kiến trúc:** Deterministic Agent — không dùng LLM.
+- **Phương thức hoạt động:**
+  1. Đọc `execution_plan` từ state, tìm task có `task_id == "type_casting"`. Nếu `task.skip == True` → trả về skipped update ngay.
+  2. **Build Casting Plan (`TypeCastingPlan`):**
+     - Ưu tiên 1: `execution_plan.strategy.per_column[col]["expected_type"]`
+     - Ưu tiên 2 (fallback): `execution_plan.columns` + `semantic_profile.columns[col].expected_type`
+  3. **Normalize expected_type:** Aliases — `integer`→`int`, `double`→`float`, `timestamp`→`datetime`, `boolean`→`bool`, v.v. Chỉ chấp nhận: `{"int", "float", "str", "bool", "date", "datetime"}`.
+  4. **`_cast_series` cho từng cột:**
+     - `str`: `astype("string")` → pandas StringDtype nullable.
+     - `float`: `_normalize_numeric_values` (strip commas, extract regex `[-+]?\d*\.?\d+`) → `pd.to_numeric(errors="coerce").astype("Float64")` nullable.
+     - `int`: Như float, thêm bước round nếu có fractional → `astype("Int64")` nullable.
+     - `bool`: `_parse_bool` map (`true/yes/y/1` → True, `false/no/n/0` → False, else None) → `astype("boolean")` nullable.
+     - `datetime`: `pd.to_datetime(errors="coerce", format="mixed")`.
+     - `date`: Như datetime + `.dt.normalize()`.
+  5. Tính `coerced_nulls` (số giá trị bị coerce thành null sau cast) cho từng cột, append vào `notes`.
+  6. Ghi Parquet `{project_id}_type_casted.parquet` và **gọi `LineageService.append_new_version()`** để lưu version mới vào PostgreSQL.
+  7. Đọc dataframe từ `physical_dataframe_path` hoặc fallback sang `LineageService.get_latest_version(session_id)` nếu path không có.
+- **Output state fields:** `worker_outputs[typecast_agent]`, `physical_dataframe_path`, `dataset_version` (lineage version number), `current_dataset_version`, `worker_states.typecast_agent`.
 
 ---
 
@@ -347,7 +457,9 @@ Tất cả các router được quản lý tập trung trong [app/api/v1/pipelin
 
 ## 10. Technical Debt & Cần Cải Thiện Trong Tương Lai
 
-1. **Sinh code tự động cho Workers:** Hiện tại `NullAgent` và `TypeCastingAgent` đang chạy dưới dạng Deterministic Executors (các hàm hardcode Pandas). Để tăng tính linh hoạt (Agentic), có thể nâng cấp chúng thành Code-generating Sub-agents như đã thiết kế cho `DeduplicationAgent` (sử dụng LLM kết hợp Tools để sinh code xử lý edge cases).
-2. **Reporter Agent:** Agent `reporter` trong thư mục `app/agents/reporter/` hiện tại vẫn đang là stub trả về giá trị TODO. Node `report_agent_node` hiện tại mới chỉ tự tính toán logic F1 metric nội bộ. Cần tích hợp `ReporterAgent` sâu vào pipeline bằng một LangChain/ReAct loop để sinh báo cáo tự nhiên.
-3. **Hỗ trợ Multi-file Ingestion:** Mặc dù API endpoints có nhắc đến upload multi-file nhưng backend hiện tại mới chỉ tập trung xử lý dọn dẹp đơn file (single session).
+1. **NullAgent thiếu các chiến lược nâng cao:** Hiện `NullAgent` chỉ hỗ trợ 3 strategies: `drop_row`, `fill_value`, `leave_as_is`. Các chiến lược nâng cao như `fill_mean`, `fill_median`, `fill_mode`, `fill_llm` (LLM imputation) chưa được triển khai — khi planner sinh ra các strategy này, NullAgent sẽ xử lý chúng như `leave_as_is` (unknown strategy fallback).
+2. **TypeCastingAgent thiếu write fallback dir:** `_write_output_dataframe` của TypeCastingAgent chỉ thử một directory (không có fallback như DeduplicationAgent và NullAgent). Nếu `output_dir` không writable sẽ raise exception.
+3. **Reporter Agent chưa dùng LLM:** Agent `reporter` trong `app/agents/reporter/` có prompt nhưng node `report_agent_node` hiện tại chỉ tính F1 metrics nội bộ. Chưa tích hợp `ReporterAgent` vào LangChain/ReAct loop để sinh báo cáo tự nhiên.
+4. **Hỗ trợ Multi-file Ingestion:** Backend hiện tại mới chỉ xử lý dọn dẹp đơn file (single session).
+5. **InputValidationResult parsing không tolerant:** Nếu LLM sinh ra key dynamic ngoài schema (ví dụ `Q2_strategy_column_SomeName` trong `NullClarifications`), model `NullClarifications` dùng `extra="allow"` để chứa chúng — nhưng các category khác (`DuplicateClarifications`, `TypecastClarifications`) vẫn dùng strict schema cố định.
 

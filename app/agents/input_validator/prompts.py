@@ -34,9 +34,10 @@ For each active issue (that is not already explicitly resolved by the user's ins
   Q2_strategy_column_<column_name> (generate individually for columns with null values):
       - Ask the user how they would like to resolve the missing/null values for this specific column.
       - Provide the pre-assigned options from the column's `fill_strategies` list in the semantic profile.
-      - CRITICAL: If the column's actual `dtype` in the Statistical Profile is `string`, `object`, or `mixed` (meaning it contains text like '33 patients'), you MUST append `"fill_llm"` and `"keep_null"` to the options if they are not already present. This is because mathematical operations like `fill_median` or `fill_mean` will fail on text strings!
+      - CRITICAL dtype rule: If the column's actual `dtype` in the Statistical Profile is `string`, `object`, or `mixed` (text data), you MUST NOT include `"fill_mean"` or `"fill_median"` in the options. Instead, you MUST append `"fill_mode"`, `"fill_llm"`, and `"keep_null"` to the options if they are not already present. Mathematical operations like `fill_median` or `fill_mean` will always fail on text strings.
+      - CRITICAL high null-rate rule: If the column's `null_rate` in the Statistical Profile is ≥ 0.70 (70% or more values are null), you MUST include `"drop_column"` as an option. A column that is mostly empty often has no analytical value and removing it is the safest choice.
       - Always add a custom free-text option: `"Custom strategy (describe in your next prompt)"` as the final option.
-      - State the consequences of each option in the `consequences` dictionary.
+      - State the consequences of each option in the `consequences` dictionary. The consequence for `"drop_column"` should explain that the entire column will be removed from the dataset.
 
   Q3_semantic_insight / Q4_semantic_insight (Optional):
       - Surface any other general semantic insights (e.g. disguised missing values potential_dmv, null correlation, MNAR suspicion) that require yes/no confirmation.
@@ -158,10 +159,14 @@ Return a pure JSON object. No markdown fences, no conversational text. Strictly 
       },
       "Q2_strategy_column_<column_name>": {
         "question": "How would you like to handle null values in <column_name>?",
-        "options": ["fill_mean", "fill_median", "Custom strategy (describe in your next prompt)"],
+        "options": ["fill_mean", "fill_median", "fill_mode", "fill_llm", "keep_null", "drop_column", "Custom strategy (describe in your next prompt)"],
         "consequences": {
-          "fill_mean": "Imputes missing values with column mean.",
-          "fill_median": "Imputes missing values with column median.",
+          "fill_mean": "Imputes missing values with column mean (numeric columns only).",
+          "fill_median": "Imputes missing values with column median (numeric columns only).",
+          "fill_mode": "Imputes missing values with the most frequent value (any data type).",
+          "fill_llm": "Uses AI to infer contextually appropriate fill values.",
+          "keep_null": "Retains nulls intentionally; the column is allowed to have missing values.",
+          "drop_column": "Removes the entire column from the dataset. Best when null_rate is very high (≥70%) or the column has no analytical value.",
           "Custom strategy (describe in your next prompt)": "Allows you to describe a custom imputation strategy."
         },
         "answer": null
