@@ -47,10 +47,13 @@ const hasAnsweredClarifications = (valResult: any): boolean => {
 };
 
 export const pipelineApi = {
-  uploadFile: async (file: File, requirements: string): Promise<UploadResponse> => {
+  uploadFile: async (file: File, requirements: string, cleanFile?: File | null): Promise<UploadResponse> => {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('user_prompt', requirements);
+    if (cleanFile) {
+      formData.append('clean_file', cleanFile);
+    }
 
     const response = await apiClient.post<any>('/pipeline/run', formData, {
       headers: {

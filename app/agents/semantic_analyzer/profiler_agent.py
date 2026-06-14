@@ -32,6 +32,11 @@ class ColumnSemanticProfileOutput(BaseModel):
     potential_dmv_reason: str = Field(description="Reasoning explaining disguised missing values.")
     expected_str_pattern: Optional[str] = Field(default=None, description="Regex or string pattern description.")
     expected_str_pattern_reason: Optional[str] = Field(default=None, description="Reasoning explaining expected_str_pattern.")
+    semantic_data_type: str = Field(description="The semantic data type of the column: Continuous | Discrete | Nominal | Ordinal | Temporal | Free text + Geospatial | Structured text | Boolean | Identifier.")
+    fill_strategies: List[str] = Field(
+        default_factory=list,
+        description="Null-filling strategies applicable to this column based on its semantic data type."
+    )
     
     # Integrated Quality Review / Audit
     is_error: bool = Field(description="True if actual statistics mismatch expectations (e.g. unexpected nulls, type mismatch, outliers).")
@@ -154,8 +159,33 @@ class SemanticProfilerAgent(BaseAgent):
             return {"global_errors": "SemanticProfilerAgent failed after 3 attempts."}
 
         # 3. Map to final SemanticProfile state model
+        def map_fill_strategies(s_type: str) -> List[str]:
+            dt = (s_type or "").strip().lower()
+            if "continuous" in dt:
+                return ["fill_mean", "fill_median"]
+            elif "discrete" in dt:
+                return ["fill_median", "fill_mode"]
+            elif "nominal" in dt:
+                return ["fill_mode", "fill_llm", "keep_null"]
+            elif "ordinal" in dt:
+                return ["fill_mode", "fill_median"]
+            elif "temporal" in dt:
+                return ["fill_median"]
+            elif "free text" in dt or "geospatial" in dt or "geo" in dt:
+                return ["fill_llm"]
+            elif "structured text" in dt:
+                return ["fill_llm", "drop_row"]
+            elif "boolean" in dt:
+                return ["fill_mode", "fill_constant"]
+            elif "identifier" in dt:
+                return ["drop_row"]
+            else:
+                return ["fill_mode", "fill_llm", "keep_null"]
+
         columns_dict: Dict[str, ColumnSemanticProfileDetail] = {}
         for col in response.columns:
+            # Enforce strict mapping of fill strategies based on semantic_data_type
+            strategies = col.fill_strategies or map_fill_strategies(col.semantic_data_type)
             columns_dict[col.column_name] = ColumnSemanticProfileDetail(
                 description=col.description,
                 logical_group=col.logical_group,
@@ -171,6 +201,8 @@ class SemanticProfilerAgent(BaseAgent):
                 is_error=col.is_error,
                 error_types=col.error_types,
                 error_reason=col.error_reason,
+                semantic_data_type=col.semantic_data_type or "Nominal",
+                fill_strategies=strategies,
             )
 
         # Fallback stubs for missing columns
@@ -185,6 +217,8 @@ class SemanticProfilerAgent(BaseAgent):
                     expected_type="str",
                     expected_type_reason="Fallback.",
                     is_error=False,
+                    semantic_data_type="Nominal",
+                    fill_strategies=["fill_mode", "fill_llm", "keep_null"],
                 )
 
         final_profile = SemanticProfile(

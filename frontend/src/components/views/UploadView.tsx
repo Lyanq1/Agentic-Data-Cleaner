@@ -35,6 +35,7 @@ export const UploadView: React.FC<UploadViewProps> = ({
   initialRunId
 }) => {
   const [file, setFile] = useState<File | null>(null);
+  const [cleanFile, setCleanFile] = useState<File | null>(null);
   const [previewData, setPreviewData] = useState<PreviewData | null>(null);
   const [profileData, setProfileData] = useState<any | null>(null);
   const [requirements, setRequirements] = useState('');
@@ -168,11 +169,14 @@ export const UploadView: React.FC<UploadViewProps> = ({
 
   const handleRemoveFile = () => {
     setFile(null);
+    setCleanFile(null);
     setPreviewData(null);
     setProfileData(null);
     setUploadedRunId(null);
     const input = document.getElementById('file-upload') as HTMLInputElement;
     if (input) input.value = '';
+    const cleanInput = document.getElementById('clean-file-upload') as HTMLInputElement;
+    if (cleanInput) cleanInput.value = '';
     if (onClearProfile) {
       onClearProfile();
     }
@@ -189,7 +193,7 @@ export const UploadView: React.FC<UploadViewProps> = ({
     setError(null);
 
     try {
-      const response = await pipelineApi.uploadFile(file, requirements);
+      const response = await pipelineApi.uploadFile(file, requirements, cleanFile);
       setUploadedRunId(response.run_id);
       
       try {
@@ -299,6 +303,72 @@ export const UploadView: React.FC<UploadViewProps> = ({
                     <button 
                       type="button"
                       onClick={handleRemoveFile}
+                      className="p-1 hover:bg-slate-200/50 rounded-full transition-colors"
+                    >
+                      <X className="h-4 w-4 text-slate-500" />
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-semibold text-slate-800">
+                  Clean File / Ground Truth (Optional, for testing)
+                </label>
+                {!cleanFile ? (
+                  <div 
+                    className="border-2 border-dashed border-slate-200 rounded-xl p-6 flex flex-col items-center justify-center text-center cursor-pointer hover:bg-slate-50/50 hover:border-primary/45 transition-all duration-300 group" 
+                    onClick={() => document.getElementById('clean-file-upload')?.click()}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                        const selectedFile = e.dataTransfer.files[0];
+                        setCleanFile(selectedFile);
+                      }
+                    }}
+                  >
+                    <div className="bg-slate-50 p-2.5 rounded-full mb-2 group-hover:scale-110 transition-transform">
+                      <UploadCloud className="h-6 w-6 text-slate-400 group-hover:text-primary" />
+                    </div>
+                    <div className="text-sm font-medium mb-1 text-slate-700">
+                      Click to select or drag and drop
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      CSV, JSON, XLSX, SQL, TSV, Parquet
+                    </div>
+                    <input
+                      id="clean-file-upload"
+                      type="file"
+                      className="hidden"
+                      accept=".csv,.json,.xlsx,.xls,.jsonl,.sql,.tsv,.parquet"
+                      onChange={(e) => {
+                        if (e.target.files && e.target.files.length > 0) {
+                          setCleanFile(e.target.files[0]);
+                        }
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <div className="relative p-3 rounded-xl border bg-slate-50/45 flex items-center space-x-3 border-slate-100">
+                    <div className="bg-emerald-100/50 p-2.5 rounded-lg">
+                      <FileText className="h-5 w-5 text-emerald-600" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold truncate text-slate-800">{cleanFile.name}</p>
+                      <p className="text-xs text-muted-foreground">{(cleanFile.size / 1024 / 1024).toFixed(2)} MB</p>
+                    </div>
+                    <button 
+                      type="button"
+                      onClick={() => {
+                        setCleanFile(null);
+                        const cleanInput = document.getElementById('clean-file-upload') as HTMLInputElement;
+                        if (cleanInput) cleanInput.value = '';
+                      }}
                       className="p-1 hover:bg-slate-200/50 rounded-full transition-colors"
                     >
                       <X className="h-4 w-4 text-slate-500" />

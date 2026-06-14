@@ -17,9 +17,14 @@ export const InputValidationClarificationContent: React.FC<{
   const categories = ["null", "duplicate", "typecast"] as const;
 
   const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [customInputs, setCustomInputs] = useState<Record<string, string>>({});
 
   const handleSelectAnswer = (key: string, val: string) => {
     setAnswers((prev) => ({ ...prev, [key]: val }));
+  };
+
+  const handleCustomInputChange = (key: string, val: string) => {
+    setCustomInputs((prev) => ({ ...prev, [key]: val }));
   };
 
   const totalQuestions = useMemo(() => {
@@ -27,7 +32,7 @@ export const InputValidationClarificationContent: React.FC<{
     categories.forEach((cat) => {
       const catData = clarifications[cat];
       if (catData) {
-        count += Object.keys(catData).length;
+        count += Object.keys(catData).filter((qKey) => catData[qKey]).length;
       }
     });
     return count;
@@ -39,19 +44,33 @@ export const InputValidationClarificationContent: React.FC<{
       const catData = clarifications[cat];
       if (catData) {
         Object.keys(catData).forEach((qKey) => {
-          if (answers[`${cat}.${qKey}`]) {
-            count += 1;
+          const key = `${cat}.${qKey}`;
+          if (catData[qKey] && answers[key]) {
+            if (
+              answers[key].includes("Custom strategy") &&
+              !customInputs[key]?.trim()
+            ) {
+              // Must provide text for custom strategy
+            } else {
+              count += 1;
+            }
           }
         });
       }
     });
     return count;
-  }, [clarifications, answers]);
+  }, [clarifications, answers, customInputs]);
 
   const allAnswered = answeredCount === totalQuestions;
 
   const handleSubmit = () => {
-    onDecision("approve", "User resolved all clarifications", answers);
+    const finalAnswers = { ...answers };
+    Object.keys(finalAnswers).forEach((key) => {
+      if (finalAnswers[key].includes("Custom strategy") && customInputs[key]) {
+        finalAnswers[key] = `Custom strategy: ${customInputs[key].trim()}`;
+      }
+    });
+    onDecision("approve", "User resolved all clarifications", finalAnswers);
   };
 
   return (
@@ -99,9 +118,10 @@ export const InputValidationClarificationContent: React.FC<{
                   .sort()
                   .map((qKey, qi) => {
                     const q = catData[qKey];
+                    if (!q) return null;
                     const key = `${cat}.${qKey}`;
                     const selectedVal = answers[key] || "";
-                    const isStrategy = "options" in q;
+                    const isStrategy = q && typeof q === "object" && "options" in q;
 
                     return (
                       <div
@@ -147,16 +167,32 @@ export const InputValidationClarificationContent: React.FC<{
                                       </span>
                                     </label>
                                     {isSelected && optConsequence && (
-                                      <div className="ml-6 p-3 rounded-lg bg-indigo-50/40 border border-indigo-100/50 text-xs text-indigo-950/90 leading-relaxed flex items-start gap-2 animate-fadeIn">
-                                        <TextIcon className="w-4 h-4 text-indigo-500 shrink-0 mt-0.5">
-                                          !
-                                        </TextIcon>
-                                        <div>
-                                          <strong className="font-semibold text-indigo-900 block mb-0.5">
-                                            Consequence:
-                                          </strong>
-                                          {formatDisplayValue(optConsequence)}
+                                      <div className="ml-6 p-3 rounded-lg bg-indigo-50/40 border border-indigo-100/50 text-xs text-indigo-950/90 leading-relaxed flex flex-col gap-2 animate-fadeIn">
+                                        <div className="flex items-start gap-2">
+                                          <TextIcon className="w-4 h-4 text-indigo-500 shrink-0 mt-0.5">
+                                            !
+                                          </TextIcon>
+                                          <div>
+                                            <strong className="font-semibold text-indigo-900 block mb-0.5">
+                                              Consequence:
+                                            </strong>
+                                            {formatDisplayValue(optConsequence)}
+                                          </div>
                                         </div>
+                                        {optionLabel.includes("Custom strategy") && (
+                                          <div className="mt-2 w-full">
+                                            <input
+                                              type="text"
+                                              value={customInputs[key] || ""}
+                                              onChange={(e) =>
+                                                handleCustomInputChange(key, e.target.value)
+                                              }
+                                              placeholder="E.g. fill with 'Unknown', drop the row..."
+                                              className="w-full text-sm rounded-md border border-indigo-200 px-3 py-2 bg-white text-foreground focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+                                              disabled={!isAwaiting}
+                                            />
+                                          </div>
+                                        )}
                                       </div>
                                     )}
                                   </div>

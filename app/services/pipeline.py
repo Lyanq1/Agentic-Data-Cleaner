@@ -47,6 +47,7 @@ async def run_pipeline(
     user_prompt: str = "",
     original_filename: str = "",
     data_schema: dict | None = None,
+    clean_dataset_path: str | None = None,
 ) -> dict[str, Any]:
     """Run the profiler → input_validator pipeline on a canonical Parquet dataset.
 
@@ -63,6 +64,7 @@ async def run_pipeline(
     initial_state = {
         "messages": [],
         "dataset_path": canonical_path,
+        "clean_dataset_path": clean_dataset_path,
         "user_prompt": user_prompt,
         "project_id": run_id,
         "session_id": Path(canonical_path).stem,
@@ -145,11 +147,6 @@ async def run_pipeline(
                             }
                         })
                         
-            # Tell frontend that execution ended
-            await manager.broadcast_to_run(run_id, {
-                "event": "status_change",
-                "status": "completed"
-            })
         except Exception as e:
             logger.error(f"Pipeline execution error: {e}")
             await manager.broadcast_to_run(run_id, {
@@ -161,6 +158,19 @@ async def run_pipeline(
         
         snapshot = await graph.aget_state(config)
         final_state = snapshot.values if snapshot else initial_state
+
+        # Check if the graph has paused at an interrupt (meaning execution is not fully completed yet)
+        is_interrupted = bool(snapshot and snapshot.next)
+        if not is_interrupted:
+            await manager.broadcast_to_run(run_id, {
+                "event": "status_change",
+                "status": "completed"
+            })
+        else:
+            await manager.broadcast_to_run(run_id, {
+                "event": "status_change",
+                "status": "paused"
+            })
 
     raw_profile = final_state.get("statistical_profile")
     formatted_profile = _format_profile_for_frontend(raw_profile)

@@ -120,12 +120,7 @@ class InputValidatorAgent(BaseAgent):
                 "Make sure to populate the 'action_plan' dictionary with the cleaning plans for 'null', 'duplicate', and 'typecast'. "
                 "Populate 'resolved_by_user' list with the resolved issue/column descriptions. "
                 "Also, keep the exact same 'clarifications' structure but fill in the 'answer' field of each question with the user's actual selected answer. "
-                "CRITICAL for Q4_allow_missing_confirmation: populate its 'answer' field as a JSON object (dict) mapping "
-                "EVERY column name in the dataset to a boolean (true/false) reflecting the user's confirmed allow_missing decision. "
-                "Example: {\"TITLE\": false, \"CONTRIBUTORS\": true, \"BARCODE\": false, ...}. "
-                "If the user agreed with the AI's suggestion, preserve the original allow_missing values from the Semantic Profile. "
-                "If the user corrected any column, apply their correction. "
-                "Do NOT leave Q4_allow_missing_confirmation.answer as null."
+                "CRITICAL: for each Q1_allow_missing_column_<name>, populate its 'answer' field with the user's confirmed answer ('Yes' or 'No') based on their choices."
             )))
 
 
@@ -185,7 +180,7 @@ class InputValidatorAgent(BaseAgent):
 
         # Format the response into a JSON string for the message, 
         # and also put the raw dict into state for the frontend to consume.
-        json_data = response.model_dump()
+        json_data = response.model_dump(exclude_none=True)
         final_message = json.dumps(json_data, ensure_ascii=False, indent=2)
 
         # ------------------------------------------------------------------
@@ -241,25 +236,33 @@ class InputValidatorAgent(BaseAgent):
         except Exception:
             return None
 
-        # Locate Q4 answer inside clarifications.null
+        # Locate Q1 answers inside clarifications.null
         clarifications = validation_result.clarifications
         if clarifications is None or clarifications.null is None:
             return None
 
-        q4 = clarifications.null.Q4_allow_missing_confirmation
-        if q4 is None or q4.answer is None:
-            return None
+        # clarifications.null can be a dict or a BaseModel
+        if isinstance(clarifications.null, dict):
+            null_dict = clarifications.null
+        else:
+            null_dict = clarifications.null.model_dump() if hasattr(clarifications.null, "model_dump") else clarifications.null.__dict__
 
-        # q4.answer is dict[str, bool]: {"TITLE": False, "CONTRIBUTORS": True, ...}
         patched = False
-        for col_name, new_value in q4.answer.items():
-            if col_name in profile.columns:
-                profile.columns[col_name].allow_missing = bool(new_value)
-                logger.info(
-                    "InputValidatorAgent: %s.allow_missing overridden to %s by user.",
-                    col_name,
-                    new_value,
-                )
-                patched = True
+
+        # Individual column yes/no questions: Q1_allow_missing_column_<col_name>
+        for k, v in null_dict.items():
+            if k.startswith("Q1_allow_missing_column_") and v:
+                col_name = k[len("Q1_allow_missing_column_"):]
+                if col_name in profile.columns:
+                    answer = v.get("answer") if isinstance(v, dict) else getattr(v, "answer", None)
+                    if answer in ("Yes", "No"):
+                        new_val = (answer == "Yes")
+                        profile.columns[col_name].allow_missing = new_val
+                        logger.info(
+                            "InputValidatorAgent: %s.allow_missing overridden to %s by user.",
+                            col_name,
+                            new_val,
+                        )
+                        patched = True
 
         return profile if patched else None

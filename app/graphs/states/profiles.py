@@ -32,6 +32,18 @@ class ColumnSemanticProfileDetail(BaseModel):
     expected_str_pattern_reason: str | None = Field(
         default=None, description="Reasoning explaining expected_str_pattern."
     )
+    semantic_data_type: str = Field(
+        default="Nominal",
+        description=(
+            "The semantic data type of the column according to fill_strategy_summary.md "
+            "(Continuous | Discrete | Nominal | Ordinal | Temporal | Free text + Geospatial | "
+            "Structured text | Boolean | Identifier)."
+        )
+    )
+    fill_strategies: list[str] = Field(
+        default_factory=list,
+        description="Pre-assigned null-filling strategies for this column based on its semantic data type."
+    )
 
     # Combined Semantic Review / Quality Audit
     is_error: bool = Field(

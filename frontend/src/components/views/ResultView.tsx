@@ -130,6 +130,32 @@ function formatCell(value: any): string {
   }
 }
 
+const CircularProgress = ({ value, label }: { value: number, label: string }) => {
+  const radius = 24;
+  const circumference = 2 * Math.PI * radius;
+  const offset = circumference - (value / 100) * circumference;
+  
+  return (
+    <div className="flex flex-col items-center justify-center gap-2">
+      <div className="relative w-14 h-14 flex items-center justify-center">
+        <svg className="w-full h-full transform -rotate-90" viewBox="0 0 56 56">
+          <circle cx="28" cy="28" r={radius} className="stroke-muted/30" strokeWidth="4.5" fill="none" />
+          <circle 
+            cx="28" cy="28" r={radius} 
+            className="stroke-primary transition-all duration-1000 ease-out" 
+            strokeWidth="4.5" fill="none" 
+            strokeDasharray={circumference} 
+            strokeDashoffset={offset} 
+            strokeLinecap="round" 
+          />
+        </svg>
+        <span className="absolute text-xs font-bold text-foreground">{Math.round(value)}%</span>
+      </div>
+      <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">{label}</span>
+    </div>
+  );
+};
+
 export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) => {
   const [showRawJson, setShowRawJson] = useState(false);
 
@@ -282,13 +308,75 @@ export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) =>
                   </div>
                   <div className="p-5 bg-card space-y-4">
                     {validation?.metrics && Object.keys(validation.metrics).length > 0 && (
-                      <div className="space-y-4">
-                        <h4 className="text-sm font-semibold text-muted-foreground">Validation metrics</h4>
+                      <div className="space-y-6">
                         {Object.entries(validation.metrics).map(([k, v]) => {
+                          if (k === 'Intent Analysis') {
+                            const data = v as any;
+                            return (
+                              <div key={k} className="space-y-3">
+                                <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">{k}</h4>
+                                <div className="grid grid-cols-2 gap-3">
+                                  <div className="rounded-xl border bg-card p-4 shadow-sm flex flex-col justify-center items-center text-center">
+                                    <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Matched Columns</span>
+                                    <span className="text-2xl font-bold text-foreground">{data['Matched Columns'] ?? '—'}</span>
+                                  </div>
+                                  <div className="rounded-xl border bg-card p-4 shadow-sm flex flex-col justify-center items-center text-center">
+                                    <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Missing Values Detected</span>
+                                    <span className="text-2xl font-bold text-amber-600">{data['Missing values detected'] ?? '—'}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          }
+                          
+                          if (k === 'F1-Score Evaluation') {
+                            const data = v as any;
+                            return (
+                              <div key={k} className="space-y-3">
+                                <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">{k}</h4>
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                  <div className="rounded-xl border bg-card p-4 shadow-sm flex justify-center items-center">
+                                    <CircularProgress value={(data.f1_score ?? 0) * 100} label="F1 Score" />
+                                  </div>
+                                  <div className="rounded-xl border bg-card p-4 shadow-sm flex justify-center items-center">
+                                    <CircularProgress value={(data.error_correction_precision ?? 0) * 100} label="Precision" />
+                                  </div>
+                                  <div className="rounded-xl border bg-card p-4 shadow-sm flex justify-center items-center">
+                                    <CircularProgress value={(data.error_correction_recall ?? 0) * 100} label="Recall" />
+                                  </div>
+                                  <div className="rounded-xl border bg-card p-4 shadow-sm flex justify-center items-center">
+                                    <CircularProgress value={(data.cell_accuracy ?? 0) * 100} label="Accuracy" />
+                                  </div>
+                                </div>
+                                <div className="grid grid-cols-4 gap-3">
+                                  <div className="col-span-4 sm:col-span-1 rounded-xl border bg-card px-4 py-3 shadow-sm flex flex-col justify-center">
+                                    <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Total Cells</span>
+                                    <span className="text-lg font-bold text-foreground">{data.total_cells_evaluated?.toLocaleString() ?? '—'}</span>
+                                  </div>
+                                  <div className="col-span-4 sm:col-span-3 rounded-xl border bg-card px-4 py-3 shadow-sm flex items-center justify-around">
+                                    <div className="flex flex-col items-center">
+                                      <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">True Positive</span>
+                                      <span className="text-sm font-bold text-emerald-600">{data.tp?.toLocaleString() ?? '—'}</span>
+                                    </div>
+                                    <div className="flex flex-col items-center">
+                                      <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">False Positive</span>
+                                      <span className="text-sm font-bold text-amber-600">{data.fp?.toLocaleString() ?? '—'}</span>
+                                    </div>
+                                    <div className="flex flex-col items-center">
+                                      <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">False Negative</span>
+                                      <span className="text-sm font-bold text-rose-600">{data.fn?.toLocaleString() ?? '—'}</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          }
+
+                          // Fallback for other metrics
                           const lines = flattenMetricLines(v);
                           return (
                             <div key={k} className="rounded-lg border border-border bg-muted/15 overflow-hidden">
-                              <div className="px-3 py-2 border-b border-border/80 bg-muted/30 text-xs font-semibold text-foreground">
+                              <div className="px-3 py-2 border-b border-border/80 bg-muted/30 text-xs font-semibold text-foreground uppercase tracking-wider">
                                 {humanizeMetricKey(k)}
                               </div>
                               <div className="px-3 py-2 font-mono text-[11px] leading-relaxed text-foreground max-h-[320px] overflow-y-auto">

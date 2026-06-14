@@ -34,6 +34,7 @@ class GlobalState(TypedDict):
     project_id: str | None
     session_id: str | None
     dataset_path: str | None
+    clean_dataset_path: str | None
     original_filename: str | None
     user_prompt: str | None
 
