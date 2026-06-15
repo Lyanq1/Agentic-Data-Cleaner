@@ -53,8 +53,8 @@ def route_from_validator(state: GlobalState) -> str:
     
     Flow:
       - If validation failed and requires replan: routes to 'planner'.
-      - If validation failed and retrying: routes back to the current worker (dedup or null).
-      - If validation passed: moves to the next worker (null_handling after dedup) or 'report_agent'.
+      - If validation failed and retrying: routes back to the current worker (dedup, typecast, or null).
+      - If validation passed: moves to the next worker or 'report_agent'.
     """
     next_node = state.get("next_node")
     if next_node == "planner":
@@ -184,7 +184,7 @@ class GraphBuilder:
         # Approval resumes use an empty interrupt list so workers, validators, and
         # report generation can finish in one background run.
         if interrupt_before is None:
-            interrupt_before = ["deduplication", "null_handling", "type_casting", "report_agent"]
+            interrupt_before = ["deduplication", "type_casting", "null_handling", "report_agent"]
 
         return builder.compile(
             checkpointer=checkpointer,

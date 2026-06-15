@@ -130,8 +130,8 @@ class PlannerAgent(BaseAgent):
                   ),
                   TaskDetailWrapper(
                       work_order=TaskDetail(
-                          task_id="null_handling",
-                          agent="null_agent",
+                          task_id="type_casting",
+                          agent="typecast_agent",
                           skip=True,
                           skip_reason=f"Failed to generate plan due to error: {e}",
                           columns=[],
@@ -140,8 +140,8 @@ class PlannerAgent(BaseAgent):
                   ),
                   TaskDetailWrapper(
                       work_order=TaskDetail(
-                          task_id="type_casting",
-                          agent="typecast_agent",
+                          task_id="null_handling",
+                          agent="null_agent",
                           skip=True,
                           skip_reason=f"Failed to generate plan due to error: {e}",
                           columns=[],
@@ -154,15 +154,14 @@ class PlannerAgent(BaseAgent):
 
         logger.info("PlannerAgent successfully parsed execution plan.")
 
-        # Map active tasks (skip == False) to the LangGraph router's task_list
-        # Enforce execution sequence: deduplication -> null_handling -> type_casting
+        # Enforce execution sequence: deduplication -> type_casting -> null_handling
         active_tasks_set = {
             task.work_order.task_id
             for task in response.task_list
             if not task.work_order.skip
         }
         active_task_names = []
-        for task_id in ["deduplication", "null_handling", "type_casting"]:
+        for task_id in ["deduplication", "type_casting", "null_handling"]:
             if task_id in active_tasks_set:
                 active_task_names.append(task_id)
 

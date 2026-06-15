@@ -31,18 +31,18 @@ const WORKER_FLOW = [
     kindClass: "text-violet-700",
   },
   {
-    taskId: "null_handling",
-    label: "Null",
-    description: "Resolve missing and disguised missing values on the deduplicated version.",
-    cardClass: "bg-sky-50 border-sky-200",
-    kindClass: "text-sky-700",
-  },
-  {
     taskId: "type_casting",
     label: "Type Cast",
-    description: "Cast columns after null cleanup so Pandera validates final dtypes.",
+    description: "Cast columns to expected semantic types before resolving nulls.",
     cardClass: "bg-amber-50 border-amber-200",
     kindClass: "text-amber-700",
+  },
+  {
+    taskId: "null_handling",
+    label: "Null",
+    description: "Resolve missing and disguised missing values on the type-casted version.",
+    cardClass: "bg-sky-50 border-sky-200",
+    kindClass: "text-sky-700",
   },
 ] as const;
 

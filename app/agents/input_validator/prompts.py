@@ -51,6 +51,7 @@ For each active issue (that is not already explicitly resolved by the user's ins
           - Identifier:
             - If allow_missing = False: "drop_row" (filling is prohibited).
             - If allow_missing = True: "keep_null" (filling is prohibited).
+      
       - Note: "fill_value" represents fill_constant.
       - Always append "Custom strategy (describe in your next prompt)" as the final option.
       - State the consequences of each option in the `consequences` dictionary. Explain that "drop_row" will drop rows containing null values in this column, and "fill_mean"/"fill_median" will impute with mean/median values.
@@ -81,6 +82,7 @@ For each active issue (that is not already explicitly resolved by the user's ins
 **TYPECAST (if active and not explicitly resolved) — exactly 3 questions:**
   Q1 (Semantic insight 1): Surface the most critical type mismatch found.
       - Use exp_type vs current dtype to identify the mismatch.
+      - Note: If a column has null values, and its semantic type is Continuous/Discrete but physical type is string/object (making it currently unsuitable for mean/median filling), you MUST prioritize surfacing it here to confirm casting it to the correct numeric type.
       - Explain what the column semantically represents and why the current type is problematic.
       - Show type_mismatch_rate and castable_to to give the user a sense of feasibility.
       - Ask the user to confirm whether the expected type is correct.
