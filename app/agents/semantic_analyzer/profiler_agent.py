@@ -33,6 +33,7 @@ class ColumnSemanticProfileOutput(BaseModel):
     expected_str_pattern: Optional[str] = Field(default=None, description="Regex or string pattern description.")
     expected_str_pattern_reason: Optional[str] = Field(default=None, description="Reasoning explaining expected_str_pattern.")
     semantic_data_type: str = Field(description="The semantic data type of the column: Continuous | Discrete | Nominal | Ordinal | Temporal | Free text + Geospatial | Structured text | Boolean | Identifier.")
+    semantic_data_type_reason: str = Field(description="CoT reasoning explaining the choice of semantic_data_type classification.")
     fill_strategies: List[str] = Field(
         default_factory=list,
         description="Null-filling strategies applicable to this column based on its semantic data type."
@@ -202,6 +203,7 @@ class SemanticProfilerAgent(BaseAgent):
                 error_types=col.error_types,
                 error_reason=col.error_reason,
                 semantic_data_type=col.semantic_data_type or "Nominal",
+                semantic_data_type_reason=col.semantic_data_type_reason or "",
                 fill_strategies=strategies,
             )
 
@@ -218,6 +220,7 @@ class SemanticProfilerAgent(BaseAgent):
                     expected_type_reason="Fallback.",
                     is_error=False,
                     semantic_data_type="Nominal",
+                    semantic_data_type_reason="Fallback.",
                     fill_strategies=["fill_mode", "fill_llm", "keep_null"],
                 )
 
@@ -226,6 +229,15 @@ class SemanticProfilerAgent(BaseAgent):
             thinking=response.thinking,
             columns=columns_dict
         )
+
+        logger.info("Semantic Data Type Classification Reasoning:")
+        for col_name, detail in columns_dict.items():
+            logger.info(
+                "  Column '%s' -> semantic_data_type='%s' | Reasoning: %s",
+                col_name,
+                detail.semantic_data_type,
+                detail.semantic_data_type_reason
+            )
 
         logger.info("SemanticProfilerAgent completed profiling successfully.")
         return {

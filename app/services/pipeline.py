@@ -226,7 +226,7 @@ async def get_pipeline_state(run_id: str) -> dict[str, Any] | None:
         "input_validation_result": state.get("input_validation_result"),
         "worker_states": state.get("worker_states"),
         "validation_results": state.get("validation_results", []),
-        "agent_logs": state.get("agent_logs", []),
+        "agent_logs": state.get("agent_logs", {}),
         "deduplication_result": state.get("deduplication_result"),
         "current_dataset_version": state.get("current_dataset_version"),
         "execution_plan": state.get("execution_plan").model_dump() if state.get("execution_plan") and hasattr(state.get("execution_plan"), "model_dump") else state.get("execution_plan"),

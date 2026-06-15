@@ -155,17 +155,16 @@ class PlannerAgent(BaseAgent):
         logger.info("PlannerAgent successfully parsed execution plan.")
 
         # Map active tasks (skip == False) to the LangGraph router's task_list
-        task_mapping = {
-            "deduplication": "deduplication",
-            "null_handling": "null_handling",
-            "type_casting": "type_casting"
+        # Enforce execution sequence: deduplication -> null_handling -> type_casting
+        active_tasks_set = {
+            task.work_order.task_id
+            for task in response.task_list
+            if not task.work_order.skip
         }
         active_task_names = []
-        for task in response.task_list:
-            if not task.work_order.skip:
-                mapped_name = task_mapping.get(task.work_order.task_id)
-                if mapped_name:
-                    active_task_names.append(mapped_name)
+        for task_id in ["deduplication", "null_handling", "type_casting"]:
+            if task_id in active_tasks_set:
+                active_task_names.append(task_id)
 
         logger.info(f"PlannerAgent active task list: {active_task_names}")
 

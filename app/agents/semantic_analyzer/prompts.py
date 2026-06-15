@@ -5,7 +5,7 @@ Your mission is to perform a deep semantic analysis of the dataset. For each col
 1. **Analyze Meanings & Relationships**: Group columns logically, identify dependencies (e.g. zip_code functionally determines city), and provide description.
 2. **Determine Business Semantics**:
    - Identify missing rules (allow_missing), ideal expected semantic types (`expected_type`), and disguised missing values (dmvs).
-   - Classify the column's `semantic_data_type` into one of the following exact categories:
+   - Classify the column's `semantic_data_type` into one of the following exact categories, and explain your reasoning for this classification in `semantic_data_type_reason`:
      * `Continuous` (e.g. price, height, temp)
      * `Discrete` (e.g. count, age, quantity)
      * `Nominal` (e.g. color, country, gender)

@@ -65,13 +65,18 @@ async def profiler_node(state: GlobalState) -> dict[str, Any]:
         "statistical_profile": validated_profile,
         "current_step": "profiling",
         "completed_steps": "profiling",
-        "agent_logs": [
-            _agent_log("profiler", "Running detailed statistical exploratory data analysis (EDA)..."),
-            _agent_log(
-                "profiler",
-                f"Dataset profiling completed. Analyzed {profile.get('total_rows', '?')} rows and {profile.get('total_columns', '?')} columns.",
-            ),
-        ],
+        "agent_logs": {
+            "profiler": {
+                "logs": [
+                    _agent_log("profiler", "Running detailed statistical exploratory data analysis (EDA)..."),
+                    _agent_log(
+                        "profiler",
+                        f"Dataset profiling completed. Analyzed {profile.get('total_rows', '?')} rows and {profile.get('total_columns', '?')} columns.",
+                    ),
+                ],
+                "thinking": ""
+            }
+        },
     }
 
 
@@ -81,7 +86,30 @@ async def semantic_profile_node(state: GlobalState) -> dict[str, Any]:
         logger.info("semantic_profile_node: Semantic profile already exists in state, skipping.")
         return {}
     agent = SemanticProfilerAgent()
-    return await agent.run(state)
+    result = await agent.run(state)
+    
+    profile = result.get("semantic_profile")
+    thinking = ""
+    if profile:
+        if isinstance(profile, dict):
+            thinking = profile.get("thinking", "")
+        else:
+            thinking = getattr(profile, "thinking", "")
+
+    return {
+        **result,
+        "agent_logs": {
+            "semantic_profiler": {
+                "logs": [
+                    _agent_log("semantic_profiler", "Generating semantic profiles and data quality audits..."),
+                    _agent_log("semantic_profiler", "Semantic profiling and quality auditing completed.")
+                ],
+                "thinking": thinking
+            }
+        }
+    }
+
+
 
 
 # Input validation node (analyzes data profile and reports validation status)
@@ -91,14 +119,27 @@ async def input_validator_node(state: GlobalState) -> dict[str, Any]:
     agent = InputValidatorAgent()
     result = await agent.run(state)
 
+    val_result = result.get("input_validation_result")
+    reasoning = ""
+    if val_result:
+        if isinstance(val_result, dict):
+            reasoning = val_result.get("reasoning", "")
+        else:
+            reasoning = getattr(val_result, "reasoning", "")
+
     return {
         **result,
         "current_step": "input_validation",
         "completed_steps": "input_validation",
-        "agent_logs": [
-            _agent_log("input_validator", "Running data quality and user intent validation..."),
-            _agent_log("input_validator", "Data quality and user intent validation completed."),
-        ],
+        "agent_logs": {
+            "input_validator": {
+                "logs": [
+                    _agent_log("input_validator", "Running data quality and user intent validation..."),
+                    _agent_log("input_validator", "Data quality and user intent validation completed."),
+                ],
+                "thinking": reasoning
+            }
+        },
     }
 
 
@@ -111,15 +152,29 @@ async def planner_node(state: GlobalState) -> dict[str, Any]:
     agent = PlannerAgent()
     result = await agent.run(state)
 
+    plan = result.get("execution_plan")
+    plan_summary = ""
+    if plan:
+        if isinstance(plan, dict):
+            plan_summary = plan.get("plan_summary", "")
+        else:
+            plan_summary = getattr(plan, "plan_summary", "")
+
     return {
         **result,
         "current_step": "planning",
         "completed_steps": "planning",
-        "agent_logs": [
-            _agent_log("planner", "Generating execution plan..."),
-            _agent_log("planner", "Execution plan generated."),
-        ],
+        "agent_logs": {
+            "planner": {
+                "logs": [
+                    _agent_log("planner", "Generating execution plan..."),
+                    _agent_log("planner", "Execution plan generated."),
+                ],
+                "thinking": plan_summary
+            }
+        },
     }
+
 
 # Deduplication Worker stub node
 async def dedup_agent_node(state: GlobalState) -> dict[str, Any]:
@@ -148,7 +203,12 @@ async def dedup_agent_node(state: GlobalState) -> dict[str, Any]:
         **result,
         "current_step": "deduplication",
         "completed_steps": "deduplication",
-        "agent_logs": agent_logs,
+        "agent_logs": {
+            "dedup_agent": {
+                "logs": agent_logs,
+                "thinking": ""
+            }
+        },
     }
 
 
@@ -179,7 +239,12 @@ async def null_agent_node(state: GlobalState) -> dict[str, Any]:
         **result,
         "current_step": "null_handling",
         "completed_steps": "null_handling",
-        "agent_logs": agent_logs,
+        "agent_logs": {
+            "null_agent": {
+                "logs": agent_logs,
+                "thinking": ""
+            }
+        },
     }
 
 
@@ -210,7 +275,12 @@ async def type_agent_node(state: GlobalState) -> dict[str, Any]:
         **result,
         "current_step": "type_casting",
         "completed_steps": "type_casting",
-        "agent_logs": agent_logs,
+        "agent_logs": {
+            "typecast_agent": {
+                "logs": agent_logs,
+                "thinking": ""
+            }
+        },
     }
 
 
@@ -284,11 +354,18 @@ async def validator_node(state: GlobalState) -> dict[str, Any]:
         logger.error("validator_node: ValidatorAgent failed to execute.")
         return {
             "global_errors": "ValidatorAgent failed to execute.",
-            "agent_logs": _agent_log(
-                "validator",
-                "ValidatorAgent failed to execute.",
-                "error",
-            ),
+            "agent_logs": {
+                "validator": {
+                    "logs": [
+                        _agent_log(
+                            "validator",
+                            "ValidatorAgent failed to execute.",
+                            "error",
+                        )
+                    ],
+                    "thinking": "ValidatorAgent failed to execute."
+                }
+            },
         }
         
     validator_result = result.get("validator_agent_result")
@@ -335,10 +412,17 @@ async def validator_node(state: GlobalState) -> dict[str, Any]:
             "current_dataset_version": new_version_str,
             "current_step": "validation",
             "completed_steps": "validation",
-            "agent_logs": _agent_log(
-                "validator",
-                f"Task '{task_id}' passed validation.",
-            ),
+            "agent_logs": {
+                "validator": {
+                    "logs": [
+                        _agent_log(
+                            "validator",
+                            f"Task '{task_id}' passed validation.",
+                        )
+                    ],
+                    "thinking": validator_result.reasoning if validator_result else ""
+                }
+            },
         }
 
     # If Failed
@@ -376,11 +460,18 @@ async def validator_node(state: GlobalState) -> dict[str, Any]:
             "validation_results": validation_item,
             "global_errors": error_log,
             "current_step": "validation_failed",
-            "agent_logs": _agent_log(
-                "validator",
-                f"Task '{task_id}' failed validation. Action: replan. Routing to planner.",
-                "warning",
-            ),
+            "agent_logs": {
+                "validator": {
+                    "logs": [
+                        _agent_log(
+                            "validator",
+                            f"Task '{task_id}' failed validation. Action: replan. Routing to planner.",
+                            "warning",
+                        )
+                    ],
+                    "thinking": validator_result.reasoning if validator_result else ""
+                }
+            },
         }
 
     logger.warning(
@@ -397,11 +488,18 @@ async def validator_node(state: GlobalState) -> dict[str, Any]:
         "next_node": None,
         "validation_results": validation_item,
         "current_step": "validation_failed",
-        "agent_logs": _agent_log(
-            "validator",
-            f"Task '{task_id}' failed validation; retry {retry_count}/{max_retries}. Action: retry_worker.",
-            "warning",
-        ),
+        "agent_logs": {
+            "validator": {
+                "logs": [
+                    _agent_log(
+                        "validator",
+                        f"Task '{task_id}' failed validation; retry {retry_count}/{max_retries}. Action: retry_worker.",
+                        "warning",
+                    )
+                ],
+                "thinking": validator_result.reasoning if validator_result else ""
+            }
+        },
     }
 
 
@@ -541,7 +639,12 @@ async def report_agent_node(state: GlobalState) -> dict[str, Any]:
     return {
         "current_step": "reporting",
         "completed_steps": "reporting",
-        "agent_logs": _agent_log("report_agent", "Final report is ready."),
+        "agent_logs": {
+            "report_agent": {
+                "logs": [_agent_log("report_agent", "Final report is ready.")],
+                "thinking": ""
+            }
+        },
         "f1_metrics": f1_metrics,
     }
 

@@ -24,6 +24,55 @@ def append_list(
         return left + right
     return left + [right]
 
+
+def merge_agent_logs(
+    left: dict[str, Any] | None, right: dict[str, Any] | None
+) -> dict[str, Any]:
+    if left is None:
+        left = {}
+    if right is None:
+        return left
+
+    # Create a deep copy of the left dict to avoid side-effects
+    new_dict = {}
+    for k, v in left.items():
+        if isinstance(v, dict):
+            new_dict[k] = dict(v)
+            if "logs" in v:
+                new_dict[k]["logs"] = list(v["logs"])
+        elif isinstance(v, list):
+            new_dict[k] = list(v)
+        else:
+            new_dict[k] = v
+
+    # Merge right updates into new_dict
+    for k, v in right.items():
+        if k not in new_dict:
+            if isinstance(v, dict):
+                new_dict[k] = dict(v)
+                if "logs" in v:
+                    new_dict[k]["logs"] = list(v["logs"])
+            elif isinstance(v, list):
+                new_dict[k] = list(v)
+            else:
+                new_dict[k] = v
+        else:
+            existing = new_dict[k]
+            if isinstance(existing, dict) and isinstance(v, dict):
+                merged_sub = dict(existing)
+                for sub_k, sub_v in v.items():
+                    if sub_k == "logs" and "logs" in merged_sub and isinstance(merged_sub["logs"], list) and isinstance(sub_v, list):
+                        merged_sub["logs"] = merged_sub["logs"] + sub_v
+                    else:
+                        merged_sub[sub_k] = sub_v
+                new_dict[k] = merged_sub
+            elif isinstance(existing, list) and isinstance(v, list):
+                new_dict[k] = existing + v
+            else:
+                new_dict[k] = v
+
+    return new_dict
+
 ### TypedDict for the LangGraph State ###
 class GlobalState(TypedDict):
     # Core Routing & Messages
@@ -61,7 +110,7 @@ class GlobalState(TypedDict):
     worker_states: WorkerStates | None
     worker_outputs: dict[str, Any] | None
     validation_results: Annotated[list[ValidationResultItem], append_list]
-    agent_logs: Annotated[list[dict[str, Any]], append_list]
+    agent_logs: Annotated[dict[str, Any], merge_agent_logs]
     deduplication_result: DeduplicationResult | None
 
     # Control flow variables

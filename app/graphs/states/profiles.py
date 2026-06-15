@@ -40,6 +40,10 @@ class ColumnSemanticProfileDetail(BaseModel):
             "Structured text | Boolean | Identifier)."
         )
     )
+    semantic_data_type_reason: str = Field(
+        default="",
+        description="Reasoning explaining semantic_data_type classification."
+    )
     fill_strategies: list[str] = Field(
         default_factory=list,
         description="Pre-assigned null-filling strategies for this column based on its semantic data type."

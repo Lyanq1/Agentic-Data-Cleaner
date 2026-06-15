@@ -263,6 +263,107 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
     },
   });
 
+  const [activeLogTab, setActiveLogTab] = useState<"logs" | "thinking">("logs");
+  const [expandedAccordions, setExpandedAccordions] = useState<Record<string, boolean>>({
+    semantic_profiler: true,
+    input_validator: true,
+    planner: true,
+    validator: true,
+  });
+
+  const toggleAccordion = (key: string) => {
+    setExpandedAccordions((prev) => ({
+      ...prev,
+      [key]: !prev[key],
+    }));
+  };
+
+  const isAgentActive = (agentKey: string) => {
+    if (state?.status === "completed" || state?.status === "failed") return false;
+    const currentStep = state?.current_step;
+    if (agentKey === "semantic_profiler" && currentStep === "semantic_profile") return true;
+    if (agentKey === "input_validator" && currentStep === "input_validation") return true;
+    if (agentKey === "planner" && currentStep === "planning") return true;
+    if (agentKey === "validator" && currentStep === "validation") return true;
+    return false;
+  };
+
+  useEffect(() => {
+    if (!state) return;
+    const currentStep = state.current_step;
+    let activeKey = "";
+    if (currentStep === "semantic_profile") activeKey = "semantic_profiler";
+    else if (currentStep === "input_validation") activeKey = "input_validator";
+    else if (currentStep === "planning") activeKey = "planner";
+    else if (currentStep === "validation") activeKey = "validator";
+
+    if (activeKey) {
+      setExpandedAccordions((prev) => ({
+        ...prev,
+        [activeKey]: true,
+      }));
+    }
+  }, [state?.current_step]);
+
+  const renderFormattedThinking = (text: string) => {
+    if (!text) return <span className="text-slate-500 italic">No thinking recorded.</span>;
+    return (
+      <div className="space-y-2 leading-relaxed text-slate-300 text-[11px] whitespace-pre-wrap font-sans">
+        {text.split('\n').map((line, idx) => {
+          const trimmed = line.trim();
+          if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
+            return (
+              <div key={idx} className="flex gap-2 pl-2 text-slate-300">
+                <span className="text-violet-400 select-none">•</span>
+                <span>{line.substring(line.indexOf(trimmed.charAt(0)) + 2)}</span>
+              </div>
+            );
+          }
+          if (/^\d+\.\s/.test(trimmed)) {
+            const match = trimmed.match(/^(\d+\.)\s(.*)/);
+            if (match) {
+              return (
+                <div key={idx} className="flex gap-2 pl-2 text-slate-300">
+                  <span className="text-violet-400 font-bold select-none">{match[1]}</span>
+                  <span>{match[2]}</span>
+                </div>
+              );
+            }
+          }
+          if (trimmed.startsWith('### ')) {
+            return (
+              <h4 key={idx} className="text-xs font-bold text-violet-355 mt-2 mb-1">
+                {trimmed.substring(4)}
+              </h4>
+            );
+          }
+          if (trimmed.startsWith('## ')) {
+            return (
+              <h3 key={idx} className="text-xs font-bold text-violet-300 mt-3 mb-2 border-b border-slate-800 pb-0.5">
+                {trimmed.substring(3)}
+              </h3>
+            );
+          }
+          if (trimmed.startsWith('# ')) {
+            return (
+              <h2 key={idx} className="text-sm font-bold text-white mt-4 mb-2">
+                {trimmed.substring(2)}
+              </h2>
+            );
+          }
+          return <p key={idx} className="text-slate-300">{line}</p>;
+        })}
+      </div>
+    );
+  };
+
+  const thinkingKeys = [
+    { key: "semantic_profiler", label: "Semantic Profiler Agent", icon: "🔍" },
+    { key: "input_validator", label: "Input Validator Agent", icon: "🛡️" },
+    { key: "planner", label: "Execution Planner Agent", icon: "📋" },
+    { key: "validator", label: "Output Validator Agent", icon: "⚖️" },
+  ];
+
   const { data: checkpoint } = useQuery({
     queryKey: ["hitl-checkpoint", runId],
     queryFn: () => pipelineApi.getCheckpoint(runId),
@@ -608,69 +709,160 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
             className={`flex flex-col min-h-0 min-w-0 transition-all duration-300 ${showLeftPanel ? "lg:w-1/2" : "w-full"} ${showLeftPanel ? "min-h-[320px] lg:min-h-0" : ""} lg:flex-1`}
           >
             <div className="flex-1 bg-card border rounded-xl shadow-sm flex flex-col min-h-[300px] overflow-hidden">
-              <div className="border-b px-4 py-3 bg-muted/30 flex justify-between items-center flex-none">
-                <div className="flex items-center gap-2 text-foreground font-semibold text-sm">
-                  <TextIcon>&gt;_</TextIcon>
-                  Agent Execution Logs
+              <div className="border-b bg-muted/30 flex justify-between items-center flex-none px-2">
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => setActiveLogTab("logs")}
+                    className={`px-3 py-2.5 text-xs font-semibold flex items-center gap-2 border-b-2 transition-all ${
+                      activeLogTab === "logs"
+                        ? "border-primary text-foreground"
+                        : "border-transparent text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    <TextIcon className="w-3.5 h-3.5">&gt;_</TextIcon>
+                    Agent Terminal
+                  </button>
+                  <button
+                    onClick={() => setActiveLogTab("thinking")}
+                    className={`px-3 py-2.5 text-xs font-semibold flex items-center gap-2 border-b-2 transition-all ${
+                      activeLogTab === "thinking"
+                        ? "border-primary text-foreground"
+                        : "border-transparent text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    <span className="text-xs">🧠</span>
+                    LLM Thinking Process
+                  </button>
                 </div>
-                {wsIndicator}
+                <div className="pr-3">
+                  {wsIndicator}
+                </div>
               </div>
               <div
-                ref={terminalRef}
-                className="flex-1 p-4 overflow-auto font-mono text-[11px] leading-relaxed bg-slate-950 text-slate-300 custom-scrollbar"
+                ref={activeLogTab === "logs" ? terminalRef : null}
+                className="flex-1 overflow-auto bg-slate-950 text-slate-300 custom-scrollbar flex flex-col min-h-0"
               >
-                {terminalLogs.length ? (
-                  terminalLogs.map((log: any, i: number) => (
-                    <div
-                      key={i}
-                      className="mb-2 pb-2 border-b border-slate-800/50"
-                    >
-                      <span className="text-blue-400">
-                        [
-                        {log.timestamp
-                          ? new Date(log.timestamp * 1000).toLocaleTimeString(
-                              "en-GB",
-                              { timeZone: "Asia/Bangkok" },
-                            )
-                          : new Date().toLocaleTimeString("en-GB", {
-                              timeZone: "Asia/Bangkok",
-                            })}
-                        ]
-                      </span>{" "}
-                      <span className="text-purple-400 font-semibold">
-                        {log.agent || "system"}:
-                      </span>{" "}
-                      {log.level && log.level !== "info" && (
-                        <span
-                          className={`mr-1 font-semibold uppercase ${
-                            log.level === "error" ? "text-red-400" : "text-amber-300"
-                          }`}
+                {activeLogTab === "logs" ? (
+                  <div className="p-4 font-mono text-[11px] leading-relaxed flex-1">
+                    {terminalLogs.length ? (
+                      terminalLogs.map((log: any, i: number) => (
+                        <div
+                          key={i}
+                          className="mb-2 pb-2 border-b border-slate-800/50"
                         >
-                          [{log.level}]
-                        </span>
-                      )}
-                      <span
-                        className={`break-words whitespace-pre-wrap ${
-                          log.level === "error"
-                            ? "text-red-300"
-                            : log.level === "warning"
-                              ? "text-amber-300"
-                              : "text-slate-200"
-                        }`}
-                      >
-                        {log.message || JSON.stringify(log)}
-                      </span>
-                    </div>
-                  ))
-                ) : (
-                  <div className="text-slate-500 flex items-center gap-2 h-full justify-center">
-                    <SpinnerIcon className="w-4 h-4 opacity-50" />
-                    Waiting for agents to start...
+                          <span className="text-blue-400">
+                            [
+                            {log.timestamp
+                              ? new Date(log.timestamp * 1000).toLocaleTimeString(
+                                  "en-GB",
+                                  { timeZone: "Asia/Bangkok" },
+                                )
+                              : new Date().toLocaleTimeString("en-GB", {
+                                  timeZone: "Asia/Bangkok",
+                                })}
+                            ]
+                          </span>{" "}
+                          <span className="text-purple-400 font-semibold">
+                            {log.agent || "system"}:
+                          </span>{" "}
+                          {log.level && log.level !== "info" && (
+                            <span
+                              className={`mr-1 font-semibold uppercase ${
+                                log.level === "error" ? "text-red-400" : "text-amber-300"
+                              }`}
+                            >
+                              [{log.level}]
+                            </span>
+                          )}
+                          <span
+                            className={`break-words whitespace-pre-wrap ${
+                              log.level === "error"
+                                ? "text-red-300"
+                                : log.level === "warning"
+                                  ? "text-amber-300"
+                                  : "text-slate-200"
+                            }`}
+                          >
+                            {log.message || JSON.stringify(log)}
+                          </span>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="text-slate-500 flex items-center gap-2 h-full justify-center min-h-[200px]">
+                        <SpinnerIcon className="w-4 h-4 opacity-50" />
+                        Waiting for agents to start...
+                      </div>
+                    )}
+                    {state?.error_message && (
+                      <div className="text-red-400 mt-4 border border-red-900/50 bg-red-950/30 p-3 rounded font-sans text-xs">
+                        <strong>Fatal Error:</strong> {state.error_message}
+                      </div>
+                    )}
                   </div>
-                )}
-                {state?.error_message && (
-                  <div className="text-red-400 mt-4 border border-red-900/50 bg-red-950/30 p-3 rounded">
-                    <strong>Fatal Error:</strong> {state.error_message}
+                ) : (
+                  <div className="p-4 space-y-4 flex-1">
+                    <div className="text-slate-400 text-[10px] flex items-center gap-2 bg-slate-900/40 px-3 py-2 rounded-lg border border-slate-800/80 mb-2">
+                      <span>💡</span>
+                      <span>This tab displays the cognitive reasoning and thinking steps of each LLM agent in the workflow.</span>
+                    </div>
+                    {thinkingKeys.map(({ key, label, icon }) => {
+                      const thinking = state?.agent_thinkings?.[key] || "";
+                      const isActive = isAgentActive(key);
+                      const isExpanded = expandedAccordions[key];
+                      const hasThinking = Boolean(thinking);
+
+                      return (
+                        <div key={key} className="border border-slate-800 bg-slate-900/20 rounded-xl overflow-hidden shadow-sm transition-all duration-300 hover:border-slate-700/50">
+                          <button
+                            onClick={() => toggleAccordion(key)}
+                            className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-slate-900/40 transition-colors"
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs select-none">{icon}</span>
+                              <span className="text-xs font-bold text-slate-100">{label}</span>
+                              {isActive && (
+                                <span className="flex items-center gap-1 text-[10px] bg-violet-500/10 text-violet-300 border border-violet-500/20 px-2 py-0.5 rounded-full font-semibold">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-ping" />
+                                  Thinking...
+                                </span>
+                              )}
+                              {!isActive && hasThinking && (
+                                <span className="text-[9px] bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 px-2 py-0.5 rounded-full font-semibold">
+                                  Complete
+                                </span>
+                              )}
+                              {!isActive && !hasThinking && (
+                                <span className="text-[9px] bg-slate-800/40 text-slate-500 border border-slate-800 px-2 py-0.5 rounded-full font-semibold">
+                                  Pending
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-[10px] text-slate-500 font-mono transition-transform duration-200">
+                              {isExpanded ? "▲" : "▼"}
+                            </span>
+                          </button>
+                          
+                          {isExpanded && (
+                            <div className="px-4 pb-4 border-t border-slate-800 pt-3 bg-slate-900/30">
+                              {isActive && !hasThinking ? (
+                                <div className="flex items-center gap-2 py-4 text-slate-400 text-[10px] justify-center font-sans">
+                                  <SpinnerIcon className="w-3.5 h-3.5 text-violet-400 animate-spin" />
+                                  <span>Analyzing dataset context and formulating decisions...</span>
+                                </div>
+                              ) : hasThinking ? (
+                                <div className="border-l-2 border-violet-500/60 pl-3">
+                                  {renderFormattedThinking(thinking)}
+                                </div>
+                              ) : (
+                                <div className="py-3 text-slate-500 text-[10px] italic text-center font-sans">
+                                  Awaiting pipeline execution of this agent.
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>

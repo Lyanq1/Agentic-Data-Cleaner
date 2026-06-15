@@ -33,13 +33,29 @@ For each active issue (that is not already explicitly resolved by the user's ins
 
   Q2_strategy_column_<column_name> (generate individually for columns with null values):
       - Ask the user how they would like to resolve the missing/null values for this specific column.
-      - Provide the pre-assigned options from the column's `fill_strategies` list in the semantic profile.
-      - CRITICAL dtype rule: If the column's actual `dtype` in the Statistical Profile is `string`, `object`, or `mixed` (text data), you MUST NOT include `"fill_mean"` or `"fill_median"` in the options. Instead, you MUST append `"fill_mode"`, `"fill_llm"`, and `"keep_null"` to the options if they are not already present. Mathematical operations like `fill_median` or `fill_mean` will always fail on text strings.
-      - CRITICAL high null-rate rule: If the column's `null_rate` in the Statistical Profile is ≥ 0.70 (70% or more values are null), you MUST include `"drop_column"` as an option. A column that is mostly empty often has no analytical value and removing it is the safest choice.
-      - Always add a custom free-text option: `"Custom strategy (describe in your next prompt)"` as the final option.
-      - State the consequences of each option in the `consequences` dictionary. The consequence for `"drop_column"` should explain that the entire column will be removed from the dataset.
+      - Never include "drop_column" or "fill_llm" in the options list under any circumstances.
+      - Dynamically construct the options based on the column's null statistics (null_rate/null_ratio) in the Statistical Profile and expected_type/semantic_data_type in the Semantic Profile:
+        * If null_ratio = 1.0 (100% null):
+          - Options must ONLY include: "fill_value" (fill with constant value), "keep_null" (only if allow_missing = True), and "Custom strategy (describe in your next prompt)". Mean, median, and mode are not allowed.
+        * If null_ratio < 1.0 (less than 100% null), look up the column's semantic_data_type in the Semantic Profile:
+          - Continuous: "fill_mean", "fill_median", "fill_mode", "fill_value", "keep_null".
+          - Discrete: "fill_mode", "fill_mean" (rounded to integer), "fill_median" (rounded to integer), "fill_value", "keep_null".
+          - Nominal: "fill_mode", "fill_value", "keep_null". (No mean/median allowed).
+          - Ordinal: "fill_mode", "fill_value", "keep_null". (No mean/median allowed).
+          - Temporal: "fill_mean", "fill_median", "fill_value", "keep_null". (No mode allowed).
+          - Free text + Geospatial: "keep_null", "fill_value". (No mean/median/mode allowed).
+          - Structured text:
+            - If allow_missing = False: "drop_row", "fill_value".
+            - If allow_missing = True: "keep_null", "fill_value".
+          - Boolean: "fill_mode", "fill_value", "keep_null".
+          - Identifier:
+            - If allow_missing = False: "drop_row" (filling is prohibited).
+            - If allow_missing = True: "keep_null" (filling is prohibited).
+      - Note: "fill_value" represents fill_constant.
+      - Always append "Custom strategy (describe in your next prompt)" as the final option.
+      - State the consequences of each option in the `consequences` dictionary. Explain that "drop_row" will drop rows containing null values in this column, and "fill_mean"/"fill_median" will impute with mean/median values.
 
-  Q3_semantic_insight / Q4_semantic_insight (Optional):
+  Q3_semantic_insight / Q4_semantic_insight:
       - Surface any other general semantic insights (e.g. disguised missing values potential_dmv, null correlation, MNAR suspicion) that require yes/no confirmation.
 
 **DUPLICATE (if active and not explicitly resolved) — exactly 3 questions:**
@@ -159,14 +175,14 @@ Return a pure JSON object. No markdown fences, no conversational text. Strictly 
       },
       "Q2_strategy_column_<column_name>": {
         "question": "How would you like to handle null values in <column_name>?",
-        "options": ["fill_mean", "fill_median", "fill_mode", "fill_llm", "keep_null", "drop_column", "Custom strategy (describe in your next prompt)"],
+        "options": ["fill_mean", "fill_median", "fill_mode", "fill_value", "keep_null", "drop_row", "Custom strategy (describe in your next prompt)"],
         "consequences": {
-          "fill_mean": "Imputes missing values with column mean (numeric columns only).",
-          "fill_median": "Imputes missing values with column median (numeric columns only).",
-          "fill_mode": "Imputes missing values with the most frequent value (any data type).",
-          "fill_llm": "Uses AI to infer contextually appropriate fill values.",
+          "fill_mean": "Imputes missing values with column mean.",
+          "fill_median": "Imputes missing values with column median.",
+          "fill_mode": "Imputes missing values with the most frequent value.",
+          "fill_value": "Imputes missing values with a constant value.",
           "keep_null": "Retains nulls intentionally; the column is allowed to have missing values.",
-          "drop_column": "Removes the entire column from the dataset. Best when null_rate is very high (≥70%) or the column has no analytical value.",
+          "drop_row": "Drops rows containing null values in this column.",
           "Custom strategy (describe in your next prompt)": "Allows you to describe a custom imputation strategy."
         },
         "answer": null

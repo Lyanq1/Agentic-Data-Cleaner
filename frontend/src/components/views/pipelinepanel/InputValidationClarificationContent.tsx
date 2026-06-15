@@ -20,7 +20,17 @@ export const InputValidationClarificationContent: React.FC<{
   const [customInputs, setCustomInputs] = useState<Record<string, string>>({});
 
   const handleSelectAnswer = (key: string, val: string) => {
-    setAnswers((prev) => ({ ...prev, [key]: val }));
+    setAnswers((prev) => {
+      const nextAnswers = { ...prev, [key]: val };
+      if (key.startsWith("null.Q1_allow_missing_column_")) {
+        const colName = key.substring("null.Q1_allow_missing_column_".length);
+        const q2Key = `null.Q2_strategy_column_${colName}`;
+        if (val === "No" && prev[q2Key] === "keep_null") {
+          delete nextAnswers[q2Key];
+        }
+      }
+      return nextAnswers;
+    });
   };
 
   const handleCustomInputChange = (key: string, val: string) => {
@@ -122,6 +132,15 @@ export const InputValidationClarificationContent: React.FC<{
                     const key = `${cat}.${qKey}`;
                     const selectedVal = answers[key] || "";
                     const isStrategy = q && typeof q === "object" && "options" in q;
+                    let optionsToRender = q.options || [];
+                    if (cat === "null" && qKey.startsWith("Q2_strategy_column_")) {
+                      const colName = qKey.substring("Q2_strategy_column_".length);
+                      const q1Key = `null.Q1_allow_missing_column_${colName}`;
+                      const q1Answer = answers[q1Key];
+                      if (q1Answer === "No") {
+                        optionsToRender = optionsToRender.filter((opt: any) => opt !== "keep_null");
+                      }
+                    }
 
                     return (
                       <div
@@ -135,7 +154,7 @@ export const InputValidationClarificationContent: React.FC<{
                         {isStrategy ? (
                           <div className="space-y-3">
                             <div className="space-y-3 pl-2">
-                              {(q.options || []).map((opt: any) => {
+                              {optionsToRender.map((opt: any) => {
                                 const optionLabel = formatDisplayValue(opt);
                                 const isSelected = selectedVal === optionLabel;
                                 const optConsequence = getOptionConsequence(

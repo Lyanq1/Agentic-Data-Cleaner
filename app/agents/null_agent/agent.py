@@ -29,6 +29,7 @@ from app.graphs.states.global_state import (
 )
 from app.graphs.states.planning import TaskDetail
 from app.graphs.states.workers import WorkerStateDetail
+from app.graphs.states.profiles import SemanticProfile
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +85,18 @@ class NullAgentResult(BaseModel):
     # Columns intentionally left unchanged (leave_as_is strategy)
     skipped_columns: list[str]
     notes: list[str]
+
+
+# ---------------------------------------------------------------------------
+# Exceptions
+# ---------------------------------------------------------------------------
+
+class NullHandlingError(Exception):
+    """Raised when null handling violates constraints or requires HITL."""
+    def __init__(self, message: str, failed_rules: list[str], notes: list[str]) -> None:
+        super().__init__(message)
+        self.failed_rules = failed_rules
+        self.notes = notes
 
 
 # ---------------------------------------------------------------------------
@@ -145,9 +158,17 @@ class NullAgent(BaseAgent):
         before_row_count = len(df)
 
         # ---- Apply all null strategies from plan ---------------------------
-        cleaned_df, dropped_per_column, filled_per_column, dropped_columns, skipped_columns, notes = (
-            self._apply_null_strategies(df, agent_input.planner_task)
-        )
+        try:
+            cleaned_df, dropped_per_column, filled_per_column, dropped_columns, skipped_columns, notes = (
+                self._apply_null_strategies(df, agent_input.planner_task, state.get("semantic_profile"))
+            )
+        except NullHandlingError as exc:
+            return self._failure_update(
+                state,
+                str(exc),
+                failed_rules=exc.failed_rules,
+                notes=exc.notes,
+            )
 
         after_row_count = len(cleaned_df)
         dropped_row_count = before_row_count - after_row_count
@@ -253,6 +274,7 @@ class NullAgent(BaseAgent):
     def _apply_null_strategies(
         df: pd.DataFrame,
         task: TaskDetail | None,
+        semantic_profile: SemanticProfile | None = None,
     ) -> tuple[
         pd.DataFrame,          # cleaned dataframe
         dict[str, int],        # dropped_per_column
@@ -264,13 +286,13 @@ class NullAgent(BaseAgent):
         """Apply per-column null strategies from the Planner's work order.
 
         Strategies handled:
-        - ``drop_column`` : remove the entire column from the dataframe.
+        - ``drop_column`` : remove the entire column from the dataframe (NOT allowed per constraints).
         - ``drop_row``    : drop rows that have a null in *col*.
-        - ``fill_mean``   : impute with column mean (numeric only).
-        - ``fill_median`` : impute with column median (numeric only).
+        - ``fill_mean``   : impute with column mean (numeric or temporal only).
+        - ``fill_median`` : impute with column median (numeric or temporal only).
         - ``fill_mode``   : impute with most-frequent value (any dtype).
         - ``fill_value``  : fill nulls with ``cfg["fill_value"]`` (default ``"Unknown"``).
-        - ``fill_llm``    : LLM-assisted imputation (falls back to mode).
+        - ``fill_llm``    : LLM-assisted imputation (bypassed per constraints).
         - ``leave_as_is`` / ``keep_null``: intentionally keep nulls.
         Any unrecognised strategy is treated as ``leave_as_is``.
         """
@@ -297,66 +319,284 @@ class NullAgent(BaseAgent):
 
         per_column: dict[str, Any] = strategy_dict.get("per_column", {})
 
+        def get_allow_missing(col: str) -> bool:
+            if semantic_profile and col in semantic_profile.columns:
+                return semantic_profile.columns[col].allow_missing
+            if task and task.inputs and task.inputs.column_context and col in task.inputs.column_context:
+                ctx = task.inputs.column_context[col]
+                semantic_dict = {}
+                if hasattr(ctx, "semantic"):
+                    semantic_dict = ctx.semantic
+                elif isinstance(ctx, dict):
+                    semantic_dict = ctx.get("semantic") or {}
+                if isinstance(semantic_dict, dict):
+                    return semantic_dict.get("allow_missing", True)
+                elif hasattr(semantic_dict, "allow_missing"):
+                    return semantic_dict.allow_missing
+            return True
+
+        def get_semantic_data_type(col: str) -> str:
+            if semantic_profile and col in semantic_profile.columns:
+                val = semantic_profile.columns[col].semantic_data_type
+                if val:
+                    return str(val).strip()
+            # Fallback based on expected_type in semantic_profile or task context
+            expected_type = None
+            if semantic_profile and col in semantic_profile.columns:
+                expected_type = semantic_profile.columns[col].expected_type
+            elif task and task.inputs and task.inputs.column_context and col in task.inputs.column_context:
+                ctx = task.inputs.column_context[col]
+                semantic_dict = {}
+                if hasattr(ctx, "semantic"):
+                    semantic_dict = ctx.semantic
+                elif isinstance(ctx, dict):
+                    semantic_dict = ctx.get("semantic") or {}
+                if isinstance(semantic_dict, dict):
+                    expected_type = semantic_dict.get("expected_type")
+                elif hasattr(semantic_dict, "expected_type"):
+                    expected_type = semantic_dict.expected_type
+            
+            if expected_type:
+                expected_type = str(expected_type).lower().strip()
+                if expected_type == "bool":
+                    return "Boolean"
+                if expected_type in ("date", "datetime"):
+                    return "Temporal"
+                if expected_type in ("int", "integer"):
+                    return "Discrete"
+                if expected_type in ("float", "double", "number"):
+                    return "Continuous"
+            
+            # Fallback based on actual pandas dtype
+            dtype = str(cleaned_df[col].dtype).lower()
+            if "bool" in dtype:
+                return "Boolean"
+            if "datetime" in dtype or "time" in dtype:
+                return "Temporal"
+            if "int" in dtype:
+                return "Discrete"
+            if "float" in dtype or "double" in dtype:
+                return "Continuous"
+            
+            return "Nominal"
+
         for col, cfg in per_column.items():
             if not isinstance(cfg, dict):
                 skipped_columns.append(col)
                 continue
-
-            strategy = cfg.get("strategy", "leave_as_is")
 
             if col not in cleaned_df.columns:
                 notes.append(f"Column '{col}' not found in dataframe; skipped.")
                 logger.warning("NullAgent: column '%s' not in dataframe, skipping.", col)
                 continue
 
+            strategy = cfg.get("strategy", "leave_as_is")
+            allow_missing = get_allow_missing(col)
+            semantic_type = get_semantic_data_type(col)
+
+            # System constraint: drop_column is never allowed
             if strategy == "drop_column":
-                cleaned_df = cleaned_df.drop(columns=[col])
-                dropped_columns.append(col)
-                notes.append(f"Dropped entire column '{col}' (strategy='drop_column').")
-                logger.info("NullAgent: dropped column '%s'.", col)
-                continue  # column gone — skip further checks
+                skipped_columns.append(col)
+                notes.append(
+                    f"Column '{col}': strategy='drop_column' is prohibited by system constraints; "
+                    "reverted to leave_as_is."
+                )
+                logger.warning("NullAgent: drop_column prohibited, skipping '%s'.", col)
+                continue
 
-            elif strategy == "drop_row":
-                null_mask = cleaned_df[col].isna()
-                count = int(null_mask.sum())
-                if count > 0:
-                    cleaned_df = cleaned_df[~null_mask].reset_index(drop=True)
-                    dropped_per_column[col] = count
-                    notes.append(f"Dropped {count} row(s) with null in column '{col}'.")
-                    logger.info("NullAgent: dropped %d row(s) for column '%s'.", count, col)
-                else:
+            # System constraint: bypass/ignore fill_llm
+            if strategy == "fill_llm":
+                skipped_columns.append(col)
+                notes.append(
+                    f"Column '{col}': strategy='fill_llm' is ignored/bypassed; "
+                    "reverted to leave_as_is."
+                )
+                logger.info("NullAgent: fill_llm bypassed for column '%s'.", col)
+                continue
+
+            # Calculate actual null statistics for this column
+            null_mask = cleaned_df[col].isna()
+            count = int(null_mask.sum())
+            total = len(cleaned_df)
+            null_ratio = count / total if total > 0 else 0.0
+
+            # If no nulls found at all, skip processing
+            if count == 0:
+                if strategy == "drop_row":
                     dropped_per_column[col] = 0
-                    notes.append(f"Column '{col}': no null rows found; nothing dropped.")
+                elif strategy in ("fill_value", "fill_mean", "fill_median", "fill_mode"):
+                    filled_per_column[col] = 0
+                else:
+                    skipped_columns.append(col)
+                notes.append(f"Column '{col}': no nulls found; nothing modified.")
+                continue
 
-            elif strategy == "fill_value":
-                fill_val = cfg.get("fill_value", "Unknown")
-                null_mask = cleaned_df[col].isna()
-                count = int(null_mask.sum())
-                if count > 0:
+            # Case: null_ratio = 100%
+            if null_ratio == 1.0:
+                fill_val = cfg.get("fill_value")
+                if fill_val is not None:
+                    # fill_constant
                     cleaned_df[col] = cleaned_df[col].fillna(fill_val)
                     filled_per_column[col] = count
                     notes.append(
-                        f"Filled {count} null(s) in column '{col}' with constant '{fill_val}'."
+                        f"Column '{col}' has 100% nulls; filled with user-defined default '{fill_val}'."
+                    )
+                    logger.info("NullAgent: filled 100%% null column '%s' with default '%s'.", col, fill_val)
+                else:
+                    if allow_missing:
+                        # keep_null
+                        skipped_columns.append(col)
+                        notes.append(
+                            f"Column '{col}' has 100% nulls and allow_missing=True; "
+                            "nulls retained (keep_null)."
+                        )
+                        logger.info("NullAgent: keeping 100%% null column '%s' as null.", col)
+                    else:
+                        # HITL - raise NullHandlingError
+                        message = (
+                            f"Column '{col}' has 100% nulls and allow_missing=False, "
+                            "but no default value (fill_value) was defined. Human-in-the-loop (HITL) required."
+                        )
+                        notes.append(message)
+                        raise NullHandlingError(message, ["null_ratio_100_percent_no_default"], notes)
+                continue
+
+            # Coerce strategy based on semantic_type rules
+            coerced_strategy = strategy
+
+            if semantic_type == "Identifier":
+                # Identifier: drop_row or keep_null (never fill)
+                if strategy not in ("drop_row", "leave_as_is", "keep_null", "skip"):
+                    if allow_missing:
+                        coerced_strategy = "leave_as_is"
+                        notes.append(
+                            f"Column '{col}' (Identifier): strategy '{strategy}' coerced to 'leave_as_is' "
+                            "(Identifier columns must never be filled)."
+                        )
+                    else:
+                        coerced_strategy = "drop_row"
+                        notes.append(
+                            f"Column '{col}' (Identifier): strategy '{strategy}' coerced to 'drop_row' "
+                            "(Identifier columns must never be filled)."
+                        )
+            
+            elif semantic_type == "Structured text":
+                # Structured text: drop_row (allow_missing=False) or keep_null (allow_missing=True)
+                target_strat = "leave_as_is" if allow_missing else "drop_row"
+                if strategy != target_strat and (strategy not in ("leave_as_is", "keep_null", "skip") or target_strat != "leave_as_is"):
+                    coerced_strategy = target_strat
+                    notes.append(
+                        f"Column '{col}' (Structured text): strategy '{strategy}' coerced to '{coerced_strategy}' "
+                        f"based on allow_missing={allow_missing}."
+                    )
+            
+            elif semantic_type in ("Free text", "Geospatial", "Free text + Geospatial"):
+                # Free text + Geospatial: keep_null (or fill_value/fill_constant if defined)
+                if strategy == "fill_value":
+                    pass # keep fill_value
+                else:
+                    coerced_strategy = "leave_as_is"
+                    if strategy not in ("leave_as_is", "keep_null", "skip"):
+                        notes.append(
+                            f"Column '{col}' ({semantic_type}): strategy '{strategy}' coerced to 'leave_as_is' "
+                            "unless user-defined fill_value is provided."
+                        )
+
+            elif semantic_type == "Ordinal":
+                # Ordinal: fill_mode only. No mean/median.
+                if strategy in ("fill_mean", "fill_median"):
+                    coerced_strategy = "fill_mode"
+                    notes.append(
+                        f"Column '{col}' (Ordinal): strategy '{strategy}' coerced to 'fill_mode' "
+                        "(mean/median calculations require encoding and are not allowed)."
+                    )
+            
+            elif semantic_type == "Boolean":
+                # Boolean: fill_mode or fill_constant.
+                if strategy in ("fill_mean", "fill_median"):
+                    coerced_strategy = "fill_mode"
+                    notes.append(
+                        f"Column '{col}' (Boolean): strategy '{strategy}' coerced to 'fill_mode' "
+                        "(mean/median calculations are not applicable for Booleans)."
+                    )
+
+            # Process the coerced strategy
+            if coerced_strategy == "drop_row":
+                cleaned_df = cleaned_df[~null_mask].reset_index(drop=True)
+                dropped_per_column[col] = count
+                notes.append(f"Dropped {count} row(s) with null in column '{col}'.")
+                logger.info("NullAgent: dropped %d row(s) for column '%s'.", count, col)
+
+            elif coerced_strategy == "fill_value":
+                fill_val = cfg.get("fill_value", "Unknown")
+                cleaned_df[col] = cleaned_df[col].fillna(fill_val)
+                filled_per_column[col] = count
+                notes.append(
+                    f"Filled {count} null(s) in column '{col}' with constant '{fill_val}'."
+                )
+                logger.info(
+                    "NullAgent: filled %d null(s) in column '%s' with constant '%s'.",
+                    count, col, fill_val,
+                )
+
+            elif coerced_strategy == "fill_mode":
+                mode_series = cleaned_df[col].mode()
+                if mode_series.empty:
+                    skipped_columns.append(col)
+                    notes.append(f"Column '{col}': mode calculation failed; left as-is.")
+                else:
+                    mode_val = mode_series.iloc[0]
+                    cleaned_df[col] = cleaned_df[col].fillna(mode_val)
+                    filled_per_column[col] = count
+                    notes.append(
+                        f"Filled {count} null(s) in column '{col}' with mode='{mode_val}'."
                     )
                     logger.info(
-                        "NullAgent: filled %d null(s) in column '%s' with constant '%s'.",
-                        count, col, fill_val,
+                        "NullAgent: filled %d null(s) in column '%s' with mode='%s'.",
+                        count, col, mode_val,
                     )
-                else:
-                    filled_per_column[col] = 0
-                    notes.append(f"Column '{col}': no nulls found; nothing filled.")
 
-            elif strategy == "fill_mean":
-                null_mask = cleaned_df[col].isna()
-                count = int(null_mask.sum())
-                if count > 0:
+            elif coerced_strategy == "fill_mean":
+                if semantic_type == "Temporal":
                     try:
-                        mean_val = cleaned_df[col].mean()
-                        cleaned_df[col] = cleaned_df[col].fillna(mean_val)
+                        # Convert to datetime and calculate mean timestamp
+                        temp_series = pd.to_datetime(cleaned_df[col], errors="coerce")
+                        numeric_series = temp_series.astype("int64").mask(temp_series.isna())
+                        mean_ts = numeric_series.mean()
+                        fill_val = pd.to_datetime(mean_ts)
+                        
+                        is_dt = pd.api.types.is_datetime64_any_dtype(cleaned_df[col])
+                        if not is_dt:
+                            fill_val = str(fill_val)
+                            
+                        cleaned_df[col] = cleaned_df[col].fillna(fill_val)
                         filled_per_column[col] = count
                         notes.append(
-                            f"Filled {count} null(s) in column '{col}' with mean={mean_val:.4g}."
+                            f"Filled {count} null(s) in Temporal column '{col}' with mean datetime='{fill_val}'."
                         )
+                        logger.info(
+                            "NullAgent: filled %d null(s) in temporal column '%s' with mean='%s'.",
+                            count, col, fill_val,
+                        )
+                    except Exception as exc:
+                        skipped_columns.append(col)
+                        notes.append(f"Column '{col}' (Temporal): fill_mean failed with error '{exc}'; left as-is.")
+                        logger.warning("NullAgent: fill_mean failed for temporal column '%s': %s", col, exc)
+                else:
+                    try:
+                        mean_val = cleaned_df[col].mean()
+                        # Discrete needs rounding
+                        if semantic_type == "Discrete":
+                            mean_val = round(mean_val)
+                            notes.append(
+                                f"Filled {count} null(s) in Discrete column '{col}' with mean={mean_val} (rounded to integer)."
+                            )
+                        else:
+                            notes.append(
+                                f"Filled {count} null(s) in column '{col}' with mean={mean_val:.4g}."
+                            )
+                        cleaned_df[col] = cleaned_df[col].fillna(mean_val)
+                        filled_per_column[col] = count
                         logger.info(
                             "NullAgent: filled %d null(s) in column '%s' with mean=%s.",
                             count, col, mean_val,
@@ -369,21 +609,48 @@ class NullAgent(BaseAgent):
                         )
                         notes.append(message)
                         logger.warning(message)
-                else:
-                    filled_per_column[col] = 0
-                    notes.append(f"Column '{col}': no nulls found; nothing filled.")
 
-            elif strategy == "fill_median":
-                null_mask = cleaned_df[col].isna()
-                count = int(null_mask.sum())
-                if count > 0:
+            elif coerced_strategy == "fill_median":
+                if semantic_type == "Temporal":
                     try:
-                        median_val = cleaned_df[col].median()
-                        cleaned_df[col] = cleaned_df[col].fillna(median_val)
+                        # Convert to datetime and calculate median timestamp
+                        temp_series = pd.to_datetime(cleaned_df[col], errors="coerce")
+                        numeric_series = temp_series.astype("int64").mask(temp_series.isna())
+                        median_ts = numeric_series.median()
+                        fill_val = pd.to_datetime(median_ts)
+                        
+                        is_dt = pd.api.types.is_datetime64_any_dtype(cleaned_df[col])
+                        if not is_dt:
+                            fill_val = str(fill_val)
+                            
+                        cleaned_df[col] = cleaned_df[col].fillna(fill_val)
                         filled_per_column[col] = count
                         notes.append(
-                            f"Filled {count} null(s) in column '{col}' with median={median_val:.4g}."
+                            f"Filled {count} null(s) in Temporal column '{col}' with median datetime='{fill_val}'."
                         )
+                        logger.info(
+                            "NullAgent: filled %d null(s) in temporal column '%s' with median='%s'.",
+                            count, col, fill_val,
+                        )
+                    except Exception as exc:
+                        skipped_columns.append(col)
+                        notes.append(f"Column '{col}' (Temporal): fill_median failed with error '{exc}'; left as-is.")
+                        logger.warning("NullAgent: fill_median failed for temporal column '%s': %s", col, exc)
+                else:
+                    try:
+                        median_val = cleaned_df[col].median()
+                        # Discrete needs rounding
+                        if semantic_type == "Discrete":
+                            median_val = round(median_val)
+                            notes.append(
+                                f"Filled {count} null(s) in Discrete column '{col}' with median={median_val} (rounded to integer)."
+                            )
+                        else:
+                            notes.append(
+                                f"Filled {count} null(s) in column '{col}' with median={median_val:.4g}."
+                            )
+                        cleaned_df[col] = cleaned_df[col].fillna(median_val)
+                        filled_per_column[col] = count
                         logger.info(
                             "NullAgent: filled %d null(s) in column '%s' with median=%s.",
                             count, col, median_val,
@@ -396,86 +663,15 @@ class NullAgent(BaseAgent):
                         )
                         notes.append(message)
                         logger.warning(message)
-                else:
-                    filled_per_column[col] = 0
-                    notes.append(f"Column '{col}': no nulls found; nothing filled.")
 
-            elif strategy == "fill_mode":
-                null_mask = cleaned_df[col].isna()
-                count = int(null_mask.sum())
-                if count > 0:
-                    mode_series = cleaned_df[col].mode()
-                    if mode_series.empty:
-                        # All values are null — mode is undefined. Drop the column entirely
-                        # because a 100%-null column has no imputable or analytical value.
-                        cleaned_df = cleaned_df.drop(columns=[col])
-                        dropped_columns.append(col)
-                        message = (
-                            f"Column '{col}': fill_mode failed (all {count} values are null, "
-                            "no mode can be computed). Auto-dropped the column."
-                        )
-                        notes.append(message)
-                        logger.warning(message)
-                        continue
-                    else:
-                        mode_val = mode_series.iloc[0]
-                        cleaned_df[col] = cleaned_df[col].fillna(mode_val)
-                        filled_per_column[col] = count
-                        notes.append(
-                            f"Filled {count} null(s) in column '{col}' with mode='{mode_val}'."
-                        )
-                        logger.info(
-                            "NullAgent: filled %d null(s) in column '%s' with mode='%s'.",
-                            count, col, mode_val,
-                        )
-                else:
-                    filled_per_column[col] = 0
-                    notes.append(f"Column '{col}': no nulls found; nothing filled.")
-
-            elif strategy == "fill_llm":
-                # LLM-assisted imputation: NullAgent is deterministic, so fall back to mode.
-                # If 100% null (mode undefined), auto-drop like fill_mode.
-                null_mask = cleaned_df[col].isna()
-                count = int(null_mask.sum())
-                if count > 0:
-                    mode_series = cleaned_df[col].mode()
-                    if mode_series.empty:
-                        cleaned_df = cleaned_df.drop(columns=[col])
-                        dropped_columns.append(col)
-                        message = (
-                            f"fill_llm requested for column '{col}' but all {count} values are null "
-                            "(no mode fallback possible). Auto-dropped the column."
-                        )
-                        notes.append(message)
-                        logger.warning(message)
-                        continue
-                    fill_val = mode_series.iloc[0]
-                    cleaned_df[col] = cleaned_df[col].fillna(fill_val)
-                    filled_per_column[col] = count
-                    message = (
-                        f"fill_llm requested for column '{col}' but NullAgent is deterministic; "
-                        f"fell back to mode-fill with '{fill_val}' for {count} null(s)."
-                    )
-                    notes.append(message)
-                    logger.warning(message)
-                else:
-                    filled_per_column[col] = 0
-                    notes.append(f"Column '{col}': no nulls found; nothing filled.")
-
-            elif strategy in ("leave_as_is", "skip", "keep_null"):
+            elif coerced_strategy in ("leave_as_is", "skip", "keep_null"):
                 skipped_columns.append(col)
-                notes.append(f"Column '{col}': strategy='leave_as_is'; nulls retained intentionally.")
+                notes.append(f"Column '{col}': strategy='{coerced_strategy}'; nulls retained intentionally.")
                 logger.info("NullAgent: column '%s' intentionally left with nulls.", col)
 
             else:
-                # Unknown strategy → treat as leave_as_is
                 skipped_columns.append(col)
-                message = (
-                    f"NullAgent: unrecognised strategy '{strategy}' for column '{col}'; "
-                    "leaving as-is."
-                )
-                notes.append(message)
-                logger.warning(message)
+                notes.append(f"NullAgent: strategy '{coerced_strategy}' not handled; leaving as-is.")
 
         return cleaned_df, dropped_per_column, filled_per_column, dropped_columns, skipped_columns, notes
 
