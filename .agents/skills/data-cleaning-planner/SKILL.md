@@ -180,7 +180,8 @@ For each non-skipped task, define the metadata context:
 
 ### **STEP 4 — HANDLING REPLAN & RECOVERY (IF APPLICABLE)**
 
-If the prompt includes a `## REPLAN REQUIRED` section, you are in a recovery loop. The previous plan was rejected by the output validator. You must adapt your plan to fix the `Validation Error`:
+If the prompt includes a `## REPLAN REQUIRED` section, you are in a recovery loop. The previous plan was rejected by the output validator. You must adapt your plan to fix the errors:
+- **Read the Replan Reason and Validation Error**: Understand why the policy failed (e.g., max retries exceeded, or specific rule violations) and the detailed error messages.
 - **Read the Hints**: Carefully follow any `Hints` provided by the validator to adjust the specific task strategy.
 - **Adjust Parameters**: 
   - If deduplication dropped too many rows or failed, reduce the scope, review `primary_keys`, or relax exact matching rules. 
