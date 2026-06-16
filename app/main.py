@@ -79,10 +79,24 @@ async def websocket_pipeline_logs(websocket: WebSocket, run_id: str):
                 await asyncio.sleep(1)
                 continue
 
-            logs = state.get("agent_logs") or []
-            for log in logs[sent_log_count:]:
+            agent_logs_dict = state.get("agent_logs") or {}
+            all_logs = []
+            if isinstance(agent_logs_dict, dict):
+                for task_data in agent_logs_dict.values():
+                    if isinstance(task_data, dict) and "logs" in task_data:
+                        if isinstance(task_data["logs"], list):
+                            all_logs.extend(task_data["logs"])
+                    elif isinstance(task_data, list):
+                        all_logs.extend(task_data)
+            elif isinstance(agent_logs_dict, list):
+                all_logs = agent_logs_dict
+
+            # Sort logs chronologically by timestamp
+            all_logs.sort(key=lambda x: x.get("timestamp") or 0.0)
+
+            for log in all_logs[sent_log_count:]:
                 await websocket.send_json({"event": "log", "log": log})
-            sent_log_count = len(logs)
+            sent_log_count = len(all_logs)
 
             status = _state_status(state)
             if status != last_status:

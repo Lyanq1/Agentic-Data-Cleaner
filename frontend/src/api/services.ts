@@ -115,7 +115,26 @@ export const pipelineApi = {
         : (awaiting_hitl ? 'awaiting_hitl' : 'running');
 
     // Dynamic generation of rich logs to visualize the agent workflow
-    const agent_logs: any[] = Array.isArray(data.agent_logs) ? [...data.agent_logs] : [];
+    const agent_logs: any[] = [];
+    const agent_thinkings: Record<string, string> = {};
+
+    if (data.agent_logs && typeof data.agent_logs === 'object' && !Array.isArray(data.agent_logs)) {
+      for (const [key, val] of Object.entries(data.agent_logs)) {
+        if (val && typeof val === 'object') {
+          const typedVal = val as any;
+          if (Array.isArray(typedVal.logs)) {
+            agent_logs.push(...typedVal.logs);
+          }
+          if (typeof typedVal.thinking === 'string' && typedVal.thinking) {
+            agent_thinkings[key] = typedVal.thinking;
+          }
+        }
+      }
+      agent_logs.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+    } else if (Array.isArray(data.agent_logs)) {
+      agent_logs.push(...data.agent_logs);
+    }
+
     const hasBackendLogs = agent_logs.length > 0;
     if (!hasBackendLogs && data.completed_steps && data.completed_steps.length > 0) {
       if (data.completed_steps.includes('profiling') || data.data_profile) {
@@ -187,6 +206,7 @@ export const pipelineApi = {
         blocking: valResult.status === 'needs_clarification',
       } : null,
       agent_logs,
+      agent_thinkings,
       next_node: nextNodes,
       current_step: data.current_step,
       completed_steps: data.completed_steps || [],
