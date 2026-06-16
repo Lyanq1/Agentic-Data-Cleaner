@@ -37,8 +37,12 @@ The `Input Validation Decision` JSON contains decisions, rules, and answered cla
    - **Allow-Missing Confirmations:**
      * Read the individual yes/no question answers (like `null.Q1_allow_missing_column_<col>.answer` where "Yes" means allow_missing=true, "No" means allow_missing=false).
      * Incorporate these user choices as the source of truth for which columns are allowed to have missing values.
-   - **Semantic Insights:** If the user confirmed a semantic insight (e.g., answering `"yes"` to a check), ensure your plan addresses it.
-   - **Clarification Mapping to Worker Tasks:** For each worker task, find any questions under `clarifications` (e.g., under `duplicate` for `deduplication`, `null` for `null_handling`, and `typecast` for `type_casting`) that have a non-null `answer`. Populate `inputs.relevant_clarifications` with a list of objects containing `question` (the text of the question) and `user_answer` (the user's answer text).
+    - **Typecasting Strategy Answers:**
+      * Read the individual yes/no question answers (like `typecast.Q1_cast_column_<col>.answer` where "Yes" means cast the column, "No" means do NOT cast the column).
+      * If the answer for a column is "No", you MUST NOT include this column in the `type_casting` task's `strategy.per_column`.
+      * If the answer is "Yes" (or if no question was asked because it was already correct), include the column in the `type_casting` task's `strategy.per_column` with its `expected_type` set to the target semantic type.
+    - **Semantic Insights:** If the user confirmed a semantic insight (e.g., answering `"yes"` to a check), ensure your plan addresses it.
+    - **Clarification Mapping to Worker Tasks:** For each worker task, find any questions under `clarifications` (e.g., under `duplicate` for `deduplication`, `null` for `null_handling`, and `typecast` for `type_casting`) that have a non-null `answer`. Populate `inputs.relevant_clarifications` with a list of objects containing `question` (the text of the question) and `user_answer` (the user's answer text).
 
 ---
 
@@ -55,9 +59,10 @@ Determine if cleaning is necessary for each of the three steps:
    - If no null values or disguised missing values exist, set `skip = true` and provide a clear `skip_reason`.
 
 3. **Type Casting (typecast_agent):**
-   - Compare the actual physical type (`dtype`) in the Statistical Profile against the `expected_type` in the Semantic Profile.
-   - If there is any mismatch (e.g. expected type is `datetime` or `int` but stored as `string`/`object`), plan a type casting task.
-   - If all columns match their expected semantic data types, set `skip = true` and provide a clear `skip_reason`.
+   - Compare the actual physical type (`dtype`) in the Statistical Profile against the `expected_type` in the Semantic Profile, while respecting the user's answers under `typecast.Q1_cast_column_<col>.answer`.
+   - If the user answered "No" for a mismatched column, do NOT plan a typecast for that column.
+   - If there is any remaining mismatch where the user agreed to cast ("Yes" or if there was no clarification because it matches), plan a type casting task.
+   - If all columns match or the user said "No" to all typecasting clarifications, set `skip = true` and provide a clear `skip_reason`.
 
 ---
 

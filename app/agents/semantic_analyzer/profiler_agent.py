@@ -6,12 +6,55 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
+import re
 from app.agents.base import BaseAgent
 from app.graphs.states.global_state import GlobalState
 from app.graphs.states.profiles import SemanticProfile, ColumnSemanticProfileDetail
 from app.agents.semantic_analyzer.prompts import COMBINED_PROFILER_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
+
+def analyze_temporal_column(series: pd.Series) -> str:
+    """Analyze a series to determine if it is:
+    - 'time_only': has time patterns, but no date patterns.
+    - 'date_only': has date patterns, but no time patterns.
+    - 'mixed': has both date and time patterns, or some rows have both and some only have time.
+    - 'datetime': all rows have both date and time.
+    - 'other': does not match.
+    """
+    non_null = series.dropna().astype(str).str.strip()
+    if non_null.empty:
+        return "other"
+    
+    # Date patterns: contains YYYY-MM-DD, DD/MM/YYYY, or Month words (Jan, Feb...)
+    date_pat = re.compile(
+        r"\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}[-/]\d{4}|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)",
+        re.IGNORECASE
+    )
+    # Time patterns: contains HH:MM or HH:MM:SS or AM/PM
+    time_pat = re.compile(
+        r"\b\d{1,2}:\d{2}(?::\d{2})?\s*(?:am|pm)?\b|\b\d{1,2}\s*(?:am|pm)\b",
+        re.IGNORECASE
+    )
+    
+    has_date = non_null.apply(lambda x: bool(date_pat.search(x)))
+    has_time = non_null.apply(lambda x: bool(time_pat.search(x)))
+    
+    any_date = has_date.any()
+    any_time = has_time.any()
+    
+    if any_date and not any_time:
+        return "date_only"
+    if any_time and not any_date:
+        return "time_only"
+    if any_date and any_time:
+        all_have_date = has_date.all()
+        if not all_have_date:
+            return "mixed"
+        return "datetime"
+    
+    return "other"
+
 
 class ColumnSemanticProfileOutput(BaseModel):
     column_name: str = Field(description="Exact column name in the dataset.")
@@ -69,11 +112,19 @@ class SemanticProfilerAgent(BaseAgent):
             return {"global_errors": "SemanticProfilerAgent: statistical_profile missing."}
 
         # 1. Read top 10 most popular (frequent) rows in the dataset
+        temporal_analysis = {}
         try:
             if dataset_path.endswith(".parquet"):
                 df = pd.read_parquet(dataset_path)
             else:
                 df = pd.read_csv(dataset_path)
+            
+            for col_name in df.columns:
+                try:
+                    temporal_analysis[col_name] = analyze_temporal_column(df[col_name])
+                except Exception as col_err:
+                    logger.warning(f"Failed to analyze temporal status for {col_name}: {col_err}")
+
             
             # Find the top 10 most frequent (popular) unique row combinations
             # Exclude id columns from grouping to avoid uniqueness biasing popular counts
@@ -187,13 +238,26 @@ class SemanticProfilerAgent(BaseAgent):
         for col in response.columns:
             # Enforce strict mapping of fill strategies based on semantic_data_type
             strategies = col.fill_strategies or map_fill_strategies(col.semantic_data_type)
+            
+            # Apply temporal overrides
+            expected_type = col.expected_type
+            semantic_data_type = col.semantic_data_type or "Nominal"
+            analysis = temporal_analysis.get(col.column_name, "other")
+            if analysis == "time_only":
+                expected_type = "str"
+                semantic_data_type = "Nominal"
+                strategies = ["fill_mode", "fill_llm", "keep_null"]
+            elif analysis == "mixed":
+                expected_type = "datetime"
+                strategies = ["fill_median"]
+                
             columns_dict[col.column_name] = ColumnSemanticProfileDetail(
                 description=col.description,
                 logical_group=col.logical_group,
                 relationships=col.relationships,
                 allow_missing=col.allow_missing,
                 allow_missing_reason=col.allow_missing_reason,
-                expected_type=col.expected_type,
+                expected_type=expected_type,
                 expected_type_reason=col.expected_type_reason,
                 potential_dmv=col.potential_dmv,
                 potential_dmv_reason=col.potential_dmv_reason,
@@ -202,7 +266,7 @@ class SemanticProfilerAgent(BaseAgent):
                 is_error=col.is_error,
                 error_types=col.error_types,
                 error_reason=col.error_reason,
-                semantic_data_type=col.semantic_data_type or "Nominal",
+                semantic_data_type=semantic_data_type,
                 semantic_data_type_reason=col.semantic_data_type_reason or "",
                 fill_strategies=strategies,
             )

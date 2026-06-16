@@ -50,6 +50,8 @@ class DuplicateClarifications(BaseModel):
     Q3_semantic_insight: InsightQuestion | None = None
 
 class TypecastClarifications(BaseModel):
+    model_config = {"extra": "allow"}
+
     Q1_semantic_insight: InsightQuestion | None = None
     Q2_semantic_insight: InsightQuestion | None = None
     Q3_semantic_insight: InsightQuestion | None = None

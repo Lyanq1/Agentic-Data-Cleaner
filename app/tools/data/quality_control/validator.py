@@ -151,17 +151,19 @@ def validate_dataframe(
                     )
                     
             if semantic.expected_str_pattern:
-                pattern = semantic.expected_str_pattern
-                non_nulls = dataframe[column_name].dropna().astype(str)
-                if not non_nulls.empty:
-                    match_mask = non_nulls.str.match(pattern)
-                    if not match_mask.all():
-                        errors.append(
-                            PandasValidationError(
-                                "expected_str_pattern",
-                                f"Column '{column_name}' does not match expected pattern {pattern}.",
+                # Skip pattern check for datetime-like columns to avoid false failures due to format normalization.
+                if not pd.api.types.is_datetime64_any_dtype(dataframe[column_name]):
+                    pattern = semantic.expected_str_pattern
+                    non_nulls = dataframe[column_name].dropna().astype(str)
+                    if not non_nulls.empty:
+                        match_mask = non_nulls.str.match(pattern)
+                        if not match_mask.all():
+                            errors.append(
+                                PandasValidationError(
+                                    "expected_str_pattern",
+                                    f"Column '{column_name}' does not match expected pattern {pattern}.",
+                                )
                             )
-                        )
                         
     if errors:
         raise PandasValidationErrors(errors)

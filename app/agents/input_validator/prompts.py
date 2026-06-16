@@ -51,7 +51,7 @@ For each active issue (that is not already explicitly resolved by the user's ins
           - Identifier:
             - If allow_missing = False: "drop_row" (filling is prohibited).
             - If allow_missing = True: "keep_null" (filling is prohibited).
-      
+      - **Type Casting dependency**: If a column has nulls and its semantic data type is Continuous, Discrete, or Temporal but its physical `dtype` is non-numeric or non-datetime (e.g. "object", "string", "category", "mixed"), you MUST still offer the numeric/temporal filling options ("fill_mean", "fill_median"). However, because the physical data type is currently not suitable for this filling, you MUST also generate a type casting clarification question under the TYPECAST section to confirm casting the column to its appropriate type (e.g., float, int, date, or datetime) to align it with its semantic type. Explain in the consequences that successful filling depends on casting the column first.
       - Note: "fill_value" represents fill_constant.
       - Always append "Custom strategy (describe in your next prompt)" as the final option.
       - State the consequences of each option in the `consequences` dictionary. Explain that "drop_row" will drop rows containing null values in this column, and "fill_mean"/"fill_median" will impute with mean/median values.
@@ -79,25 +79,18 @@ For each active issue (that is not already explicitly resolved by the user's ins
         or duplicate subsets that suggest a specific data ingestion pattern (e.g. daily batch re-import).
       - Ask the user to confirm your interpretation.
 
-**TYPECAST (if active and not explicitly resolved) — exactly 3 questions:**
-  Q1 (Semantic insight 1): Surface the most critical type mismatch found.
-      - Use exp_type vs current dtype to identify the mismatch.
-      - Note: If a column has null values, and its semantic type is Continuous/Discrete but physical type is string/object (making it currently unsuitable for mean/median filling), you MUST prioritize surfacing it here to confirm casting it to the correct numeric type.
-      - Explain what the column semantically represents and why the current type is problematic.
-      - Show type_mismatch_rate and castable_to to give the user a sense of feasibility.
-      - Ask the user to confirm whether the expected type is correct.
+**TYPECAST (if active and not explicitly resolved) — clarifications structured as follows:**
+  Q1_cast_column_<column_name> (generate individually for ALL columns where there is a type mismatch, i.e., the column's expected_type in the Semantic Profile is NOT "str", and its current physical dtype in the Statistical Profile is string/object/mixed):
+      - Ask the user directly whether they want to cast this specific column to its expected semantic type (e.g. int, float, bool, date, or datetime).
+      - Do NOT include an "options" field for this question, so the frontend automatically displays it as a Yes/No option.
+      - The answer field will contain "Yes" or "No".
+      - You MUST generate this question for ALL columns with a type mismatch. Do not skip any column that meets this condition.
 
-  Q2 (Semantic insight 2): Surface a second type issue.
-      - Focus on: mixed_type_rate > 0 columns where values are a mix of types
-        (e.g. "score" column contains both integers and strings like "N/A").
-      - Explain that DMV cleanup must happen before casting, otherwise cast will fail.
+  Q2_semantic_insight (Surface mixed type issues if any):
+      - Focus on: mixed_type_rate > 0 columns where values are a mix of types (e.g. "score" column contains both integers and strings like "N/A").
+      - Explain that DMV (Disguised Missing Value) cleanup must happen before casting, otherwise cast will fail.
       - Ask the user to confirm this interpretation.
-
-  Q3 (Semantic insight 3): Surface a third type issue or a casting consequence.
-      - Focus on: columns where casting would cause data loss
-        (e.g. float → int truncates decimals, object → date drops unparseable rows).
-      - Quantify the impact using type_mismatch_rate (e.g. "5% of rows will be dropped or set to null").
-      - Ask the user to confirm they accept this consequence.
+      - Provide fields: question, insight, confirm, and answer.
 
 ---
 
@@ -221,21 +214,13 @@ Return a pure JSON object. No markdown fences, no conversational text. Strictly 
       }
     },
     "typecast": {
-      "Q1_semantic_insight": {
-        "question": "<question text>",
-        "insight": "<what the semantic profile revealed that stat profile missed>",
-        "confirm": "<yes/no confirmation ask>",
+      "Q1_cast_column_<column_name>": {
+        "question": "Do you want to cast column <column_name> from string/object to <expected_type>?",
         "answer": null
       },
       "Q2_semantic_insight": {
         "question": "<question text>",
-        "insight": "<second semantic insight>",
-        "confirm": "<yes/no confirmation ask>",
-        "answer": null
-      },
-      "Q3_semantic_insight": {
-        "question": "<question text>",
-        "insight": "<third semantic insight>",
+        "insight": "<what the semantic profile revealed>",
         "confirm": "<yes/no confirmation ask>",
         "answer": null
       }

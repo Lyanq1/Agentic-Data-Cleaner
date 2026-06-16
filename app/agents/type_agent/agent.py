@@ -341,6 +341,45 @@ class TypeCastingAgent(BaseAgent):
             notes.append("Casted with pandas nullable BooleanDtype.")
             return result, notes
 
+        if expected_type in ("datetime", "date"):
+            import re
+            from dateutil import parser
+            
+            as_str = series.dropna().astype(str).str.strip()
+            date_pat = re.compile(
+                r"\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}[-/]\d{4}|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)",
+                re.IGNORECASE
+            )
+            time_pat = re.compile(
+                r"\b\d{1,2}:\d{2}(?::\d{2})?\s*(?:am|pm)?\b|\b\d{1,2}\s*(?:am|pm)\b",
+                re.IGNORECASE
+            )
+            
+            has_date = as_str.apply(lambda x: bool(date_pat.search(x)))
+            has_time = as_str.apply(lambda x: bool(time_pat.search(x)))
+            
+            if has_date.any() and has_time.any():
+                first_date_str = None
+                for val in as_str[has_date]:
+                    try:
+                        parsed = parser.parse(val)
+                        first_date_str = parsed.strftime("%Y-%m-%d")
+                        break
+                    except Exception:
+                        pass
+                
+                if first_date_str:
+                    def fill_date(x):
+                        if pd.isna(x):
+                            return x
+                        x_str = str(x).strip()
+                        if not date_pat.search(x_str) and time_pat.search(x_str):
+                            return f"{first_date_str} {x_str}"
+                        return x
+                    
+                    series = series.apply(fill_date)
+                    notes.append(f"Filled missing date components using extracted date '{first_date_str}'.")
+
         if expected_type == "datetime":
             result = pd.to_datetime(series, errors="coerce", format="mixed")
             notes.append("Casted with pandas datetime64 using pandas parser.")

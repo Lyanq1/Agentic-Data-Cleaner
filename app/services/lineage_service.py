@@ -184,14 +184,33 @@ class LineageService:
 
 
 def _json_safe_value(value: Any) -> Any:
-    """Convert pandas missing scalar values to JSONB-safe nulls."""
+    """Convert pandas missing scalar values and non-serializable objects (like Timestamp) to JSONB-safe values."""
+    import numpy as np
+    import pandas as pd
+    from datetime import datetime, date
+
     if isinstance(value, dict):
         return {key: _json_safe_value(item) for key, item in value.items()}
     if isinstance(value, list):
         return [_json_safe_value(item) for item in value]
+    
+    # Handle pandas NA/NaN/Nat
     try:
         if pd.isna(value):
             return None
     except (TypeError, ValueError):
-        return value
+        pass
+
+    # Handle datetime/date/Timestamp
+    if isinstance(value, (datetime, date)) or hasattr(value, "isoformat"):
+        return value.isoformat()
+
+    # Handle numpy types
+    if isinstance(value, np.integer):
+        return int(value)
+    if isinstance(value, np.floating):
+        return float(value)
+    if isinstance(value, np.ndarray):
+        return [_json_safe_value(item) for item in value.tolist()]
+
     return value
