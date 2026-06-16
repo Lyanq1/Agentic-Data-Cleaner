@@ -141,7 +141,7 @@ export const ResolvedValidationPlanPanel: React.FC<{
               onClick={onGeneratePlan}
               disabled={isGenerating}
               aria-busy={isGenerating}
-              className="inline-flex h-11 items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-emerald-600 px-5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-emerald-700 hover:shadow-md disabled:cursor-wait disabled:opacity-70"
+              className="inline-flex h-11 items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-emerald-600 px-5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-emerald-700 hover:shadow-md disabled:cursor-wait disabled:opacity-70 cursor-pointer"
             >
               {isGenerating ? (
                 <>

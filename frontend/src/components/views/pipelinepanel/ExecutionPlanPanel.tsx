@@ -566,7 +566,7 @@ export const ExecutionPlanPanel: React.FC<{
               onClick={onApprove}
               disabled={isApproving}
               aria-busy={isApproving}
-              className="inline-flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-semibold transition-all shadow-md hover:shadow-lg disabled:cursor-wait disabled:opacity-70"
+              className="inline-flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-semibold transition-all shadow-md hover:shadow-lg disabled:cursor-wait disabled:opacity-70 cursor-pointer"
             >
               {isApproving ? (
                 <>

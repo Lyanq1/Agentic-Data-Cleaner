@@ -3,6 +3,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, TYPE_CHECKING
 from app.core.llm_factory import create_llm
+from app.core.callbacks import TokenTrackerCallback
 
 if TYPE_CHECKING:
     from app.graphs.states.global_state import GlobalState
@@ -31,7 +32,8 @@ class BaseAgent(ABC):
     def __init__(self) -> None:
         """Build the LLM and optionally bind tools declared in ``self.tools``."""
 
-        base_llm = create_llm()
+        self.token_tracker = TokenTrackerCallback()
+        base_llm = create_llm(callbacks=[self.token_tracker])
         if self.tools:
             self.llm = base_llm.bind_tools(self.tools)
         else:
