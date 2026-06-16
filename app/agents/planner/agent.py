@@ -39,6 +39,18 @@ class PlannerAgent(BaseAgent):
         user_prompt = state.get("user_prompt", "")
         prior_messages = state.get("messages", [])
 
+        # Output Validation Feedback for Replanning
+        replan_reason = state.get("replan_reason")
+        last_validation_error = state.get("last_validation_error")
+        validation_results = state.get("validation_results", [])
+        latest_replan_hints = {}
+        if validation_results:
+            latest_result = validation_results[-1]
+            if hasattr(latest_result, "replan_hints"):
+                latest_replan_hints = latest_result.replan_hints
+            elif isinstance(latest_result, dict):
+                latest_replan_hints = latest_result.get("replan_hints", {})
+
         # Format profiles safely (handling dict or Pydantic models)
         def to_dict(obj: Any) -> Any:
             if not obj:
@@ -66,6 +78,16 @@ class PlannerAgent(BaseAgent):
             human_content += f"## Dataset Statistical Profile\n```json\n{json.dumps(data_profile_dict, indent=2, default=str)}\n```\n\n"
         if semantic_profile_dict:
             human_content += f"## Dataset Semantic Profile\n```json\n{json.dumps(semantic_profile_dict, indent=2, default=str)}\n```\n"
+
+        if replan_reason or last_validation_error:
+            human_content += f"## REPLAN REQUIRED\nThe previous plan failed validation. You must adjust your plan or strategy based on this feedback to avoid failing again.\n"
+            if replan_reason:
+                human_content += f"- **Replan Reason**: {replan_reason}\n"
+            if last_validation_error:
+                human_content += f"- **Validation Error**: {last_validation_error}\n"
+            if latest_replan_hints:
+                human_content += f"- **Hints**: {json.dumps(latest_replan_hints, indent=2, default=str)}\n"
+            human_content += "\n"
 
         messages = [
             SystemMessage(content=PLANNER_SYSTEM_PROMPT),
