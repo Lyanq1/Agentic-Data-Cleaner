@@ -1,0 +1,17 @@
+{
+  "skill_name": "data-cleaning-planner",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Here is the context for the new dataset. Statistical Profile: 1200 rows, 'age' has 50 nulls (dtype float64), 'user_id' is 98% unique (dtype string). Semantic Profile: 'age' expected_type float, allow_missing false. 'user_id' expected_type str. Input Validation Decision: User says 'Use user_id as primary key and fill age with median'. Please generate the ExecutionPlan.",
+      "expected_output": "A JSON plan with deduplication on user_id, null handling filling 'age' with median, and skipping type casting.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "## REPLAN REQUIRED\nThe previous plan failed validation. You must adjust your plan or strategy based on this feedback to avoid failing again.\n- **Replan Reason**: Validation failed with policy action 'replan'. Errors: ['null_rate_lte']\n- **Validation Error**: Failed Rules: ['null_rate_lte']. Reasoning: The column 'age' still contains 10 nulls after imputation because the median strategy failed on string types.\n- **Hints**: {\"suggested_action\": \"Use fill_mode or drop_row for non-numeric column 'age'\"}\n\nReplan the null handling task for 'age'.",
+      "expected_output": "A JSON plan where null handling for 'age' uses 'fill_mode' or 'drop_row' and updates the rationale explaining the change.",
+      "files": []
+    }
+  ]
+}
