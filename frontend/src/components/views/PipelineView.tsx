@@ -713,7 +713,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
                 <div className="flex items-center gap-1">
                   <button
                     onClick={() => setActiveLogTab("logs")}
-                    className={`px-3 py-2.5 text-xs font-semibold flex items-center gap-2 border-b-2 transition-all ${
+                    className={`px-3 py-2.5 text-xs font-semibold flex items-center gap-2 border-b-2 transition-all cursor-pointer ${
                       activeLogTab === "logs"
                         ? "border-primary text-foreground"
                         : "border-transparent text-muted-foreground hover:text-foreground"
@@ -724,7 +724,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
                   </button>
                   <button
                     onClick={() => setActiveLogTab("thinking")}
-                    className={`px-3 py-2.5 text-xs font-semibold flex items-center gap-2 border-b-2 transition-all ${
+                    className={`px-3 py-2.5 text-xs font-semibold flex items-center gap-2 border-b-2 transition-all cursor-pointer ${
                       activeLogTab === "thinking"
                         ? "border-primary text-foreground"
                         : "border-transparent text-muted-foreground hover:text-foreground"
