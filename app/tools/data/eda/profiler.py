@@ -294,8 +294,13 @@ class StatisticalProfiler:
                     
                     if not format_counts.empty:
                         num_formats = len(format_counts)
-                        if 1 < num_formats <= 15:
-                            for pattern, pct in format_counts.items():
+                        top_format_pct = float(format_counts.iloc[0])
+                        # Flag as formatting anomalies if:
+                        # 1. The total unique format patterns is small (between 2 and 15)
+                        # 2. OR the column is structured (the most frequent pattern covers >= 30%) and has minor outliers.
+                        if (1 < num_formats <= 15) or (num_formats > 15 and top_format_pct >= 0.3):
+                            # Limit the output to the top 15 patterns to avoid frontend color clutter
+                            for pattern, pct in format_counts.head(15).items():
                                 format_anomalies.append({
                                     "format_pattern": str(pattern),
                                     "pct": float(pct)
