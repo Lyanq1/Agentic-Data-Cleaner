@@ -42,7 +42,9 @@ For each active issue (that is not already explicitly resolved by the user's ins
           - Discrete: "fill_mode", "fill_mean" (rounded to integer), "fill_median" (rounded to integer), "fill_value", "keep_null".
           - Nominal: "fill_mode", "fill_value", "keep_null". (No mean/median allowed).
           - Ordinal: "fill_mode", "fill_value", "keep_null". (No mean/median allowed).
-          - Temporal: "fill_mean", "fill_median", "fill_value", "keep_null". (No mode allowed).
+          - Temporal:
+            * If the column's expected_type in the Semantic Profile is "str" (indicating it is time-only and will not be cast to datetime, or should remain string): "fill_mode", "fill_value", "keep_null". (No mean/median allowed, since pure time columns in string format cannot support numeric/datetime mathematical operations).
+            * If the column's expected_type is "date" or "datetime": "fill_median", "fill_value", "keep_null", "fill_mode". (No mean allowed, as mean can distort logical temporal meaning).
           - Free text + Geospatial: "keep_null", "fill_value". (No mean/median/mode allowed).
           - Structured text:
             - If allow_missing = False: "drop_row", "fill_value".
@@ -51,7 +53,7 @@ For each active issue (that is not already explicitly resolved by the user's ins
           - Identifier:
             - If allow_missing = False: "drop_row" (filling is prohibited).
             - If allow_missing = True: "keep_null" (filling is prohibited).
-      - **Type Casting dependency**: If a column has nulls and its semantic data type is Continuous, Discrete, or Temporal but its physical `dtype` is non-numeric or non-datetime (e.g. "object", "string", "category", "mixed"), you MUST still offer the numeric/temporal filling options ("fill_mean", "fill_median"). However, because the physical data type is currently not suitable for this filling, you MUST also generate a type casting clarification question under the TYPECAST section to confirm casting the column to its appropriate type (e.g., float, int, date, or datetime) to align it with its semantic type. Explain in the consequences that successful filling depends on casting the column first.
+      - **Type Casting dependency**: If a column has nulls and its semantic data type is Continuous, Discrete, or Temporal but its physical `dtype` is non-numeric or non-datetime (e.g. "object", "string", "category", "mixed"), you MUST still offer the numeric/temporal filling options ("fill_mean", "fill_median" for Continuous/Discrete, or "fill_median" for Temporal). However, this rule does NOT apply if the column's expected_type is "str" (indicating time-only columns where casting to datetime is bypassed). For such columns, do NOT offer "fill_mean" or "fill_median" because they will not be cast to datetime/numeric and cannot be computed; only offer "fill_mode", "fill_value", and "keep_null". Also, do not generate a type casting clarification question for columns whose expected_type is "str". For columns that are castable, explain in the consequences that successful filling depends on casting the column first.
       - Note: "fill_value" represents fill_constant.
       - Always append "Custom strategy (describe in your next prompt)" as the final option.
       - State the consequences of each option in the `consequences` dictionary. Explain that "drop_row" will drop rows containing null values in this column, and "fill_mean"/"fill_median" will impute with mean/median values.

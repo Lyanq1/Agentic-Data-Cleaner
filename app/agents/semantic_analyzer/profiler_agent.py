@@ -26,9 +26,9 @@ def analyze_temporal_column(series: pd.Series) -> str:
     if non_null.empty:
         return "other"
     
-    # Date patterns: contains YYYY-MM-DD, DD/MM/YYYY, or Month words (Jan, Feb...)
+    # Date patterns: contains YYYY-MM-DD, DD/MM/YYYY, MM/DD/YY, DD-MM-YY, or Month words (Jan, Feb...)
     date_pat = re.compile(
-        r"\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}[-/]\d{4}|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)",
+        r"\b\d{4}[-/]\d{1,2}[-/]\d{1,2}\b|\b\d{1,2}[-/]\d{1,2}[-/]\d{2,4}\b|\b\d{2}[-/]\d{1,2}[-/]\d{1,2}\b|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)",
         re.IGNORECASE
     )
     # Time patterns: contains HH:MM or HH:MM:SS or AM/PM
@@ -54,6 +54,29 @@ def analyze_temporal_column(series: pd.Series) -> str:
         return "datetime"
     
     return "other"
+
+
+def is_time_only_column(column_name: str, description: Optional[str], pattern: Optional[str]) -> bool:
+    # 1. Check regex pattern if available
+    if pattern:
+        pat = pattern.lower()
+        has_time_pat = ":" in pat or "am" in pat or "pm" in pat or "a.m." in pat or "p.m." in pat
+        has_date_pat = "y" in pat or "d{4}" in pat or "year" in pat or "month" in pat or "day" in pat
+        if has_time_pat and not has_date_pat:
+            return True
+            
+    # 2. Check name and description for time keywords vs date keywords
+    name_lower = column_name.lower()
+    desc_lower = (description or "").lower()
+    has_time_name = "time" in name_lower or "hour" in name_lower or "minute" in name_lower or "second" in name_lower
+    has_date_name = "date" in name_lower or "year" in name_lower or "month" in name_lower or "day" in name_lower
+    has_time_desc = "time" in desc_lower or "hour" in desc_lower or "minute" in desc_lower or "second" in desc_lower
+    has_date_desc = "date" in desc_lower or "year" in desc_lower or "month" in desc_lower or "day" in desc_lower
+    
+    if (has_time_name and not has_date_name) or (has_time_desc and not has_date_desc):
+        return True
+        
+    return False
 
 
 class ColumnSemanticProfileOutput(BaseModel):
@@ -243,13 +266,18 @@ class SemanticProfilerAgent(BaseAgent):
             expected_type = col.expected_type
             semantic_data_type = col.semantic_data_type or "Nominal"
             analysis = temporal_analysis.get(col.column_name, "other")
-            if analysis == "time_only":
+            is_time_only = (analysis == "time_only") or (
+                analysis not in ("mixed", "datetime", "date_only")
+                and is_time_only_column(col.column_name, col.description, col.expected_str_pattern)
+            )
+            if is_time_only:
                 expected_type = "str"
-                semantic_data_type = "Nominal"
-                strategies = ["fill_mode", "fill_llm", "keep_null"]
-            elif analysis == "mixed":
+                semantic_data_type = "Temporal"
+                strategies = ["fill_mode", "keep_null"]
+            elif analysis in ("mixed", "date_only", "datetime"):
                 expected_type = "datetime"
-                strategies = ["fill_median"]
+                semantic_data_type = "Temporal"
+                strategies = ["fill_median", "fill_mode", "keep_null"]
                 
             columns_dict[col.column_name] = ColumnSemanticProfileDetail(
                 description=col.description,

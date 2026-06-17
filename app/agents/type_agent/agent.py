@@ -347,7 +347,7 @@ class TypeCastingAgent(BaseAgent):
             
             as_str = series.dropna().astype(str).str.strip()
             date_pat = re.compile(
-                r"\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}[-/]\d{4}|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)",
+                r"\b\d{4}[-/]\d{1,2}[-/]\d{1,2}\b|\b\d{1,2}[-/]\d{1,2}[-/]\d{2,4}\b|\b\d{2}[-/]\d{1,2}[-/]\d{1,2}\b|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)",
                 re.IGNORECASE
             )
             time_pat = re.compile(

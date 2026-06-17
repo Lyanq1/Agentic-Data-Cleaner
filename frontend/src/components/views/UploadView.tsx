@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { pipelineApi } from '../../api/services';
 import { StatisticalProfilePanel } from './StatisticalProfilePanel';
+import { SemanticProfilePanel } from './SemanticProfilePanel';
 import { TablePreviewPanel } from './TablePreviewPanel';
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
@@ -41,7 +42,7 @@ export const UploadView: React.FC<UploadViewProps> = ({
   const [requirements, setRequirements] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [uploadedRunId, setUploadedRunId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'profile' | 'preview'>('profile');
+  const [activeTab, setActiveTab] = useState<'profile' | 'semantic' | 'preview'>('profile');
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -202,12 +203,16 @@ export const UploadView: React.FC<UploadViewProps> = ({
         console.warn('Skipping client-side table preview for this format:', parseErr);
       }
       
-      // Poll getProfile until it is available (since the pipeline runs asynchronously in the background)
+      // Poll getProfile until both statistical and semantic profiles are available
       let profile = null;
-      for (let i = 0; i < 20; i++) {
+      for (let i = 0; i < 40; i++) {
         try {
           profile = await pipelineApi.getProfile(response.run_id);
-          if (profile) break;
+          if (profile && profile.semantic_profile) {
+            break;
+          }
+          // If profile exists but semantic_profile is not ready yet, wait and retry
+          await new Promise(resolve => setTimeout(resolve, 1500));
         } catch (err: any) {
           // If it is 404, wait and retry
           if (err.response?.status === 404) {
@@ -433,6 +438,17 @@ export const UploadView: React.FC<UploadViewProps> = ({
                     <BarChart3 className="h-3.5 w-3.5" />
                     <span>Statistical Profile</span>
                   </button>
+                  <button
+                    onClick={() => setActiveTab('semantic')}
+                    className={`inline-flex items-center space-x-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition-all ${
+                      activeTab === 'semantic' 
+                        ? 'bg-background text-foreground shadow-sm' 
+                        : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    <span className="text-xs">🧠</span>
+                    <span>Semantic Profile</span>
+                  </button>
                   {previewData && (
                     <button
                       onClick={() => setActiveTab('preview')}
@@ -479,6 +495,11 @@ export const UploadView: React.FC<UploadViewProps> = ({
             {/* Profile Tab View */}
             {activeTab === 'profile' && (
               <StatisticalProfilePanel profileData={profileData} />
+            )}
+
+            {/* Semantic Profile Tab View */}
+            {activeTab === 'semantic' && (
+              <SemanticProfilePanel profileData={profileData} />
             )}
 
             {/* Preview Tab View */}
