@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { FileText, ArrowUp, ArrowDown, ListFilter, ChevronDown, Search } from 'lucide-react';
 
 interface FormatAnomaliesPanelProps {
@@ -58,6 +58,15 @@ export const FormatAnomaliesPanel: React.FC<FormatAnomaliesPanelProps> = ({
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
   const [expandedSection, setExpandedSection] = useState<'color' | 'value'>('value');
   const [filterSearchText, setFilterSearchText] = useState('');
+
+  // Reset all filters & sorting states when new previewData is loaded (prevents stale filter conflicts)
+  useEffect(() => {
+    setSelectedFilters({});
+    setSelectedColorFilters({});
+    setSortConfig({ key: '', direction: null });
+    setActiveDropdown(null);
+    setFilterSearchText('');
+  }, [previewData]);
 
   // Helper to open dropdown and auto-expand correct section
   const openDropdown = (col: string) => {
@@ -124,6 +133,14 @@ export const FormatAnomaliesPanel: React.FC<FormatAnomaliesPanelProps> = ({
 
       return { ...prev, [col]: currentSet };
     });
+
+    // Clear color filter on this column to avoid filter conflict
+    setSelectedColorFilters(prev => {
+      if (!prev[col]) return prev;
+      const next = { ...prev };
+      delete next[col];
+      return next;
+    });
   };
 
   // Handle Color Filter Toggle
@@ -144,11 +161,25 @@ export const FormatAnomaliesPanel: React.FC<FormatAnomaliesPanelProps> = ({
 
       return { ...prev, [col]: currentSet };
     });
+
+    // Clear value filter on this column to avoid filter conflict
+    setSelectedFilters(prev => {
+      if (!prev[col]) return prev;
+      const next = { ...prev };
+      delete next[col];
+      return next;
+    });
   };
 
   // Select all / clear all values helper
   const handleSelectAllValues = (col: string) => {
     setSelectedFilters(prev => {
+      const next = { ...prev };
+      delete next[col];
+      return next;
+    });
+    setSelectedColorFilters(prev => {
+      if (!prev[col]) return prev;
       const next = { ...prev };
       delete next[col];
       return next;
@@ -160,6 +191,12 @@ export const FormatAnomaliesPanel: React.FC<FormatAnomaliesPanelProps> = ({
       ...prev,
       [col]: new Set()
     }));
+    setSelectedColorFilters(prev => {
+      if (!prev[col]) return prev;
+      const next = { ...prev };
+      delete next[col];
+      return next;
+    });
   };
 
   // Clear all filters of a column
@@ -181,6 +218,36 @@ export const FormatAnomaliesPanel: React.FC<FormatAnomaliesPanelProps> = ({
     setSelectedFilters({});
     setSelectedColorFilters({});
     setSortConfig({ key: '', direction: null });
+    setActiveDropdown(null);
+    setFilterSearchText('');
+  };
+
+  // Apply filters when OK is clicked, taking search results into account if active
+  const handleOkClick = (col: string) => {
+    if (filterSearchText) {
+      const colUniqueVals = columnUniqueValuesMap[col] || [];
+      const filteredVals = colUniqueVals.filter((v: any) => {
+        const str = v === null || v === undefined ? '(blanks)' : String(v).toLowerCase();
+        return str.includes(filterSearchText.toLowerCase());
+      });
+
+      const checkedFilteredVals = filteredVals.filter(val => {
+        return selectedFilters[col] ? selectedFilters[col].has(val) : true;
+      });
+
+      setSelectedFilters(prev => ({
+        ...prev,
+        [col]: new Set(checkedFilteredVals)
+      }));
+
+      // Clear color filter on this column to avoid filter conflict
+      setSelectedColorFilters(prev => {
+        if (!prev[col]) return prev;
+        const next = { ...prev };
+        delete next[col];
+        return next;
+      });
+    }
     setActiveDropdown(null);
     setFilterSearchText('');
   };
@@ -381,7 +448,7 @@ export const FormatAnomaliesPanel: React.FC<FormatAnomaliesPanelProps> = ({
                                     onClick={() => setExpandedSection(expandedSection === 'color' ? 'value' : 'color')}
                                     className="w-full px-3 py-2 text-left text-[9px] font-bold text-slate-400 hover:text-slate-600 hover:bg-slate-50/50 uppercase tracking-wider flex justify-between items-center bg-slate-50/20"
                                   >
-                                    <span>Filter by Color</span>
+                                    <span>Filter by Color {selectedColorFilters[col] && <span className="text-blue-600 font-semibold text-[8px] normal-case ml-1">(Active)</span>}</span>
                                     <span className="text-[9px] text-slate-400 font-mono">
                                       {expandedSection === 'color' ? '▼' : '▶'}
                                     </span>
@@ -425,7 +492,7 @@ export const FormatAnomaliesPanel: React.FC<FormatAnomaliesPanelProps> = ({
                                   onClick={() => setExpandedSection(expandedSection === 'value' ? 'color' : 'value')}
                                   className="w-full px-3 py-2 text-left text-[9px] font-bold text-slate-400 hover:text-slate-600 hover:bg-slate-50/50 uppercase tracking-wider flex justify-between items-center bg-slate-50/20"
                                 >
-                                  <span>Filter by Value</span>
+                                  <span>Filter by Value {selectedFilters[col] && <span className="text-blue-600 font-semibold text-[8px] normal-case ml-1">(Active)</span>}</span>
                                   <span className="text-[9px] text-slate-400 font-mono">
                                     {expandedSection === 'value' ? '▼' : '▶'}
                                   </span>
@@ -482,10 +549,7 @@ export const FormatAnomaliesPanel: React.FC<FormatAnomaliesPanelProps> = ({
                                   Clear Filter
                                 </button>
                                 <button
-                                  onClick={() => {
-                                    setActiveDropdown(null);
-                                    setFilterSearchText('');
-                                  }}
+                                  onClick={() => handleOkClick(col)}
                                   className="bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-bold px-3 py-1 rounded shadow-sm transition-colors"
                                 >
                                   OK
