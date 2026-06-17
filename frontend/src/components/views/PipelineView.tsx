@@ -9,6 +9,8 @@ import {
   ValidationResolutionPendingPanel,
 } from "./PipelinePanel";
 import { RequirementSummaryPanel } from "./RequirementSummaryPanel";
+import { FormatAnomaliesPanel } from "./pipelinepanel/FormatAnomaliesPanel";
+import { Maximize2, X } from "lucide-react";
 
 interface PipelineViewProps {
   runId: string;
@@ -262,8 +264,32 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
       return status === "completed" || status === "failed" ? false : 3000;
     },
   });
+  const { data: preview } = useQuery({
+    queryKey: ["processed-preview", runId],
+    queryFn: () => pipelineApi.getProcessedPreview(runId, 1000),
+  });
 
-  const [activeLogTab, setActiveLogTab] = useState<"logs" | "thinking">("logs");
+  const [activeLogTab, setActiveLogTab] = useState<"logs" | "thinking" | "anomalies">("anomalies");
+  const [leftPanelWidth, setLeftPanelWidth] = useState(50);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const splitContainerRef = useRef<HTMLDivElement>(null);
+
+  const startResizing = (mouseDownEvent: React.MouseEvent) => {
+    mouseDownEvent.preventDefault();
+    const handleMouseMove = (mouseMoveEvent: MouseEvent) => {
+      if (!splitContainerRef.current) return;
+      const { left, width } = splitContainerRef.current.getBoundingClientRect();
+      const newWidth = ((mouseMoveEvent.clientX - left) / width) * 100;
+      setLeftPanelWidth(Math.min(Math.max(newWidth, 20), 80));
+    };
+    const handleMouseUp = () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+  };
+
   const [expandedAccordions, setExpandedAccordions] = useState<Record<string, boolean>>({
     semantic_profiler: true,
     input_validator: true,
@@ -641,11 +667,15 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
       )}
 
       {/* Split View Container */}
-      <div className="flex-1 min-h-0 flex flex-col lg:flex-row gap-4 lg:gap-6 overflow-y-auto lg:overflow-hidden custom-scrollbar">
+      <div ref={splitContainerRef} className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden custom-scrollbar relative">
         {/* Left Column: HITL Review Panel or Action Plan Summary */}
         {showLeftPanel && (
           <div
-            className={`flex flex-col min-h-0 min-w-0 transition-all duration-300 ${displayLogs ? "lg:w-1/2" : "w-full"} ${displayLogs ? "min-h-[320px] lg:min-h-0" : ""} lg:flex-1`}
+            className={`flex flex-col min-h-0 min-w-0 transition-none ${displayLogs ? "" : "w-full"}`}
+            style={{ 
+              flex: displayLogs ? `0 0 ${leftPanelWidth}%` : '1 1 auto',
+              maxWidth: displayLogs ? `${leftPanelWidth}%` : '100%' 
+            }}
           >
             <div className="flex-1 min-h-0 overflow-y-auto pr-2 pb-4 custom-scrollbar">
               {displayHitl ? (
@@ -703,14 +733,43 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
           </div>
         )}
 
+        {/* Draggable Splitter */}
+        {showLeftPanel && displayLogs && (
+          <div
+            onMouseDown={startResizing}
+            className="hidden lg:flex items-center justify-center w-4 mx-1 cursor-col-resize group flex-none z-10 hover:bg-slate-100 rounded transition-colors"
+          >
+            <div className="w-1 h-12 bg-slate-200 group-hover:bg-slate-400 rounded-full transition-colors" />
+          </div>
+        )}
+
         {/* Right Column: Execution Logs */}
         {displayLogs && (
           <div
-            className={`flex flex-col min-h-0 min-w-0 transition-all duration-300 ${showLeftPanel ? "lg:w-1/2" : "w-full"} ${showLeftPanel ? "min-h-[320px] lg:min-h-0" : ""} lg:flex-1`}
+            className={
+              isModalOpen
+                ? "fixed inset-4 md:inset-10 z-50 bg-white border border-slate-300 rounded-xl shadow-2xl flex flex-col overflow-hidden ring-4 ring-black/20"
+                : "flex flex-col min-h-0 min-w-0 transition-none"
+            }
+            style={!isModalOpen ? { flex: '1 1 auto' } : undefined}
           >
-            <div className="flex-1 bg-card border rounded-xl shadow-sm flex flex-col min-h-[300px] overflow-hidden">
+            {isModalOpen && (
+              <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm -z-10" />
+            )}
+            <div className={`flex-1 bg-card ${!isModalOpen ? "border rounded-xl shadow-sm" : ""} flex flex-col min-h-[300px] overflow-hidden relative`}>
               <div className="border-b bg-muted/30 flex justify-between items-center flex-none px-2">
                 <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => setActiveLogTab("anomalies")}
+                    className={`px-3 py-2.5 text-xs font-semibold flex items-center gap-2 border-b-2 transition-all cursor-pointer ${
+                      activeLogTab === "anomalies"
+                        ? "border-primary text-foreground"
+                        : "border-transparent text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    <span className="text-xs">⚠️</span>
+                    Format Anomalies
+                  </button>
                   <button
                     onClick={() => setActiveLogTab("logs")}
                     className={`px-3 py-2.5 text-xs font-semibold flex items-center gap-2 border-b-2 transition-all cursor-pointer ${
@@ -734,8 +793,15 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
                     LLM Thinking Process
                   </button>
                 </div>
-                <div className="pr-3">
+                <div className="flex items-center gap-2 pr-2">
                   {wsIndicator}
+                  <button
+                    onClick={() => setIsModalOpen(!isModalOpen)}
+                    className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-200 rounded transition-colors"
+                    title={isModalOpen ? "Exit Fullscreen" : "Fullscreen"}
+                  >
+                    {isModalOpen ? <X className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+                  </button>
                 </div>
               </div>
               <div
@@ -746,7 +812,9 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
                     : "bg-white text-slate-800"
                 }`}
               >
-                {activeLogTab === "logs" ? (
+                {activeLogTab === "anomalies" ? (
+                  <FormatAnomaliesPanel dataProfile={state?.data_profile} previewData={preview} />
+                ) : activeLogTab === "logs" ? (
                   <div className="p-4 font-mono text-[11px] leading-relaxed flex-1">
                     {terminalLogs.length ? (
                       terminalLogs.map((log: any, i: number) => (
