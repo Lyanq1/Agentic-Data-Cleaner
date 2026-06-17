@@ -1,14 +1,15 @@
 """Planner Agent — copy and customize to create a new agent."""
 import json
 import logging
+from pathlib import Path
 from typing import Any
 from langchain_core.messages import AIMessage, SystemMessage, HumanMessage
 
 from app.agents.base import BaseAgent
 from app.agents.registry import AgentRegistry
-from app.agents.planner.prompts import PLANNER_SYSTEM_PROMPT
 from datetime import datetime
 from app.graphs.states.global_state import GlobalState
+
 from app.graphs.states.planning import ExecutionPlan, TaskDetail, TaskDetailWrapper, PlanMetadata, GlobalConstraints
 
 logger = logging.getLogger(__name__)
@@ -89,8 +90,26 @@ class PlannerAgent(BaseAgent):
                 human_content += f"- **Hints**: {json.dumps(latest_replan_hints, indent=2, default=str)}\n"
             human_content += "\n"
 
+        # Load the planner skill file dynamically
+        skill_path = Path.cwd() / ".agents" / "skills" / "data-cleaning-planner" / "SKILL.md"
+        if skill_path.exists():
+            with open(skill_path, "r", encoding="utf-8") as f:
+                content = f.read()
+                # Strip YAML frontmatter if present
+                if content.startswith("---"):
+                    parts = content.split("---", 2)
+                    if len(parts) >= 3:
+                        planner_system_prompt = parts[2].strip()
+                    else:
+                        planner_system_prompt = content
+                else:
+                    planner_system_prompt = content
+        else:
+            logger.warning(f"PlannerAgent: Skill file not found at {skill_path}. Falling back to default prompt.")
+            from app.agents.planner.prompts import PLANNER_SYSTEM_PROMPT as planner_system_prompt
+
         messages = [
-            SystemMessage(content=PLANNER_SYSTEM_PROMPT),
+            SystemMessage(content=planner_system_prompt),
             HumanMessage(content=human_content),
         ]
 

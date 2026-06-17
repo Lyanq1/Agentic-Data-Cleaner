@@ -275,10 +275,7 @@ export const ExecutionPlanPanel: React.FC<{
               <span className="text-muted-foreground">Version:</span>{" "}
               {metadata.plan_version}
             </div>
-            <div>
-              <span className="text-muted-foreground">Created At:</span>{" "}
-              {formatToGmt7(metadata.created_at)}
-            </div>
+            
           </div>
           <div className="rounded-xl border bg-white p-4 shadow-sm text-xs space-y-2">
             <h4 className="font-bold text-foreground uppercase tracking-wider mb-2">

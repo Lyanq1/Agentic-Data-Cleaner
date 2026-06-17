@@ -165,7 +165,7 @@ export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) =>
   });
   const { data: preview } = useQuery({
     queryKey: ['processed-preview', runId],
-    queryFn: () => pipelineApi.getProcessedPreview(runId, 50),
+    queryFn: () => pipelineApi.getProcessedPreview(runId, 500),
   });
 
   const rowsProcessed = useMemo(() => getRowsProcessed(report), [report]);
@@ -184,7 +184,7 @@ export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) =>
   /** Outer fills main; inner scroll region gets flex-1 min-h-0 so it scrolls under h-screen + overflow-hidden. */
   return (
     <div className="w-full max-w-4xl mx-auto flex flex-col flex-1 min-h-0 text-left self-center">
-      <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain pt-8 pb-4 custom-scrollbar">
+      <div className="flex-1 min-h-0 overflow-y-auto pt-8 pb-4 hidden-scrollbar">
         {isLoading ? (
           <div className="text-center py-12 text-muted-foreground">Loading report...</div>
         ) : error ? (
@@ -437,9 +437,6 @@ export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) =>
                         Showing {preview.preview_count?.toLocaleString?.() ?? preview.rows?.length ?? 0} of {preview.row_count?.toLocaleString?.() ?? 0} rows from the latest processed version.
                       </p>
                     </div>
-                    <span className="text-[10px] uppercase tracking-wider font-semibold rounded-full border bg-slate-50 text-slate-600 px-2.5 py-1">
-                      Parquet export ready
-                    </span>
                   </div>
                   <div className="overflow-auto max-h-[360px]">
                     <table className="w-full min-w-[48rem] border-separate border-spacing-0 text-xs">

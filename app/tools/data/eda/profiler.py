@@ -278,6 +278,33 @@ class StatisticalProfiler:
                         "count": int(other_count),
                         "pct": round(float(other_count / total_rows), 4) if total_rows > 0 else 0.0
                     })
+                    
+                format_anomalies = []
+                if is_string_like and len(non_null) > 0:
+                    import re
+                    def abstract_format(v):
+                        s = str(v)
+                        s = re.sub(r'[0-9]', 'D', s)
+                        s = re.sub(r'[a-zA-Z]', 'A', s)
+                        return s
+                    
+                    sample_series = non_null.head(10000)
+                    formats = sample_series.map(abstract_format)
+                    format_counts = formats.value_counts(normalize=True)
+                    
+                    if not format_counts.empty:
+                        num_formats = len(format_counts)
+                        top_format_pct = float(format_counts.iloc[0])
+                        # Flag as formatting anomalies if:
+                        # 1. The total unique format patterns is small (between 2 and 15)
+                        # 2. OR the column is structured (the most frequent pattern covers >= 30%) and has minor outliers.
+                        if (1 < num_formats <= 15) or (num_formats > 15 and top_format_pct >= 0.3):
+                            # Limit the output to the top 15 patterns to avoid frontend color clutter
+                            for pattern, pct in format_counts.head(15).items():
+                                format_anomalies.append({
+                                    "format_pattern": str(pattern),
+                                    "pct": float(pct)
+                                })
 
                 categorical_stats = {
                     "values_count": len(non_null),
@@ -286,9 +313,12 @@ class StatisticalProfiler:
                     "missing_pct": round(null_rate, 4),
                     "distinct_count": unique_count,
                     "distinct_pct": round(unique_ratio, 4),
-                    "frequencies": frequencies
+                    "frequencies": frequencies,
+                    "format_anomalies": format_anomalies
                 }
-            except Exception:
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Error computing categorical stats for {col}: {e}")
                 pass
 
         return ColumnStat(

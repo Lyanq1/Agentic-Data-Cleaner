@@ -199,7 +199,7 @@ async def api_preview_processed_dataset(run_id: str, limit: int = 50):
             "preview_count": 0,
         }
 
-    safe_limit = max(1, min(limit, 200))
+    safe_limit = max(1, min(limit, 1000))
     preview_df = df.head(safe_limit).where(df.head(safe_limit).notna(), None)
     rows = [
         {str(key): _json_safe_preview_value(value) for key, value in row.items()}
@@ -289,6 +289,7 @@ async def api_resolve_pipeline(
         user_prompt=state.get("user_prompt", ""),
         original_filename=original_filename,
         data_schema=state.get("dataset_schema"),
+        clean_dataset_path=state.get("clean_dataset_path"),
     )
     
     return {
