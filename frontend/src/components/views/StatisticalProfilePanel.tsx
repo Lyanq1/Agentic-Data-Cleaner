@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { Database, Binary, Hash, Columns, Copy, Key, AlertTriangle, ListFilter } from 'lucide-react';
+import React, { useMemo, useState, useEffect } from 'react';
+import { Database, Binary, Hash, Columns, Copy, Key, AlertTriangle, ListFilter, ArrowUp } from 'lucide-react';
 import { formatDisplayValue } from './pipelinepanel/utils';
 
 interface StatisticalProfilePanelProps {
@@ -151,6 +151,39 @@ export const StatisticalProfilePanel: React.FC<StatisticalProfilePanelProps> = (
 
   const semanticProfile = profileData.semantic_profile;
   const [showThinking, setShowThinking] = useState(false);
+  const [showScrollTop, setShowScrollTop] = useState(false);
+
+  useEffect(() => {
+    const handleScroll = (e: any) => {
+      const target = e.target;
+      if (target && target.scrollTop !== undefined) {
+         if (target.scrollTop > 300) {
+           setShowScrollTop(true);
+         } else {
+           setShowScrollTop(false);
+         }
+      }
+    };
+    
+    window.addEventListener('scroll', handleScroll, true);
+    return () => window.removeEventListener('scroll', handleScroll, true);
+  }, []);
+
+  const scrollToTop = () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    const el = document.getElementById('statistical-profile-top');
+    if (el) {
+      let parent = el.parentElement;
+      while (parent) {
+        const style = window.getComputedStyle(parent);
+        if (style.overflowY === 'auto' || style.overflowY === 'scroll') {
+          parent.scrollTo({ top: 0, behavior: 'smooth' });
+          break;
+        }
+        parent = parent.parentElement;
+      }
+    }
+  };
 
   const logicalGroups = useMemo(() => {
     const groups: Record<string, string[]> = {};
@@ -171,7 +204,18 @@ export const StatisticalProfilePanel: React.FC<StatisticalProfilePanelProps> = (
     : Object.values(profileData.columns || {});
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 relative" id="statistical-profile-top">
+      {/* Scroll to Top Widget */}
+      {showScrollTop && (
+        <button
+          onClick={scrollToTop}
+          className="fixed bottom-8 right-8 z-50 p-3 rounded-full bg-blue-600 text-white shadow-lg hover:bg-blue-700 transition-all duration-300 hover:scale-110 flex items-center justify-center group"
+          title="Scroll to top"
+        >
+          <ArrowUp className="w-5 h-5 group-hover:-translate-y-1 transition-transform" />
+        </button>
+      )}
+
       {/* Dataset Profile Overview */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-card rounded-xl border border-slate-200 p-5 shadow-sm text-left flex items-center space-x-4">

@@ -184,7 +184,7 @@ export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) =>
   /** Outer fills main; inner scroll region gets flex-1 min-h-0 so it scrolls under h-screen + overflow-hidden. */
   return (
     <div className="w-full max-w-4xl mx-auto flex flex-col flex-1 min-h-0 text-left self-center">
-      <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain pt-8 pb-4 custom-scrollbar">
+      <div className="flex-1 min-h-0 overflow-y-auto pt-8 pb-4 hidden-scrollbar">
         {isLoading ? (
           <div className="text-center py-12 text-muted-foreground">Loading report...</div>
         ) : error ? (

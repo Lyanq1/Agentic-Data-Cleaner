@@ -306,15 +306,15 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
   }, [state?.current_step]);
 
   const renderFormattedThinking = (text: string) => {
-    if (!text) return <span className="text-slate-500 italic">No thinking recorded.</span>;
+    if (!text) return <span className="text-slate-400 italic">No thinking recorded.</span>;
     return (
-      <div className="space-y-2 leading-relaxed text-slate-300 text-[11px] whitespace-pre-wrap font-sans">
+      <div className="space-y-2 leading-relaxed text-slate-700 text-sm whitespace-pre-wrap font-sans">
         {text.split('\n').map((line, idx) => {
           const trimmed = line.trim();
           if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
             return (
-              <div key={idx} className="flex gap-2 pl-2 text-slate-300">
-                <span className="text-violet-400 select-none">•</span>
+              <div key={idx} className="flex gap-2 pl-2 text-slate-700">
+                <span className="text-violet-600 select-none">•</span>
                 <span>{line.substring(line.indexOf(trimmed.charAt(0)) + 2)}</span>
               </div>
             );
@@ -323,8 +323,8 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
             const match = trimmed.match(/^(\d+\.)\s(.*)/);
             if (match) {
               return (
-                <div key={idx} className="flex gap-2 pl-2 text-slate-300">
-                  <span className="text-violet-400 font-bold select-none">{match[1]}</span>
+                <div key={idx} className="flex gap-2 pl-2 text-slate-700">
+                  <span className="text-violet-600 font-bold select-none">{match[1]}</span>
                   <span>{match[2]}</span>
                 </div>
               );
@@ -332,26 +332,26 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
           }
           if (trimmed.startsWith('### ')) {
             return (
-              <h4 key={idx} className="text-xs font-bold text-violet-355 mt-2 mb-1">
+              <h4 key={idx} className="text-xs font-bold text-violet-700 mt-2 mb-1">
                 {trimmed.substring(4)}
               </h4>
             );
           }
           if (trimmed.startsWith('## ')) {
             return (
-              <h3 key={idx} className="text-xs font-bold text-violet-300 mt-3 mb-2 border-b border-slate-800 pb-0.5">
+              <h3 key={idx} className="text-xs font-bold text-violet-700 mt-3 mb-2 border-b border-slate-200 pb-0.5">
                 {trimmed.substring(3)}
               </h3>
             );
           }
           if (trimmed.startsWith('# ')) {
             return (
-              <h2 key={idx} className="text-sm font-bold text-white mt-4 mb-2">
+              <h2 key={idx} className="text-sm font-bold text-slate-900 mt-4 mb-2">
                 {trimmed.substring(2)}
               </h2>
             );
           }
-          return <p key={idx} className="text-slate-300">{line}</p>;
+          return <p key={idx} className="text-slate-700">{line}</p>;
         })}
       </div>
     );
@@ -740,7 +740,11 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
               </div>
               <div
                 ref={activeLogTab === "logs" ? terminalRef : null}
-                className="flex-1 overflow-auto bg-slate-950 text-slate-300 custom-scrollbar flex flex-col min-h-0"
+                className={`flex-1 overflow-auto custom-scrollbar flex flex-col min-h-0 ${
+                  activeLogTab === "logs" 
+                    ? "bg-slate-950 text-slate-300" 
+                    : "bg-white text-slate-800"
+                }`}
               >
                 {activeLogTab === "logs" ? (
                   <div className="p-4 font-mono text-[11px] leading-relaxed flex-1">
@@ -801,10 +805,6 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
                   </div>
                 ) : (
                   <div className="p-4 space-y-4 flex-1">
-                    <div className="text-slate-400 text-[10px] flex items-center gap-2 bg-slate-900/40 px-3 py-2 rounded-lg border border-slate-800/80 mb-2">
-                      <span>💡</span>
-                      <span>This tab displays the cognitive reasoning and thinking steps of each LLM agent in the workflow.</span>
-                    </div>
                     {thinkingKeys.map(({ key, label, icon }) => {
                       const thinking = state?.agent_thinkings?.[key] || "";
                       const isActive = isAgentActive(key);
@@ -812,49 +812,49 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
                       const hasThinking = Boolean(thinking);
 
                       return (
-                        <div key={key} className="border border-slate-800 bg-slate-900/20 rounded-xl overflow-hidden shadow-sm transition-all duration-300 hover:border-slate-700/50">
+                        <div key={key} className="border border-slate-200 bg-white rounded-xl overflow-hidden shadow-sm transition-all duration-300 hover:border-slate-300">
                           <button
                             onClick={() => toggleAccordion(key)}
-                            className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-slate-900/40 transition-colors"
+                            className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-slate-50 transition-colors"
                           >
                             <div className="flex items-center gap-2">
                               <span className="text-xs select-none">{icon}</span>
-                              <span className="text-xs font-bold text-slate-100">{label}</span>
+                              <span className="text-sm font-bold text-slate-800">{label}</span>
                               {isActive && (
-                                <span className="flex items-center gap-1 text-[10px] bg-violet-500/10 text-violet-300 border border-violet-500/20 px-2 py-0.5 rounded-full font-semibold">
-                                  <span className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-ping" />
+                                <span className="flex items-center gap-1 text-[10px] bg-violet-100 text-violet-700 border border-violet-200 px-2 py-0.5 rounded-full font-semibold">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-violet-500 animate-ping" />
                                   Thinking...
                                 </span>
                               )}
                               {!isActive && hasThinking && (
-                                <span className="text-[9px] bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 px-2 py-0.5 rounded-full font-semibold">
+                                <span className="text-[9px] bg-emerald-100 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full font-semibold">
                                   Complete
                                 </span>
                               )}
                               {!isActive && !hasThinking && (
-                                <span className="text-[9px] bg-slate-800/40 text-slate-500 border border-slate-800 px-2 py-0.5 rounded-full font-semibold">
+                                <span className="text-[9px] bg-slate-100 text-slate-500 border border-slate-200 px-2 py-0.5 rounded-full font-semibold">
                                   Pending
                                 </span>
                               )}
                             </div>
-                            <span className="text-[10px] text-slate-500 font-mono transition-transform duration-200">
+                            <span className="text-[10px] text-slate-400 font-mono transition-transform duration-200">
                               {isExpanded ? "▲" : "▼"}
                             </span>
                           </button>
                           
                           {isExpanded && (
-                            <div className="px-4 pb-4 border-t border-slate-800 pt-3 bg-slate-900/30">
+                            <div className="px-4 pb-4 border-t border-slate-100 pt-3 bg-slate-50/50">
                               {isActive && !hasThinking ? (
-                                <div className="flex items-center gap-2 py-4 text-slate-400 text-[10px] justify-center font-sans">
-                                  <SpinnerIcon className="w-3.5 h-3.5 text-violet-400 animate-spin" />
+                                <div className="flex items-center gap-2 py-4 text-slate-500 justify-center font-sans">
+                                  <SpinnerIcon className="w-3.5 h-3.5 text-violet-500 animate-spin" />
                                   <span>Analyzing dataset context and formulating decisions...</span>
                                 </div>
                               ) : hasThinking ? (
-                                <div className="border-l-2 border-violet-500/60 pl-3">
+                                <div className="border-l-2 border-violet-400 pl-3">
                                   {renderFormattedThinking(thinking)}
                                 </div>
                               ) : (
-                                <div className="py-3 text-slate-500 text-[10px] italic text-center font-sans">
+                                <div className="py-3 text-slate-400 text-[10px] italic text-center font-sans">
                                   Awaiting pipeline execution of this agent.
                                 </div>
                               )}
