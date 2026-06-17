@@ -165,7 +165,7 @@ export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) =>
   });
   const { data: preview } = useQuery({
     queryKey: ['processed-preview', runId],
-    queryFn: () => pipelineApi.getProcessedPreview(runId, 50),
+    queryFn: () => pipelineApi.getProcessedPreview(runId, 500),
   });
 
   const rowsProcessed = useMemo(() => getRowsProcessed(report), [report]);
@@ -437,9 +437,6 @@ export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) =>
                         Showing {preview.preview_count?.toLocaleString?.() ?? preview.rows?.length ?? 0} of {preview.row_count?.toLocaleString?.() ?? 0} rows from the latest processed version.
                       </p>
                     </div>
-                    <span className="text-[10px] uppercase tracking-wider font-semibold rounded-full border bg-slate-50 text-slate-600 px-2.5 py-1">
-                      Parquet export ready
-                    </span>
                   </div>
                   <div className="overflow-auto max-h-[360px]">
                     <table className="w-full min-w-[48rem] border-separate border-spacing-0 text-xs">

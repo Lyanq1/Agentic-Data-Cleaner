@@ -289,6 +289,7 @@ async def api_resolve_pipeline(
         user_prompt=state.get("user_prompt", ""),
         original_filename=original_filename,
         data_schema=state.get("dataset_schema"),
+        clean_dataset_path=state.get("clean_dataset_path"),
     )
     
     return {

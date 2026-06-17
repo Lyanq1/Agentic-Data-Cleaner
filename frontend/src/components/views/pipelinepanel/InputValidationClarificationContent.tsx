@@ -186,7 +186,7 @@ export const InputValidationClarificationContent: React.FC<{
                                       </span>
                                     </label>
                                     {isSelected && optConsequence && (
-                                      <div className="ml-6 p-3 rounded-lg bg-indigo-50/40 border border-indigo-100/50 text-xs text-indigo-950/90 leading-relaxed flex flex-col gap-2 animate-fadeIn">
+                                      <div className="ml-6 p-3 rounded-lg bg-indigo-50/40 border border-indigo-100/50 text-md text-indigo-950/90 leading-relaxed flex flex-col gap-2 animate-fadeIn">
                                         <div className="flex items-start gap-2">
                                           <TextIcon className="w-4 h-4 text-indigo-500 shrink-0 mt-0.5">
                                             !
@@ -222,7 +222,7 @@ export const InputValidationClarificationContent: React.FC<{
                         ) : (
                           <div className="space-y-3">
                             {q.insight && (
-                              <div className="text-xs bg-muted/40 p-2.5 rounded border border-border/40 text-muted-foreground italic mb-2 leading-relaxed">
+                              <div className="text-sm bg-muted/40 p-2.5 rounded border border-border/40 text-muted-foreground italic mb-2 leading-relaxed">
                                 💡 {formatDisplayValue(q.insight)}
                               </div>
                             )}
