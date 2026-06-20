@@ -127,7 +127,7 @@ function App() {
             </a>
             <div className="flex items-center gap-3">
               <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-violet-100 text-violet-800 border border-violet-200">
-                ⚡ Mass Ingestion Console
+              Mass Ingestion Console
               </span>
               <a
                 href="/"
