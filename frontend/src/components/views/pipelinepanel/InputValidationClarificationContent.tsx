@@ -14,7 +14,7 @@ export const InputValidationClarificationContent: React.FC<{
   isPending: boolean;
 }> = ({ payload, isAwaiting, onDecision, isPending }) => {
   const clarifications = payload.clarifications || {};
-  const categories = ["null", "duplicate", "typecast"] as const;
+  const categories = ["typecast", "null", "duplicate"] as const;
 
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [customInputs, setCustomInputs] = useState<Record<string, string>>({});
@@ -165,10 +165,39 @@ export const InputValidationClarificationContent: React.FC<{
                     let optionsToRender = q.options || [];
                     if (cat === "null" && qKey.startsWith("Q2_strategy_column_")) {
                       const colName = qKey.substring("Q2_strategy_column_".length);
+                      
+                      // 1. Filter out keep_null if allow_missing is answered "No"
                       const q1Key = `null.Q1_allow_missing_column_${colName}`;
                       const q1Answer = answers[q1Key];
                       if (q1Answer === "No") {
                         optionsToRender = optionsToRender.filter((opt: any) => opt !== "keep_null");
+                      }
+
+                      // 2. Filter or add options based on Type Cast decision
+                      const castKey = `typecast.Q1_cast_column_${colName}`;
+                      const castAnswer = answers[castKey];
+                      
+                      const typecastData = clarifications.typecast || {};
+                      const hasCastQuestion = `Q1_cast_column_${colName}` in typecastData;
+                      
+                      if (hasCastQuestion) {
+                        let expectedType = "str";
+                        const semProfile = payload.semantic_profile || {};
+                        const colDetail = semProfile.columns?.[colName];
+                        if (colDetail) {
+                          expectedType = colDetail.expected_type || "str";
+                        }
+
+                        if (castAnswer === "Yes") {
+                          if (expectedType === "int" || expectedType === "float") {
+                            if (!optionsToRender.includes("fill_mean")) optionsToRender.unshift("fill_mean");
+                            if (!optionsToRender.includes("fill_median")) optionsToRender.unshift("fill_median");
+                          } else if (expectedType === "datetime" || expectedType === "date") {
+                            if (!optionsToRender.includes("fill_median")) optionsToRender.unshift("fill_median");
+                          }
+                        } else {
+                          optionsToRender = optionsToRender.filter((opt: any) => opt !== "fill_mean" && opt !== "fill_median");
+                        }
                       }
                     }
 

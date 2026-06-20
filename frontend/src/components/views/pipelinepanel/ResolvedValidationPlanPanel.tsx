@@ -15,7 +15,7 @@ export const ResolvedValidationPlanPanel: React.FC<{
 
   const submittedAnswers = useMemo(() => {
     const clarifications = validationResult.clarifications || {};
-    return ["null", "duplicate", "typecast"].flatMap((cat) =>
+    return ["typecast", "null", "duplicate"].flatMap((cat) =>
       (Object.entries(clarifications[cat] || {}) as [string, any][])
         .filter(
           ([, question]) => question?.answer != null && question.answer !== "",
@@ -63,7 +63,7 @@ export const ResolvedValidationPlanPanel: React.FC<{
           </h4>
 
           <div className="grid grid-cols-1 gap-4">
-            {["null", "duplicate", "typecast"].map((issue) => {
+            {["typecast", "null", "duplicate"].map((issue) => {
               const planText = actionPlan[issue];
               if (!planText) return null;
 

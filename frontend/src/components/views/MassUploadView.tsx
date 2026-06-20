@@ -941,7 +941,7 @@ export const MassUploadView: React.FC = () => {
                         (() => {
                           const payload = activeItem.checkpoint.payload || {};
                           const clarifications = payload.clarifications || {};
-                          const categories = ["null", "duplicate", "typecast"] as const;
+                          const categories = ["typecast", "null", "duplicate"] as const;
 
                           return (
                             <div className="space-y-5">
@@ -971,6 +971,44 @@ export const MassUploadView: React.FC = () => {
                                         const selectedVal = mcqAnswers[key] || "";
                                         const isStrategy = q && typeof q === "object" && "options" in q;
                                         let optionsToRender = q.options || [];
+
+                                        if (cat === "null" && qKey.startsWith("Q2_strategy_column_")) {
+                                          const colName = qKey.substring("Q2_strategy_column_".length);
+                                          
+                                          // 1. Filter out keep_null if allow_missing is answered "No"
+                                          const q1Key = `null.Q1_allow_missing_column_${colName}`;
+                                          const q1Answer = mcqAnswers[q1Key];
+                                          if (q1Answer === "No") {
+                                            optionsToRender = optionsToRender.filter((opt: any) => opt !== "keep_null");
+                                          }
+
+                                          // 2. Filter or add options based on Type Cast decision
+                                          const castKey = `typecast.Q1_cast_column_${colName}`;
+                                          const castAnswer = mcqAnswers[castKey];
+                                          
+                                          const typecastData = clarifications.typecast || {};
+                                          const hasCastQuestion = `Q1_cast_column_${colName}` in typecastData;
+                                          
+                                          if (hasCastQuestion) {
+                                            let expectedType = "str";
+                                            const semProfile = payload.semantic_profile || {};
+                                            const colDetail = semProfile.columns?.[colName];
+                                            if (colDetail) {
+                                              expectedType = colDetail.expected_type || "str";
+                                            }
+
+                                            if (castAnswer === "Yes") {
+                                              if (expectedType === "int" || expectedType === "float") {
+                                                if (!optionsToRender.includes("fill_mean")) optionsToRender.unshift("fill_mean");
+                                                if (!optionsToRender.includes("fill_median")) optionsToRender.unshift("fill_median");
+                                              } else if (expectedType === "datetime" || expectedType === "date") {
+                                                if (!optionsToRender.includes("fill_median")) optionsToRender.unshift("fill_median");
+                                              }
+                                            } else {
+                                              optionsToRender = optionsToRender.filter((opt: any) => opt !== "fill_mean" && opt !== "fill_median");
+                                            }
+                                          }
+                                        }
 
                                         return (
                                           <div key={qKey} className="space-y-2 text-left">

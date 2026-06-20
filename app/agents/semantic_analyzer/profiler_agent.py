@@ -14,69 +14,7 @@ from app.agents.semantic_analyzer.prompts import COMBINED_PROFILER_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
 
-def analyze_temporal_column(series: pd.Series) -> str:
-    """Analyze a series to determine if it is:
-    - 'time_only': has time patterns, but no date patterns.
-    - 'date_only': has date patterns, but no time patterns.
-    - 'mixed': has both date and time patterns, or some rows have both and some only have time.
-    - 'datetime': all rows have both date and time.
-    - 'other': does not match.
-    """
-    non_null = series.dropna().astype(str).str.strip()
-    if non_null.empty:
-        return "other"
-    
-    # Date patterns: contains YYYY-MM-DD, DD/MM/YYYY, MM/DD/YY, DD-MM-YY, or Month words (Jan, Feb...)
-    date_pat = re.compile(
-        r"\b\d{4}[-/]\d{1,2}[-/]\d{1,2}\b|\b\d{1,2}[-/]\d{1,2}[-/]\d{2,4}\b|\b\d{2}[-/]\d{1,2}[-/]\d{1,2}\b|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)",
-        re.IGNORECASE
-    )
-    # Time patterns: contains HH:MM or HH:MM:SS or AM/PM
-    time_pat = re.compile(
-        r"\b\d{1,2}:\d{2}(?::\d{2})?\s*(?:am|pm)?\b|\b\d{1,2}\s*(?:am|pm)\b",
-        re.IGNORECASE
-    )
-    
-    has_date = non_null.apply(lambda x: bool(date_pat.search(x)))
-    has_time = non_null.apply(lambda x: bool(time_pat.search(x)))
-    
-    any_date = has_date.any()
-    any_time = has_time.any()
-    
-    if any_date and not any_time:
-        return "date_only"
-    if any_time and not any_date:
-        return "time_only"
-    if any_date and any_time:
-        all_have_date = has_date.all()
-        if not all_have_date:
-            return "mixed"
-        return "datetime"
-    
-    return "other"
-
-
-def is_time_only_column(column_name: str, description: Optional[str], pattern: Optional[str]) -> bool:
-    # 1. Check regex pattern if available
-    if pattern:
-        pat = pattern.lower()
-        has_time_pat = ":" in pat or "am" in pat or "pm" in pat or "a.m." in pat or "p.m." in pat
-        has_date_pat = "y" in pat or "d{4}" in pat or "year" in pat or "month" in pat or "day" in pat
-        if has_time_pat and not has_date_pat:
-            return True
-            
-    # 2. Check name and description for time keywords vs date keywords
-    name_lower = column_name.lower()
-    desc_lower = (description or "").lower()
-    has_time_name = "time" in name_lower or "hour" in name_lower or "minute" in name_lower or "second" in name_lower
-    has_date_name = "date" in name_lower or "year" in name_lower or "month" in name_lower or "day" in name_lower
-    has_time_desc = "time" in desc_lower or "hour" in desc_lower or "minute" in desc_lower or "second" in desc_lower
-    has_date_desc = "date" in desc_lower or "year" in desc_lower or "month" in desc_lower or "day" in desc_lower
-    
-    if (has_time_name and not has_date_name) or (has_time_desc and not has_date_desc):
-        return True
-        
-    return False
+# Temporal analysis functions removed to rely on LLM classification.
 
 
 class ColumnSemanticProfileOutput(BaseModel):
@@ -135,18 +73,11 @@ class SemanticProfilerAgent(BaseAgent):
             return {"global_errors": "SemanticProfilerAgent: statistical_profile missing."}
 
         # 1. Read top 10 most popular (frequent) rows in the dataset
-        temporal_analysis = {}
         try:
             if dataset_path.endswith(".parquet"):
                 df = pd.read_parquet(dataset_path)
             else:
                 df = pd.read_csv(dataset_path)
-            
-            for col_name in df.columns:
-                try:
-                    temporal_analysis[col_name] = analyze_temporal_column(df[col_name])
-                except Exception as col_err:
-                    logger.warning(f"Failed to analyze temporal status for {col_name}: {col_err}")
 
             
             # Find the top 10 most frequent (popular) unique row combinations
@@ -257,27 +188,41 @@ class SemanticProfilerAgent(BaseAgent):
             else:
                 return ["fill_mode", "fill_llm", "keep_null"]
 
+        # Get physical dtypes for type checking
+        physical_dtypes = {col_profile.column_name: col_profile.dtype for col_profile in statistical_profile.columns}
+
         columns_dict: Dict[str, ColumnSemanticProfileDetail] = {}
         for col in response.columns:
-            # Enforce strict mapping of fill strategies based on semantic_data_type
-            strategies = col.fill_strategies or map_fill_strategies(col.semantic_data_type)
-            
-            # Apply temporal overrides
-            expected_type = col.expected_type
+            # Rely on LLM prediction for semantic_data_type
             semantic_data_type = col.semantic_data_type or "Nominal"
-            analysis = temporal_analysis.get(col.column_name, "other")
-            is_time_only = (analysis == "time_only") or (
-                analysis not in ("mixed", "datetime", "date_only")
-                and is_time_only_column(col.column_name, col.description, col.expected_str_pattern)
-            )
-            if is_time_only:
-                expected_type = "str"
-                semantic_data_type = "Temporal"
-                strategies = ["fill_mode", "keep_null"]
-            elif analysis in ("mixed", "date_only", "datetime"):
-                expected_type = "datetime"
-                semantic_data_type = "Temporal"
-                strategies = ["fill_median", "fill_mode", "keep_null"]
+            expected_type = col.expected_type
+            
+            # Map fill strategies for temporal or other types
+            strategies = col.fill_strategies or map_fill_strategies(semantic_data_type)
+            
+            if semantic_data_type.strip().lower() == "temporal":
+                physical_dtype = physical_dtypes.get(col.column_name, "object")
+                is_string_dtype = physical_dtype in ("object", "string") or str(physical_dtype).startswith("str")
+                is_already_datetime = "datetime" in str(physical_dtype) or "date" in str(physical_dtype)
+                
+                if is_string_dtype:
+                    expected_type = "datetime"
+                    strategies = ["fill_median", "fill_mode", "keep_null"]
+                elif is_already_datetime:
+                    expected_type = "datetime"
+                    strategies = ["fill_median", "fill_mode", "keep_null"]
+                else:
+                    # Keep expected_type as non-datetime. If LLM predicted 'datetime' or 'date', map to an appropriate type based on physical dtype.
+                    if expected_type in ("datetime", "date"):
+                        if "int" in str(physical_dtype):
+                            expected_type = "int"
+                        elif "float" in str(physical_dtype):
+                            expected_type = "float"
+                        elif "bool" in str(physical_dtype):
+                            expected_type = "bool"
+                        else:
+                            expected_type = "str"
+                    strategies = col.fill_strategies or map_fill_strategies(expected_type)
                 
             columns_dict[col.column_name] = ColumnSemanticProfileDetail(
                 description=col.description,

@@ -252,6 +252,7 @@ async def api_resolve_pipeline(
             
         # Update the answer field in clarifications
         # payload.answers is e.g. {"null.Q1_strategy": "Option A: ...", ...}
+        cleaned_answers = {}
         for key, answer in payload.answers.items():
             parts = key.split(".")
             if len(parts) == 2:
@@ -260,11 +261,58 @@ async def api_resolve_pipeline(
                 if cat_data:
                     q_data = cat_data.get(q_key)
                     if q_data:
-                        q_data["answer"] = answer
+                        cleaned_answer = answer
+                        if q_key.startswith("Q2_strategy_column_") and answer:
+                            col_name = q_key[len("Q2_strategy_column_"):]
+                            # Check column expected type
+                            expected_type = "str"
+                            sem_profile = state.get("semantic_profile")
+                            if sem_profile:
+                                if hasattr(sem_profile, "columns"):
+                                    col_detail = sem_profile.columns.get(col_name)
+                                    if col_detail:
+                                        expected_type = getattr(col_detail, "expected_type", "str")
+                                elif isinstance(sem_profile, dict) and "columns" in sem_profile:
+                                    col_detail = sem_profile["columns"].get(col_name)
+                                    if col_detail:
+                                        expected_type = col_detail.get("expected_type", "str")
+                            
+                            if expected_type in ("datetime", "date") and not answer.lower().startswith("keep_null"):
+                                # Parse and convert to ISO format
+                                prefix = ""
+                                ans_stripped = answer.strip()
+                                while True:
+                                    matched = False
+                                    lower_ans = ans_stripped.lower()
+                                    for p in ["custom strategy:", "fill_value:", "fill_value ", "fill ", "impute "]:
+                                        if lower_ans.startswith(p):
+                                            idx = len(p)
+                                            prefix += ans_stripped[:idx]
+                                            ans_stripped = ans_stripped[idx:].strip()
+                                            matched = True
+                                            break
+                                    if not matched:
+                                        break
+                                
+                                from dateutil import parser
+                                try:
+                                    dt = parser.parse(ans_stripped, dayfirst=True)
+                                    if expected_type == "date":
+                                        iso_val = dt.date().isoformat()
+                                    else:
+                                        iso_val = dt.isoformat()
+                                    cleaned_answer = f"{prefix}{iso_val}"
+                                except Exception:
+                                    pass
+                        
+                        q_data["answer"] = cleaned_answer
+                        cleaned_answers[key] = cleaned_answer
+            if key not in cleaned_answers:
+                cleaned_answers[key] = answer
         
         # Build HumanMessage summarizing answers for the LLM chat history
         summary_lines = ["Here are my decisions for the clarification questions:"]
-        for key, answer in payload.answers.items():
+        for key, answer in cleaned_answers.items():
             summary_lines.append(f"- {key}: {answer}")
         summary_msg = HumanMessage(content="\n".join(summary_lines))
         

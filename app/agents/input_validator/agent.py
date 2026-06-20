@@ -38,6 +38,118 @@ class InputValidatorAgent(BaseAgent):
         # Get prior messages in case this is a continuation of a conversation
         prior_messages = state.get("messages", [])
 
+        # Pre-process user-submitted custom strategy datetime strings to ISO format
+        val_result = state.get("input_validation_result")
+        if val_result:
+            if hasattr(val_result, "clarifications") and val_result.clarifications:
+                clar_obj = val_result.clarifications
+                for cat in ["null", "duplicate", "typecast"]:
+                    cat_data = getattr(clar_obj, cat, None)
+                    if cat_data:
+                        fields_dict = getattr(cat_data, "__dict__", {}) or {}
+                        extra_dict = getattr(cat_data, "model_extra", {}) or {}
+                        all_fields = {**fields_dict, **extra_dict}
+                        for q_key, q_val in all_fields.items():
+                            if q_key.startswith("Q2_strategy_column_") and q_val:
+                                col_name = q_key[len("Q2_strategy_column_"):]
+                                expected_type = "str"
+                                if semantic_profile:
+                                    if hasattr(semantic_profile, "columns"):
+                                        col_detail = semantic_profile.columns.get(col_name)
+                                        if col_detail:
+                                            expected_type = getattr(col_detail, "expected_type", "str")
+                                    elif isinstance(semantic_profile, dict) and "columns" in semantic_profile:
+                                        col_detail = semantic_profile["columns"].get(col_name)
+                                        if col_detail:
+                                            expected_type = col_detail.get("expected_type", "str")
+                                
+                                if expected_type in ("datetime", "date"):
+                                    answer = None
+                                    if isinstance(q_val, dict):
+                                        answer = q_val.get("answer")
+                                    elif hasattr(q_val, "answer"):
+                                        answer = getattr(q_val, "answer")
+                                    
+                                    if answer and not answer.lower().startswith("keep_null"):
+                                        prefix = ""
+                                        ans_stripped = answer.strip()
+                                        while True:
+                                            matched = False
+                                            lower_ans = ans_stripped.lower()
+                                            for p in ["custom strategy:", "fill_value:", "fill_value ", "fill ", "impute "]:
+                                                if lower_ans.startswith(p):
+                                                    idx = len(p)
+                                                    prefix += ans_stripped[:idx]
+                                                    ans_stripped = ans_stripped[idx:].strip()
+                                                    matched = True
+                                                    break
+                                            if not matched:
+                                                break
+                                        
+                                        from dateutil import parser
+                                        try:
+                                            dt = parser.parse(ans_stripped, dayfirst=True)
+                                            if expected_type == "date":
+                                                iso_val = dt.date().isoformat()
+                                            else:
+                                                iso_val = dt.isoformat()
+                                            cleaned_answer = f"{prefix}{iso_val}"
+                                            
+                                            if isinstance(q_val, dict):
+                                                q_val["answer"] = cleaned_answer
+                                            elif hasattr(q_val, "answer"):
+                                                setattr(q_val, "answer", cleaned_answer)
+                                        except Exception:
+                                            pass
+            elif isinstance(val_result, dict) and "clarifications" in val_result:
+                clar_dict = val_result["clarifications"]
+                if clar_dict:
+                    for cat in ["null", "duplicate", "typecast"]:
+                        cat_data = clar_dict.get(cat)
+                        if isinstance(cat_data, dict):
+                            for q_key, q_val in cat_data.items():
+                                if q_key.startswith("Q2_strategy_column_") and isinstance(q_val, dict):
+                                    col_name = q_key[len("Q2_strategy_column_"):]
+                                    expected_type = "str"
+                                    if semantic_profile:
+                                        if hasattr(semantic_profile, "columns"):
+                                            col_detail = semantic_profile.columns.get(col_name)
+                                            if col_detail:
+                                                expected_type = getattr(col_detail, "expected_type", "str")
+                                        elif isinstance(semantic_profile, dict) and "columns" in semantic_profile:
+                                            col_detail = semantic_profile["columns"].get(col_name)
+                                            if col_detail:
+                                                expected_type = col_detail.get("expected_type", "str")
+                                    
+                                    if expected_type in ("datetime", "date"):
+                                        answer = q_val.get("answer")
+                                        if answer and not answer.lower().startswith("keep_null"):
+                                            prefix = ""
+                                            ans_stripped = answer.strip()
+                                            while True:
+                                                matched = False
+                                                lower_ans = ans_stripped.lower()
+                                                for p in ["custom strategy:", "fill_value:", "fill_value ", "fill ", "impute "]:
+                                                    if lower_ans.startswith(p):
+                                                        idx = len(p)
+                                                        prefix += ans_stripped[:idx]
+                                                        ans_stripped = ans_stripped[idx:].strip()
+                                                        matched = True
+                                                        break
+                                                if not matched:
+                                                    break
+                                            
+                                            from dateutil import parser
+                                            try:
+                                                dt = parser.parse(ans_stripped, dayfirst=True)
+                                                if expected_type == "date":
+                                                    iso_val = dt.date().isoformat()
+                                                else:
+                                                    iso_val = dt.isoformat()
+                                                q_val["answer"] = f"{prefix}{iso_val}"
+                                            except Exception:
+                                                pass
+
         if not data_profile:
             logger.warning("InputValidatorAgent: no statistical_profile found in state.")
             return {
