@@ -2,25 +2,6 @@ import React from "react";
 import { SpinnerIcon } from "./SpinnerIcon";
 import { formatDisplayValue } from "./utils";
 
-const formatToGmt7 = (dateStr: string) => {
-  if (!dateStr) return "";
-  try {
-    const normalizedStr =
-      dateStr.endsWith("Z") || dateStr.includes("+") || dateStr.includes("-")
-        ? dateStr
-        : dateStr + "Z";
-    const d = new Date(normalizedStr);
-    if (isNaN(d.getTime())) return dateStr;
-    return (
-      d.toLocaleString("en-GB", {
-        timeZone: "Asia/Bangkok",
-        hour12: false,
-      }) + " (GMT+7)"
-    );
-  } catch (e) {
-    return dateStr;
-  }
-};
 
 const WORKER_FLOW = [
   {

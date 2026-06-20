@@ -16,6 +16,8 @@ import {
   getInitialRouteState,
   parsePipelineSearch,
 } from "./lib/pipelineSession";
+import { MassUploadView } from "./components/views/MassUploadView";
+import { Database } from "lucide-react";
 
 function App() {
   const queryClient = useQueryClient();
@@ -108,6 +110,40 @@ function App() {
   const handleHomeReset = () => {
     resetSession();
   };
+
+  const isMassUpload = window.location.pathname === "/massupload" || window.location.pathname === "/massupload/";
+
+  if (isMassUpload) {
+    return (
+      <div className="h-dvh overflow-hidden bg-background font-sans antialiased flex flex-col items-center">
+        <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 text-left flex-none">
+          <div className="max-w-[1400px] flex h-14 items-center mx-auto px-4 w-full gap-4 justify-between">
+            <a
+              href="/"
+              className="flex items-center space-x-2 rounded-md px-1 py-1 text-left hover:bg-muted/60 transition-colors font-bold text-foreground"
+            >
+              <Database className="h-6 w-6 shrink-0 text-violet-600" />
+              <span>Agentic Data Cleaner</span>
+            </a>
+            <div className="flex items-center gap-3">
+              <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-violet-100 text-violet-800 border border-violet-200">
+                ⚡ Mass Ingestion Console
+              </span>
+              <a
+                href="/"
+                className="text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted px-3 py-1.5 rounded-lg border transition-colors"
+              >
+                Back to Single Ingestion
+              </a>
+            </div>
+          </div>
+        </header>
+        <main className="flex-1 min-h-0 overflow-hidden w-full max-w-[1400px] px-3 py-4 sm:px-4 md:px-6 md:py-6 flex flex-col">
+          <MassUploadView />
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="h-dvh overflow-hidden bg-background font-sans antialiased flex flex-col items-center">

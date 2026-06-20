@@ -111,6 +111,12 @@ export const Header: React.FC<HeaderProps> = ({
             Run ID: {runId}
           </div>
         )}
+        <a
+          href="/massupload/"
+          className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-violet-200 bg-violet-50/50 text-violet-700 hover:bg-violet-100 hover:text-violet-800 transition-colors shrink-0 ml-2 font-sans"
+        >
+        Mass Ingestion
+        </a>
       </div>
     </header>
   );
