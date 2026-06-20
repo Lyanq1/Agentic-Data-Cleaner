@@ -3,7 +3,6 @@ import {
   BookOpen, 
   Layers, 
   Brain, 
-  HelpCircle, 
   CheckCircle, 
   XCircle, 
   AlertTriangle, 
@@ -215,7 +214,7 @@ export const SemanticProfilePanel: React.FC<SemanticProfilePanelProps> = ({ prof
               <p className="text-sm font-semibold">No columns match your filter criteria.</p>
             </div>
           ) : (
-            filteredColumns.map(([colName, colDetail]: [string, any], idx: number) => {
+            filteredColumns.map(([colName, colDetail]: [string, any]) => {
               const isExpanded = expandedColumn === colName;
               const hasErrors = colDetail.is_error;
               const errorCount = colDetail.error_types?.length || 0;

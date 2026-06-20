@@ -51,8 +51,10 @@ class IngestionService:
         upload_dir = Path(self._settings.upload_dir)
         upload_dir.mkdir(parents=True, exist_ok=True)
 
-        # Save raw upload
-        raw_path = upload_dir / filename
+        # Save raw upload with a unique prefix to prevent concurrent write collisions
+        import uuid
+        unique_prefix = uuid.uuid4().hex[:6]
+        raw_path = upload_dir / f"{unique_prefix}_{filename}"
         raw_path.write_bytes(contents)
         size_mb = len(contents) / (1024 * 1024)
         logger.info(f"Saved raw upload: {raw_path} ({size_mb:.1f}MB)")
