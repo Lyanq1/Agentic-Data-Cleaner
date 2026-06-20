@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { StepFooter } from "./StepFooter";
 import { TextIcon } from "./TextIcon";
 import { formatDisplayValue, getOptionConsequence } from "./utils";
@@ -18,6 +18,36 @@ export const InputValidationClarificationContent: React.FC<{
 
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [customInputs, setCustomInputs] = useState<Record<string, string>>({});
+  const hasInitializedRef = React.useRef(false);
+
+  useEffect(() => {
+    if (hasInitializedRef.current) return;
+
+    const nextAnswers: Record<string, string> = {};
+    const nextCustom: Record<string, string> = {};
+    categories.forEach((cat) => {
+      const catData = clarifications[cat];
+      if (catData) {
+        Object.keys(catData).forEach((qKey) => {
+          const q = catData[qKey];
+          if (q) {
+            const ansVal = q.answer || q.previous_answer;
+            if (ansVal) {
+              if (ansVal.startsWith("Custom strategy:")) {
+                nextAnswers[`${cat}.${qKey}`] = "Custom strategy (describe in your next prompt)";
+                nextCustom[`${cat}.${qKey}`] = ansVal.substring("Custom strategy:".length).trim();
+              } else {
+                nextAnswers[`${cat}.${qKey}`] = ansVal;
+              }
+            }
+          }
+        });
+      }
+    });
+    setAnswers(nextAnswers);
+    setCustomInputs(nextCustom);
+    hasInitializedRef.current = true;
+  }, [payload, clarifications, categories]);
 
   const handleSelectAnswer = (key: string, val: string) => {
     setAnswers((prev) => {
@@ -150,6 +180,12 @@ export const InputValidationClarificationContent: React.FC<{
                         <p className="text-sm font-medium text-foreground mb-3 leading-snug">
                           {qi + 1}. {formatDisplayValue(q.question)}
                         </p>
+
+                        {q.error && (
+                          <div className="mb-4 px-3 py-2.5 text-xs text-rose-600 bg-rose-50 border border-rose-200 rounded-lg font-medium leading-relaxed">
+                            ⚠️ {formatDisplayValue(q.error)}
+                          </div>
+                        )}
 
                         {isStrategy ? (
                           <div className="space-y-3">

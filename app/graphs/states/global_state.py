@@ -137,6 +137,9 @@ class GlobalState(TypedDict):
     
     # Evaluation Metrics
     f1_metrics: dict[str, Any] | None
+    
+    # Store original datetime/date formats
+    original_datetime_formats: dict[str, dict[str, str]] | None
 
     # Token Usage Metrics
     token_metrics: Annotated[dict[str, int], sum_metrics]

@@ -29,6 +29,8 @@ class StrategyQuestion(BaseModel):
     options: list[str] = Field(description="Exactly 3 distinct options.")
     consequences: Any | None = Field(default=None, description="Consequences of each option.")
     answer: str | None = Field(default=None, description="The user's selected option/answer.")
+    error: str | None = Field(default=None, description="Error message if the previous answer was unfeasible.")
+    previous_answer: str | None = Field(default=None, description="The previous unfeasible answer submitted by the user.")
 
 class InsightQuestion(BaseModel):
     question: str = Field(description="The insight question text.")
@@ -37,6 +39,8 @@ class InsightQuestion(BaseModel):
     answer: str | None = Field(
         default=None, description="The user's answer ('yes', 'no', or comment)."
     )
+    error: str | None = Field(default=None, description="Error message if the previous answer was unfeasible.")
+    previous_answer: str | None = Field(default=None, description="The previous unfeasible answer submitted by the user.")
 class NullClarifications(BaseModel):
     model_config = {"extra": "allow"}
 

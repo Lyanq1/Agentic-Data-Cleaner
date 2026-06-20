@@ -306,6 +306,7 @@ export const HITLCheckpointPanel: React.FC<{
 
         {isInputValidationClarification && (
           <InputValidationClarificationContent
+            key={checkpoint?.checkpoint_id}
             payload={payload}
             isAwaiting={isAwaiting}
             onDecision={onDecision}

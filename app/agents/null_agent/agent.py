@@ -160,7 +160,12 @@ class NullAgent(BaseAgent):
         # ---- Apply all null strategies from plan ---------------------------
         try:
             cleaned_df, dropped_per_column, filled_per_column, dropped_columns, skipped_columns, notes = (
-                self._apply_null_strategies(df, agent_input.planner_task, state.get("semantic_profile"))
+                self._apply_null_strategies(
+                    df, 
+                    agent_input.planner_task, 
+                    state.get("semantic_profile"),
+                    state.get("original_datetime_formats")
+                )
             )
         except NullHandlingError as exc:
             return self._failure_update(
@@ -275,6 +280,7 @@ class NullAgent(BaseAgent):
         df: pd.DataFrame,
         task: TaskDetail | None,
         semantic_profile: SemanticProfile | None = None,
+        original_datetime_formats: dict[str, dict[str, str]] | None = None,
     ) -> tuple[
         pd.DataFrame,          # cleaned dataframe
         dict[str, int],        # dropped_per_column

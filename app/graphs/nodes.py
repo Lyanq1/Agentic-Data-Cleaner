@@ -391,6 +391,58 @@ async def validator_node(state: GlobalState) -> dict[str, Any]:
     if passed:
         logger.info(f"validator_node: task '{task_id}' PASSED validation.")
         
+        # Restore datetime formats for columns if this is the null_handling task
+        original_datetime_formats = state.get("original_datetime_formats")
+        if task_id == "null_handling" and original_datetime_formats and df_validated_path:
+            import pandas as pd
+            try:
+                df = pd.read_parquet(df_validated_path)
+                modified = False
+                for col, fmt_info in original_datetime_formats.items():
+                    if col in df.columns:
+                        fmt_str = fmt_info.get("format")
+                        if not fmt_str:
+                            has_slash = "/" in fmt_info.get("regex", "")
+                            semantic_profile = state.get("semantic_profile")
+                            expected_type_val = None
+                            if semantic_profile and col in semantic_profile.columns:
+                                expected_type_val = semantic_profile.columns[col].expected_type
+                            elif active_task and active_task.inputs and active_task.inputs.column_context and col in active_task.inputs.column_context:
+                                ctx = active_task.inputs.column_context[col]
+                                if isinstance(ctx, dict):
+                                    semantic_dict = ctx.get("semantic") or {}
+                                elif hasattr(ctx, "semantic"):
+                                    semantic_dict = getattr(ctx, "semantic", {}) or {}
+                                else:
+                                    semantic_dict = {}
+                                if isinstance(semantic_dict, dict):
+                                    expected_type_val = semantic_dict.get("expected_type")
+                                elif hasattr(semantic_dict, "expected_type"):
+                                    expected_type_val = getattr(semantic_dict, "expected_type")
+                            
+                            is_date_only = False
+                            if expected_type_val:
+                                is_date_only = str(expected_type_val).lower().strip() == "date"
+                                
+                            if is_date_only:
+                                fmt_str = "%Y/%m/%d" if has_slash else "%Y-%m-%d"
+                            else:
+                                fmt_str = "%Y/%m/%d %H:%M:%S" if has_slash else "%Y-%m-%d %H:%M:%S"
+                        
+                        if fmt_str:
+                            try:
+                                dt_series = pd.to_datetime(df[col], errors="coerce")
+                                df[col] = dt_series.dt.strftime(fmt_str)
+                                modified = True
+                                logger.info(f"validator_node: Restored datetime column '{col}' format to '{fmt_str}' post-validation.")
+                            except Exception as fmt_exc:
+                                logger.warning(f"validator_node: Failed to restore format for column '{col}': {fmt_exc}")
+                
+                if modified:
+                    df.to_parquet(df_validated_path, index=False)
+            except Exception as read_exc:
+                logger.error(f"validator_node: Failed to process datetime format restoration on approved dataset: {read_exc}")
+        
         # Persist to LineageService since it passed
         session_id = resolve_lineage_session_id(state)
         new_version_str = state.get("current_dataset_version")

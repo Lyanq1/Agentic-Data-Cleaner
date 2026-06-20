@@ -90,9 +90,23 @@ class TypeCastingAgent(BaseAgent):
         result_df = df.copy()
         column_results: list[TypeCastColumnResult] = []
         failed_rules: list[str] = []
+        original_datetime_formats: dict[str, dict[str, str]] = {}
 
         for column, expected_type in plan.columns.items():
             before_series = result_df[column]
+            
+            # --- Detect original date/datetime format before casting ---
+            if expected_type in ("datetime", "date"):
+                non_nulls = before_series.dropna()
+                if not non_nulls.empty:
+                    sample_val = str(non_nulls.iloc[0]).strip()
+                    if sample_val:
+                        regex_pat = self._infer_regex_from_sample(sample_val)
+                        fmt_str = self._infer_datetime_format(sample_val)
+                        original_datetime_formats[column] = {
+                            "regex": regex_pat,
+                            "format": fmt_str or ""
+                        }
             before_nulls = int(before_series.isna().sum())
             try:
                 after_series, notes = self._cast_series(before_series, expected_type)
@@ -191,6 +205,7 @@ class TypeCastingAgent(BaseAgent):
             ),
             "current_step": "type_casting",
             "completed_steps": "type_casting",
+            "original_datetime_formats": original_datetime_formats,
         }
 
     @staticmethod
@@ -391,6 +406,75 @@ class TypeCastingAgent(BaseAgent):
             return result, notes
 
         raise ValueError(f"unsupported expected_type: {expected_type}")
+
+    @staticmethod
+    def _infer_regex_from_sample(val: str) -> str:
+        import re
+        parts = []
+        i = 0
+        n = len(val)
+        while i < n:
+            char = val[i]
+            if char.isdigit():
+                start = i
+                while i < n and val[i].isdigit():
+                    i += 1
+                length = i - start
+                parts.append(f"\\d{{{length}}}")
+            elif char.isalpha():
+                start = i
+                while i < n and val[i].isalpha():
+                    i += 1
+                parts.append("[a-zA-Z]+")
+            else:
+                parts.append(re.escape(char))
+                i += 1
+        return "^" + "".join(parts) + "$"
+
+    @staticmethod
+    def _infer_datetime_format(val: str) -> str | None:
+        from dateutil import parser
+        val_str = val.strip()
+        try:
+            parsed = parser.parse(val_str)
+            formats_to_try = [
+                "%Y-%m-%d %H:%M:%S",
+                "%Y/%m/%d %H:%M:%S",
+                "%d-%m-%Y %H:%M:%S",
+                "%d/%m/%Y %H:%M:%S",
+                "%m/%d/%Y %H:%M:%S",
+                "%m-%d-%Y %H:%M:%S",
+                "%Y-%m-%d %H:%M",
+                "%Y/%m/%d %H:%M",
+                "%d-%m-%Y %H:%M",
+                "%d/%m/%Y %H:%M",
+                "%m/%d/%Y %H:%M",
+                "%m-%d-%Y %H:%M",
+                "%Y-%m-%d %H:%M:%S.%f",
+                "%Y-%m-%dT%H:%M:%S",
+                "%Y-%m-%dT%H:%M:%S.%f",
+                "%Y-%m-%dT%H:%M",
+                "%Y-%m-%d",
+                "%Y/%m/%d",
+                "%d-%m-%Y",
+                "%d/%m/%Y",
+                "%m/%d/%Y",
+                "%m-%d-%Y",
+                "%B %d, %Y",
+                "%b %d, %Y",
+                "%d-%b-%Y",
+                "%d-%B-%Y",
+            ]
+            for fmt in formats_to_try:
+                try:
+                    formatted = parsed.strftime(fmt)
+                    if formatted.lower() == val_str.lower():
+                        return fmt
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        return None
 
     @staticmethod
     def _normalize_numeric_values(series: pd.Series) -> pd.Series:

@@ -228,6 +228,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
   const [lastSubmittedCheckpointId, setLastSubmittedCheckpointId] = useState<
     string | null
   >(null);
+  const [hasBeenResolving, setHasBeenResolving] = useState(false);
 
   // View toggles
   const [showHitl, setShowHitl] = useState(true);
@@ -306,6 +307,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
 
   const isAgentActive = (agentKey: string) => {
     if (state?.status === "completed" || state?.status === "failed") return false;
+    if (state?.status === "awaiting_hitl") return false;
     const currentStep = state?.current_step;
     if (agentKey === "semantic_profiler" && currentStep === "semantic_profile") return true;
     if (agentKey === "input_validator" && currentStep === "input_validation") return true;
@@ -500,6 +502,12 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
   });
 
   useEffect(() => {
+    if (state?.resolving_hitl) {
+      setHasBeenResolving(true);
+    }
+  }, [state?.resolving_hitl]);
+
+  useEffect(() => {
     if (!state) return;
 
     if (
@@ -512,7 +520,14 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
 
     if (!state.awaiting_hitl && !state.resolving_hitl) {
       setIsTransitioning(false);
+      setHasBeenResolving(false);
       return;
+    }
+
+    // Clear transitioning state if resolving has finished but we are still awaiting HITL
+    if (hasBeenResolving && !state.resolving_hitl) {
+      setIsTransitioning(false);
+      setHasBeenResolving(false);
     }
 
     // Clear transitioning state if we hit a NEW checkpoint
@@ -521,6 +536,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
       state.current_checkpoint_id !== lastSubmittedCheckpointId
     ) {
       setIsTransitioning(false);
+      setHasBeenResolving(false);
     }
   }, [
     isApprovingPlan,
@@ -529,6 +545,8 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
     state?.resolving_hitl,
     state?.current_checkpoint_id,
     lastSubmittedCheckpointId,
+    hasBeenResolving,
+    isTransitioning,
   ]);
 
   const wsIndicator = (
