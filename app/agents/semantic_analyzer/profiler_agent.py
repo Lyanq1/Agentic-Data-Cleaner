@@ -6,13 +6,15 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
-import re
 from app.agents.base import BaseAgent
 from app.graphs.states.global_state import GlobalState
 from app.graphs.states.profiles import SemanticProfile, ColumnSemanticProfileDetail
 from app.agents.semantic_analyzer.prompts import COMBINED_PROFILER_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
+
+POPULAR_COLUMN_LIMIT = 20
+SAMPLE_ROW_LIMIT = 10
 
 # Temporal analysis functions removed to rely on LLM classification.
 
@@ -72,38 +74,52 @@ class SemanticProfilerAgent(BaseAgent):
             logger.error("SemanticProfilerAgent: no statistical_profile found in state.")
             return {"global_errors": "SemanticProfilerAgent: statistical_profile missing."}
 
-        # 1. Read top 10 most popular (frequent) rows in the dataset
+        # 1. Read top popular rows using the 20 most repeating (lowest unique_ratio) columns
         try:
             if dataset_path.endswith(".parquet"):
                 df = pd.read_parquet(dataset_path)
             else:
                 df = pd.read_csv(dataset_path)
 
-            
-            # Find the top 10 most frequent (popular) unique row combinations
-            # Exclude id columns from grouping to avoid uniqueness biasing popular counts
-            group_cols = [c for c in df.columns if c not in {"id", "__id__"}]
-            # Limit to at most 8 columns to avoid C-level tuple/integer overflow on Windows
-            group_cols = group_cols[:8]
+            id_cols = {"id", "__id__"}
+            profile_by_name = {
+                col_profile.column_name: col_profile
+                for col_profile in statistical_profile.columns
+            }
+            available_cols = [col for col in df.columns if col not in id_cols]
+            ranked_cols = sorted(
+                [col for col in available_cols if col in profile_by_name],
+                key=lambda col: profile_by_name[col].unique_ratio,
+            )
+            group_cols = ranked_cols[:POPULAR_COLUMN_LIMIT]
+            if not group_cols:
+                group_cols = available_cols[:POPULAR_COLUMN_LIMIT]
+
             try:
                 if group_cols:
-                    popular_rows = df[group_cols].astype(str).value_counts().head(10).reset_index()
+                    popular_rows = (
+                        df[group_cols].astype(str).value_counts().head(SAMPLE_ROW_LIMIT).reset_index()
+                    )
                     if "count" in popular_rows.columns:
                         popular_rows = popular_rows.drop(columns=["count"])
                     elif 0 in popular_rows.columns:
                         popular_rows = popular_rows.drop(columns=[0])
-                    
+
                     # Re-attach any columns that were not part of the grouping
                     for col in df.columns:
                         if col not in popular_rows.columns:
                             popular_rows[col] = df[col].head(len(popular_rows)).values
                     sample_df = popular_rows
                 else:
-                    sample_df = df.head(10)
+                    sample_df = df.head(SAMPLE_ROW_LIMIT)
             except Exception as inner_e:
-                logger.warning(f"SemanticProfilerAgent: value_counts failed, falling back to head(10). Error: {inner_e}")
-                sample_df = df.head(10)
-                
+                logger.warning(
+                    "SemanticProfilerAgent: value_counts failed, falling back to head(%d). Error: %s",
+                    SAMPLE_ROW_LIMIT,
+                    inner_e,
+                )
+                sample_df = df.head(SAMPLE_ROW_LIMIT)
+
             sample_text = sample_df.to_csv(index=False)
         except Exception as e:
             logger.error(f"SemanticProfilerAgent: failed to read top popular sample rows: {e}")
@@ -127,7 +143,7 @@ class SemanticProfilerAgent(BaseAgent):
 
         human_content = (
             f"## Dataset Statistical Profile\n```json\n{json.dumps(schema_info, indent=2)}\n```\n\n"
-            f"## First 10 Sample Rows (CSV)\n```csv\n{sample_text}\n```\n"
+            f"## Top {SAMPLE_ROW_LIMIT} Popular Sample Rows (CSV)\n```csv\n{sample_text}\n```\n"
         )
 
         messages = [
@@ -176,7 +192,7 @@ class SemanticProfilerAgent(BaseAgent):
             elif "ordinal" in dt:
                 return ["fill_mode", "fill_median"]
             elif "temporal" in dt:
-                return ["fill_median"]
+                return ["fill_median", "fill_mode", "keep_null"]
             elif "free text" in dt or "geospatial" in dt or "geo" in dt:
                 return ["fill_llm"]
             elif "structured text" in dt:
@@ -188,42 +204,22 @@ class SemanticProfilerAgent(BaseAgent):
             else:
                 return ["fill_mode", "fill_llm", "keep_null"]
 
-        # Get physical dtypes for type checking
-        physical_dtypes = {col_profile.column_name: col_profile.dtype for col_profile in statistical_profile.columns}
-
         columns_dict: Dict[str, ColumnSemanticProfileDetail] = {}
         for col in response.columns:
             # Rely on LLM prediction for semantic_data_type
             semantic_data_type = col.semantic_data_type or "Nominal"
             expected_type = col.expected_type
-            
-            # Map fill strategies for temporal or other types
-            strategies = col.fill_strategies or map_fill_strategies(semantic_data_type)
-            
+
             if semantic_data_type.strip().lower() == "temporal":
-                physical_dtype = physical_dtypes.get(col.column_name, "object")
-                is_string_dtype = physical_dtype in ("object", "string") or str(physical_dtype).startswith("str")
-                is_already_datetime = "datetime" in str(physical_dtype) or "date" in str(physical_dtype)
-                
-                if is_string_dtype:
-                    expected_type = "datetime"
-                    strategies = ["fill_median", "fill_mode", "keep_null"]
-                elif is_already_datetime:
-                    expected_type = "datetime"
-                    strategies = ["fill_median", "fill_mode", "keep_null"]
+                # Trust LLM for date vs datetime (and time-only str); default to datetime if ambiguous.
+                normalized = (expected_type or "").strip().lower()
+                if normalized in ("date", "datetime", "str"):
+                    expected_type = normalized
                 else:
-                    # Keep expected_type as non-datetime. If LLM predicted 'datetime' or 'date', map to an appropriate type based on physical dtype.
-                    if expected_type in ("datetime", "date"):
-                        if "int" in str(physical_dtype):
-                            expected_type = "int"
-                        elif "float" in str(physical_dtype):
-                            expected_type = "float"
-                        elif "bool" in str(physical_dtype):
-                            expected_type = "bool"
-                        else:
-                            expected_type = "str"
-                    strategies = col.fill_strategies or map_fill_strategies(expected_type)
-                
+                    expected_type = "datetime"
+
+            strategies = col.fill_strategies or map_fill_strategies(semantic_data_type)
+
             columns_dict[col.column_name] = ColumnSemanticProfileDetail(
                 description=col.description,
                 logical_group=col.logical_group,
