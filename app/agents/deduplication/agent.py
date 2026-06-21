@@ -337,6 +337,8 @@ class DeduplicationAgent(BaseAgent):
         validated = self._validate_dedup_decision(raw_planner_decision, df, dedup_input)
         return validated.model_copy(
             update={
+                "decision_source": "planner_fallback",
+                "reasoning_summary": "Planner provided the primary dedup strategy for execution.",
                 "keep_rule": keep_rule,
                 "validation_notes": list(validated.validation_notes)
                 + ["Planner strategy was used as the primary dedup execution input."],
