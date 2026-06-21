@@ -329,20 +329,44 @@ async def api_resolve_pipeline(
         # Update the thread state in checkpointer
         await graph.aupdate_state(config, state_updates, as_node="input_validator")
         
-    # Resume graph execution in the background
-    canonical_path = state.get("dataset_path")
-    original_filename = state.get("original_filename", "dataset.parquet")
-    
-    background_tasks.add_task(
-        run_pipeline,
-        run_id=run_id,
-        canonical_path=canonical_path,
-        input_format="parquet",
-        user_prompt=state.get("user_prompt", ""),
-        original_filename=original_filename,
-        data_schema=state.get("dataset_schema"),
-        clean_dataset_path=state.get("clean_dataset_path"),
-    )
+    # Resume the existing checkpointed graph state in the background.
+    # Do not restart via run_pipeline(), because this thread already has
+    # persisted state and should continue from planner after input validation.
+    async def resume_graph():
+        from app.core.websocket_manager import manager
+        import time
+        async with get_checkpointer_manager().get() as cp:
+            gr = build_graph(checkpointer=cp)
+            try:
+                async for event in gr.astream_events(None, config=config, version="v2"):
+                    kind = event["event"]
+                    name = event.get("name", "")
+
+                    if kind == "on_tool_start":
+                        await manager.broadcast_to_run(run_id, {"event": "log", "log": {"timestamp": time.time(), "agent": name, "message": f"Calling tool '{name}'...", "level": "info"}})
+                    elif kind == "on_tool_end":
+                        await manager.broadcast_to_run(run_id, {"event": "log", "log": {"timestamp": time.time(), "agent": name, "message": f"Tool '{name}' completed successfully.", "level": "info"}})
+                    elif kind == "on_tool_error":
+                        err = event.get("data", {}).get("error", "Unknown error")
+                        await manager.broadcast_to_run(run_id, {"event": "log", "log": {"timestamp": time.time(), "agent": name, "message": f"Tool '{name}' failed. Error: {err}", "level": "error"}})
+                    elif kind == "on_chain_start":
+                        if name in ["profiler", "semantic_profile", "input_validator", "planner", "supervisor", "deduplication", "null_handling", "type_casting", "validator", "report_agent"]:
+                            await manager.broadcast_to_run(run_id, {"event": "log", "log": {"timestamp": time.time(), "agent": "system", "message": f"Starting step: {name}", "level": "info"}})
+                    elif kind == "on_chain_error":
+                        err = event.get("data", {}).get("error", "Unknown error")
+                        if name != "LangGraph":
+                            await manager.broadcast_to_run(run_id, {"event": "log", "log": {"timestamp": time.time(), "agent": "system", "message": f"Error in {name}: {err}", "level": "error"}})
+
+                snapshot_after = await gr.aget_state(config)
+                if snapshot_after and snapshot_after.next:
+                    await manager.broadcast_to_run(run_id, {"event": "status_change", "status": "paused"})
+                else:
+                    await manager.broadcast_to_run(run_id, {"event": "status_change", "status": "completed"})
+            except Exception as e:
+                logger.error(f"Pipeline resume after resolve error: {e}")
+                await manager.broadcast_to_run(run_id, {"event": "status_change", "status": "failed"})
+
+    background_tasks.add_task(resume_graph)
     
     return {
         "message": "Answers submitted and pipeline resume triggered successfully."
