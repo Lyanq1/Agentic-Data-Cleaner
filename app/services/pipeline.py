@@ -7,11 +7,13 @@ from pathlib import Path
 from typing import Any
 
 from app.agents.deduplication.agent import DeduplicationAgent
+from app.agents.deduplication.models import DeduplicationHitlFeedback
 from app.agents.roles import AgentRole
 from app.graphs.graph import build_graph
 from app.graphs.checkpointer import get_checkpointer_manager
 from app.graphs.states.global_state import GlobalState
 from app.graphs.states.planning import ExecutionPlan, TaskDetail, TaskDetailWrapper, PlanMetadata, GlobalConstraints
+from app.graphs.states.workers import DeduplicationResult
 
 logger = logging.getLogger(__name__)
 
@@ -230,6 +232,8 @@ async def get_pipeline_state(run_id: str) -> dict[str, Any] | None:
         "agent_logs": state.get("agent_logs", {}),
         "deduplication_result": state.get("deduplication_result"),
         "current_dataset_version": state.get("current_dataset_version"),
+        "hitl_status": state.get("hitl_status"),
+        "hitl_checkpoint": state.get("hitl_checkpoint"),
         "execution_plan": state.get("execution_plan").model_dump() if state.get("execution_plan") and hasattr(state.get("execution_plan"), "model_dump") else state.get("execution_plan"),
         "task_list": state.get("task_list", []),
         "current_task_idx": state.get("current_task_idx", 0),
@@ -327,13 +331,82 @@ async def run_dedup_agent_for_run(
     agent = DeduplicationAgent()
     updates = await agent.run(working_state)
 
-    config = {"configurable": {"thread_id": run_id}}
     async with get_checkpointer_manager().get() as checkpointer:
         graph = build_graph(checkpointer=checkpointer)
-        await graph.aupdate_state(config, updates, as_node="deduplication")
+        base_config = {"configurable": {"thread_id": run_id}}
+        snapshot = await graph.aget_state(base_config)
+        update_config = snapshot.config if snapshot and getattr(snapshot, "config", None) else base_config
+        await graph.aupdate_state(update_config, updates, as_node="deduplication")
 
     persisted_state = await get_pipeline_state(run_id)
     return {
         "run_id": run_id,
+        "state": persisted_state,
+    }
+
+
+async def submit_dedup_hitl_feedback(
+    run_id: str,
+    feedback: DeduplicationHitlFeedback,
+) -> dict[str, Any] | None:
+    """Validate and persist HITL strategy feedback for a dedup review cycle."""
+
+    raw_state = await get_pipeline_raw_state(run_id)
+    formatted_state = await get_pipeline_state(run_id)
+    if raw_state is None and formatted_state is None:
+        return None
+
+    def _get_state_value(state_like: Any, key: str) -> Any:
+        if not isinstance(state_like, dict):
+            return None
+        if key in state_like:
+            return state_like.get(key)
+        nested_state = state_like.get("state")
+        if isinstance(nested_state, dict):
+            return nested_state.get(key)
+        return None
+
+    existing_result_raw = (
+        _get_state_value(raw_state, "deduplication_result")
+        or _get_state_value(formatted_state, "deduplication_result")
+    )
+    if not existing_result_raw:
+        raise ValueError("No deduplication_result is available for this run.")
+
+    existing_result = DeduplicationResult.model_validate(existing_result_raw)
+    pending_strategy_review = existing_result.pending_strategy_review
+    if pending_strategy_review is None:
+        raise ValueError("There is no pending dedup strategy review for this run.")
+
+    available_columns = set(
+        (
+            _get_state_value(raw_state, "dataset_schema")
+            or _get_state_value(formatted_state, "dataset_schema")
+            or {}
+        ).keys()
+    )
+    requested_columns = set(feedback.key_columns or []) | set(feedback.identifier_columns or []) | set(feedback.ignored_columns or [])
+    unknown_columns = sorted(column for column in requested_columns if column and available_columns and column not in available_columns)
+    if unknown_columns:
+        raise ValueError(f"Unknown columns in HITL feedback: {unknown_columns}")
+
+    persisted_feedback = feedback
+    updates = {
+        "hitl_feedback": persisted_feedback.model_dump_json(),
+        "hitl_status": "pending",
+        "hitl_checkpoint": _get_state_value(raw_state, "current_task_idx"),
+    }
+
+    async with get_checkpointer_manager().get() as checkpointer:
+        graph = build_graph(checkpointer=checkpointer)
+        base_config = {"configurable": {"thread_id": run_id}}
+        snapshot = await graph.aget_state(base_config)
+        update_config = snapshot.config if snapshot and getattr(snapshot, "config", None) else base_config
+        await graph.aupdate_state(update_config, updates, as_node="deduplication")
+
+    persisted_state = await get_pipeline_state(run_id)
+    return {
+        "run_id": run_id,
+        "accepted_override": True,
         "state": persisted_state,
     }
