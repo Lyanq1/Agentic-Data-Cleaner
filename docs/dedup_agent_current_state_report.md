@@ -80,6 +80,21 @@ It comes from:
 - approved via:
   - `POST /api/v1/pipeline/{run_id}/approve_plan`
 
+Editable dedup review fields submitted through that endpoint:
+
+- `dedup_review.key_columns`
+- `dedup_review.identifier_columns`
+- `dedup_review.ignored_columns`
+- `dedup_review.keep_rule`
+
+What happens on approval:
+
+- planner-owned dedup review values are validated against `dataset_schema`
+- the dedup task inside `execution_plan.task_list` is patched in-place
+- the dedup review payload inside `execution_plan.review` is updated to reflect
+  the approved values
+- the graph resumes from the planner checkpoint
+
 ### What was removed
 
 The following dedup-local approval flow is no longer part of the active
@@ -456,6 +471,7 @@ What it no longer does:
 The dedup worker is now repo-aligned:
 
 - planner owns primary strategy approval
+- planner approval can now override dedup business fields before execution
 - dedup owns safe execution
 - validator remains the promotion gate
 - worker-local review state and review endpoint have been removed from the

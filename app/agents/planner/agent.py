@@ -243,12 +243,12 @@ class PlannerAgent(BaseAgent):
 
         for wrapper in plan.task_list:
             task = wrapper.work_order
-            if task.skip:
-                continue
             if task.task_id == "deduplication":
                 sections.append(self._build_dedup_review_section(task))
                 if task.rationale:
                     warnings.append(f"{task.task_id}: {task.rationale}")
+                if task.skip_reason:
+                    warnings.append(f"{task.task_id}: {task.skip_reason}")
                 break
 
         if not sections:
