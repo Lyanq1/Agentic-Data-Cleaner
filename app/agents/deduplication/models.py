@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from app.graphs.states.planning import TaskDetail
 from app.graphs.states.profiler_state import StatisticalProfile
 from app.graphs.states.profiles import SemanticProfile
-from app.graphs.states.workers import DedupDecisionTrace, DedupStrategyReview
+from app.graphs.states.workers import DedupDecisionTrace
 
 
 class DeduplicationAgentInput(BaseModel):
@@ -24,7 +24,6 @@ class DeduplicationAgentInput(BaseModel):
     semantic_profile: SemanticProfile | None = None
     planner_task: TaskDetail | None = None
     retry_count: int = 0
-    hitl_feedback: str | None = None
     fuzzy_enabled: bool = False
 
 
@@ -148,21 +147,6 @@ class FuzzyCandidateSet(BaseModel):
     @property
     def total_count(self) -> int:
         return len(self.candidates)
-
-
-class DeduplicationHitlFeedback(BaseModel):
-    key_columns: list[str] | None = None
-    identifier_columns: list[str] | None = None
-    ignored_columns: list[str] | None = None
-    keep_rule: Literal["keep_most_complete", "keep_first", "keep_last"] | None = None
-    note: str | None = None
-
-
-class AppliedHitlResult(BaseModel):
-    validated_decision: ValidatedDedupDecision
-    notes: list[str] = Field(default_factory=list)
-    pending_strategy_review: DedupStrategyReview | None = None
-
 
 @dataclass(slots=True)
 class FuzzyBlockingConfig:

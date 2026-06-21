@@ -21,12 +21,10 @@ from app.agents.deduplication.column_roles import (
     resolve_name_family,
 )
 from app.agents.deduplication.models import (
-    AppliedHitlResult,
     BlockKeySpec,
     BlockingSpec,
     ColumnSemanticDescriptor,
     DedupDecision,
-    DeduplicationHitlFeedback,
     DeduplicationAgentInput,
     EvidenceSpec,
     FuzzyBlockingConfig,
@@ -40,7 +38,6 @@ from app.agents.deduplication.prompt import (
 )
 from app.agents.deduplication.strategies import (
     ExactKeyDedupConfig,
-    build_normalized_key_frame,
     execute_exact_key_dedup,
     execute_full_row_dedup,
     has_normalized_key_duplicates,
@@ -56,10 +53,7 @@ from app.graphs.states.output_validation import ValidationResultItem
 from app.graphs.states.planning import ExecutionPlan, TaskDetail
 from app.graphs.states.profiler_state import StatisticalProfile
 from app.graphs.states.workers import (
-    DedupPreviewGroup,
-    DedupPreviewSummary,
     DeduplicationResult,
-    DedupStrategyReview,
     WorkerStateDetail,
     WorkerStates,
 )
@@ -103,14 +97,16 @@ class DeduplicationAgent(BaseAgent):
         try:
             df = self._read_dataframe(dedup_input.dataset_path)
             context_hash = self._compute_context_hash(dedup_input)
-            existing_result = self._coerce_existing_result(state)
-            hitl_feedback = self._parse_hitl_feedback(dedup_input.hitl_feedback)
             validated_decision = self._extract_debug_override_decision(dedup_input, df)
             used_debug_override = validated_decision is not None
             reused_decision = False
+            used_planner_strategy = False
             if validated_decision is None:
                 validated_decision = self._rebuild_decision_from_state(state, context_hash)
                 reused_decision = validated_decision is not None
+            if validated_decision is None:
+                validated_decision = self._build_planner_owned_decision(df, dedup_input)
+                used_planner_strategy = validated_decision is not None
             if validated_decision is None:
                 context = self._build_decision_context(dedup_input)
                 raw_decision = await self._invoke_dedup_decision_llm(context)
@@ -127,75 +123,8 @@ class DeduplicationAgent(BaseAgent):
             notes.append("Reused the previous dedup decision because the context hash matched.")
         elif used_debug_override:
             notes.append("Used the service-layer debug override instead of invoking the LLM.")
-
-        pending_strategy_review = self._coerce_pending_strategy_review(existing_result)
-        applied_hitl = None
-        if hitl_feedback.key_columns is not None or hitl_feedback.keep_rule is not None or hitl_feedback.ignored_columns is not None or hitl_feedback.identifier_columns is not None:
-            if pending_strategy_review is None:
-                return self._failure_update(
-                    state,
-                    "DeduplicationAgent: received HITL feedback but no pending strategy review exists.",
-                    failed_rules=["missing_pending_strategy_review"],
-                )
-            applied_hitl = self._apply_hitl_feedback(
-                validated_decision,
-                pending_strategy_review,
-                hitl_feedback,
-                df,
-                dedup_input,
-            )
-            validated_decision = applied_hitl.validated_decision
-            notes.extend(applied_hitl.notes)
-            pending_strategy_review = applied_hitl.pending_strategy_review
-
-        if pending_strategy_review is None:
-            pending_strategy_review = self._build_strategy_review(df, validated_decision, dedup_input)
-
-        preview_has_duplicates = pending_strategy_review.preview.duplicate_rows > 0
-        should_wait_for_hitl = applied_hitl is None
-
-        if should_wait_for_hitl:
-            notes.append("Dedup strategy review is pending human confirmation before cleaning.")
-            result = DeduplicationResult(
-                applied_modes=[],
-                key_columns=list(pending_strategy_review.proposed_key_columns),
-                keep_strategy=pending_strategy_review.keep_rule,
-                source_path=dedup_input.dataset_path,
-                output_path=dedup_input.dataset_path,
-                before_row_count=len(df),
-                after_row_count=len(df),
-                dropped_row_count=0,
-                full_row_duplicate_count=0,
-                key_duplicate_count=0,
-                duplicate_group_count=pending_strategy_review.preview.duplicate_groups,
-                notes=notes,
-                decision_trace=validated_decision.to_trace(context_hash=context_hash),
-                pending_strategy_review=pending_strategy_review,
-            )
-            worker_states = self._coerce_worker_states(state)
-            worker_states.dedup_agent = WorkerStateDetail(status="done", retries=0, error_log=[])
-            worker_states.last_completed_agent = self.name
-            return {
-                "deduplication_result": result,
-                "worker_states": worker_states,
-                "validation_results": build_validation_results(
-                    agent_name=self.name,
-                    timestamp=self._timestamp(),
-                    before_row_count=len(df),
-                    after_row_count=len(df),
-                    decision_source=validated_decision.decision_source,
-                    failed_rules=[],
-                    unresolved_collisions=validated_decision.unresolved_collisions,
-                    fuzzy_candidate_count=0,
-                    fuzzy_notes=[],
-                    pending_strategy_review=True,
-                    proposed_key_columns=list(pending_strategy_review.proposed_key_columns),
-                ),
-                "hitl_status": "pending",
-                "hitl_checkpoint": state.get("current_task_idx"),
-                "current_step": "deduplication",
-                "completed_steps": "deduplication",
-            }
+        elif used_planner_strategy:
+            notes.append("Used the planner-approved dedup strategy as the primary execution input.")
 
         execution = self._execute_validated_decision(df, validated_decision, dedup_input)
         notes.extend(execution["notes"])
@@ -241,7 +170,6 @@ class DeduplicationAgent(BaseAgent):
             duplicate_group_count=execution["duplicate_group_count"],
             notes=notes,
             decision_trace=validated_decision.to_trace(context_hash=context_hash),
-            pending_strategy_review=None,
         )
 
         worker_states = self._coerce_worker_states(state)
@@ -272,12 +200,9 @@ class DeduplicationAgent(BaseAgent):
                 unresolved_collisions=execution["unresolved_collisions"],
                 fuzzy_candidate_count=fuzzy_candidates.total_count,
                 fuzzy_notes=fuzzy_candidates.notes,
-                pending_strategy_review=False,
-                proposed_key_columns=execution["effective_key_columns"],
             ),
-            "hitl_status": "approved" if applied_hitl is not None else state.get("hitl_status"),
+            "hitl_status": state.get("hitl_status"),
             "hitl_checkpoint": None,
-            "hitl_feedback": None,
             "current_step": "deduplication",
             "completed_steps": "deduplication",
         }
@@ -287,6 +212,7 @@ class DeduplicationAgent(BaseAgent):
         return state.get("physical_dataframe_path") or state.get("dataset_path")
 
     def _build_input(self, state: GlobalState, dataset_path: str) -> DeduplicationAgentInput:
+        execution_plan = state.get("execution_plan")
         return DeduplicationAgentInput(
             project_id=state.get("project_id"),
             dataset_path=dataset_path,
@@ -294,9 +220,8 @@ class DeduplicationAgent(BaseAgent):
             user_prompt=state.get("user_prompt"),
             statistical_profile=state.get("statistical_profile"),
             semantic_profile=state.get("semantic_profile"),
-            planner_task=self._extract_planner_task(state.get("execution_plan")),
+            planner_task=self._extract_planner_task(execution_plan),
             retry_count=state.get("retry_count") or 0,
-            hitl_feedback=state.get("hitl_feedback"),
             fuzzy_enabled=self._should_run_fuzzy(state),
         )
 
@@ -368,6 +293,54 @@ class DeduplicationAgent(BaseAgent):
             reasoning_summary="Used the service-layer debug override for key-based dedup testing.",
             validation_notes=["Debug override applied at the service layer."],
             unresolved_collisions=[],
+        )
+
+    def _build_planner_owned_decision(
+        self,
+        df: pd.DataFrame,
+        dedup_input: DeduplicationAgentInput,
+    ) -> ValidatedDedupDecision | None:
+        planner_task = dedup_input.planner_task
+        if planner_task is None or planner_task.skip:
+            return None
+
+        strategy = self._to_dict(planner_task.strategy) or {}
+        primary_keys = self._dedupe_columns(
+            strategy.get("primary_keys")
+            or (strategy.get("key_based") or {}).get("keys")
+            or planner_task.columns
+        )
+        ignored_columns = self._dedupe_columns(strategy.get("ignored_columns") or [])
+        effective_keys = [column for column in primary_keys if column not in set(ignored_columns)]
+        keep_rule = self._planner_keep_rule(strategy)
+        mode = "exact_key" if effective_keys else "exact_full_row"
+
+        semantic_seed_columns = self._dedupe_columns(
+            effective_keys
+            + list(strategy.get("identifier_columns") or [])
+            + list((strategy.get("fuzzy_matching") or {}).get("match_columns") or [])
+            + list((strategy.get("fuzzy_matching") or {}).get("blocking_columns") or [])
+        )
+        column_semantics = self._resolve_column_semantics(semantic_seed_columns, dedup_input)
+        raw_planner_decision = DedupDecision(
+            mode=mode,
+            key_columns=effective_keys,
+            column_semantics={
+                column: descriptor.model_dump(mode="json")
+                for column, descriptor in column_semantics.items()
+            },
+            ignore_columns=ignored_columns,
+            fuzzy_plan=None,
+            confidence=1.0,
+            reasoning_summary="Planner provided the primary dedup strategy for execution.",
+        )
+        validated = self._validate_dedup_decision(raw_planner_decision, df, dedup_input)
+        return validated.model_copy(
+            update={
+                "keep_rule": keep_rule,
+                "validation_notes": list(validated.validation_notes)
+                + ["Planner strategy was used as the primary dedup execution input."],
+            }
         )
 
     def _build_decision_context(self, dedup_input: DeduplicationAgentInput) -> dict[str, Any]:
@@ -834,230 +807,6 @@ class DeduplicationAgent(BaseAgent):
         if not existing:
             return None
         return DeduplicationResult.model_validate(existing)
-
-    def _parse_hitl_feedback(self, raw_feedback: str | None) -> DeduplicationHitlFeedback:
-        if not raw_feedback:
-            return DeduplicationHitlFeedback()
-        try:
-            return DeduplicationHitlFeedback.model_validate_json(raw_feedback)
-        except Exception as exc:
-            logger.warning("DeduplicationAgent: ignoring invalid hitl_feedback payload: %s", exc)
-            return DeduplicationHitlFeedback()
-
-    @staticmethod
-    def _coerce_pending_strategy_review(
-        existing_result: DeduplicationResult | None,
-    ) -> DedupStrategyReview | None:
-        if existing_result is None:
-            return None
-        return existing_result.pending_strategy_review
-
-    def _build_strategy_review(
-        self,
-        df: pd.DataFrame,
-        validated_decision: ValidatedDedupDecision,
-        dedup_input: DeduplicationAgentInput,
-    ) -> DedupStrategyReview:
-        proposed_key_columns = list(validated_decision.key_columns)
-        suggested_identifier_columns = self._suggested_identifier_columns(dedup_input)
-        ignored_columns = [
-            column
-            for column in (dedup_input.dataset_schema or {}).keys()
-            if self._looks_like_technical_id(column, dedup_input)
-        ]
-        warnings = list(validated_decision.validation_notes)
-        preview = self._build_preview_summary(
-            df,
-            validated_decision,
-            dedup_input,
-        )
-        if validated_decision.unresolved_collisions:
-            warnings.extend(
-                self._collision_rationale(collision.get("collision_type"), collision.get("key_columns") or proposed_key_columns)
-                for collision in validated_decision.unresolved_collisions
-            )
-        questions = [
-            "Which columns should define the same entity?",
-            "Which columns should be treated as reliable identifiers?",
-            "Which columns should be ignored because they are technical or not trustworthy for deduplication?",
-            "How should one row be kept from each duplicate group?",
-        ]
-        return DedupStrategyReview(
-            proposed_mode=validated_decision.mode,
-            proposed_key_columns=proposed_key_columns,
-            suggested_identifier_columns=suggested_identifier_columns,
-            ignored_columns=ignored_columns,
-            keep_rule=validated_decision.keep_rule,
-            questions=questions,
-            warnings=self._dedupe_strings(warnings),
-            preview=preview,
-        )
-
-    def _build_preview_summary(
-        self,
-        df: pd.DataFrame,
-        validated_decision: ValidatedDedupDecision,
-        dedup_input: DeduplicationAgentInput,
-    ) -> DedupPreviewSummary:
-        if validated_decision.mode == "exact_key" and validated_decision.key_columns:
-            normalized_keys = build_normalized_key_frame(
-                df,
-                validated_decision.key_columns,
-                explicit_semantics=validated_decision.column_semantics,
-                semantic_profile=dedup_input.semantic_profile,
-            )
-            working = df.join(normalized_keys)
-            compare_columns = list(normalized_keys.columns)
-            duplicate_mask = working.duplicated(subset=compare_columns, keep=False)
-            duplicate_rows = int(working.duplicated(subset=compare_columns, keep="first").sum())
-            duplicate_group_count = self._count_duplicate_groups(working.loc[duplicate_mask], compare_columns)
-            sample_groups: list[DedupPreviewGroup] = []
-            if duplicate_mask.any():
-                grouped = working.loc[duplicate_mask].groupby(compare_columns, dropna=False)
-                for _, group in grouped:
-                    if len(sample_groups) >= 5:
-                        break
-                    sample_rows = []
-                    for _, row in df.loc[group.index].head(2).iterrows():
-                        sample_rows.append(
-                            {
-                                column: self._json_safe_value(row[column])
-                                for column in self._preview_visible_columns(validated_decision.key_columns, df.columns)
-                            }
-                        )
-                    group_key = {
-                        column: self._json_safe_value(group.iloc[0][compare_name])
-                        for column, compare_name in zip(validated_decision.key_columns, compare_columns, strict=False)
-                    }
-                    sample_groups.append(
-                        DedupPreviewGroup(
-                            group_key=group_key,
-                            row_count=int(len(group)),
-                            sample_rows=sample_rows,
-                        )
-                    )
-            return DedupPreviewSummary(
-                duplicate_rows=duplicate_rows,
-                duplicate_groups=duplicate_group_count,
-                sample_groups=sample_groups,
-            )
-
-        full_row_result = execute_full_row_dedup(df)
-        return DedupPreviewSummary(
-            duplicate_rows=int(full_row_result["full_row_duplicate_count"]),
-            duplicate_groups=int(full_row_result["duplicate_group_count"]),
-            sample_groups=[],
-        )
-
-    def _apply_hitl_feedback(
-        self,
-        validated_decision: ValidatedDedupDecision,
-        pending_strategy_review: DedupStrategyReview,
-        hitl_feedback: DeduplicationHitlFeedback,
-        df: pd.DataFrame,
-        dedup_input: DeduplicationAgentInput,
-    ) -> AppliedHitlResult:
-        requested_key_columns = self._dedupe_columns(
-            list(hitl_feedback.key_columns or pending_strategy_review.proposed_key_columns)
-        )
-        ignored_columns = self._dedupe_columns(
-            list(hitl_feedback.ignored_columns or pending_strategy_review.ignored_columns)
-        )
-        requested_key_columns = [column for column in requested_key_columns if column not in set(ignored_columns)]
-        missing_columns = [column for column in requested_key_columns if column not in df.columns]
-        if missing_columns:
-            raise ValueError(f"HITL feedback selected unknown key columns: {missing_columns}")
-
-        keep_rule = hitl_feedback.keep_rule or pending_strategy_review.keep_rule
-        resolved_semantics = self._resolve_column_semantics(
-            requested_key_columns,
-            dedup_input,
-            llm_semantics=validated_decision.column_semantics,
-        )
-        updated_decision = ValidatedDedupDecision(
-            mode="exact_key" if requested_key_columns else "exact_full_row",
-            key_columns=requested_key_columns,
-            column_semantics=resolved_semantics,
-            ignore_columns=ignored_columns,
-            fuzzy_plan=validated_decision.fuzzy_plan,
-            decision_source=validated_decision.decision_source,
-            confidence=validated_decision.confidence,
-            reasoning_summary=validated_decision.reasoning_summary,
-            keep_rule=keep_rule,
-            validation_notes=list(validated_decision.validation_notes),
-            unresolved_collisions=list(validated_decision.unresolved_collisions),
-        )
-        notes = ["Applied human-reviewed dedup strategy before cleaning."]
-        if hitl_feedback.identifier_columns:
-            notes.append(
-                "Human confirmed identifier columns: "
-                + ", ".join(self._dedupe_columns(hitl_feedback.identifier_columns))
-                + "."
-            )
-        if hitl_feedback.note:
-            notes.append(f"Human note: {hitl_feedback.note}")
-        return AppliedHitlResult(
-            validated_decision=updated_decision,
-            notes=notes,
-            pending_strategy_review=None,
-        )
-
-    def _suggested_identifier_columns(self, dedup_input: DeduplicationAgentInput) -> list[str]:
-        available_columns = list((dedup_input.dataset_schema or {}).keys())
-        return [
-            column
-            for column in available_columns
-            if self._is_hard_identifier_column(column, dedup_input)
-        ][:8]
-
-    @staticmethod
-    def _preview_visible_columns(key_columns: list[str], available_columns: Any) -> list[str]:
-        visible = list(key_columns)
-        for column in available_columns:
-            if column in visible:
-                continue
-            visible.append(column)
-            if len(visible) >= max(3, len(key_columns) + 2):
-                break
-        return visible
-
-    @staticmethod
-    def _collision_rationale(collision_type: str | None, key_columns: list[str]) -> str:
-        if collision_type == "name_only":
-            return f"Rows matched on name-like fields {key_columns} without a hard identifier."
-        if collision_type == "weak_phone_only":
-            return f"Rows matched on phone-like field {key_columns}, which may be shared or reused."
-        return f"Rows matched on weak key fields {key_columns} and were not auto-merged."
-
-    @staticmethod
-    def _dedupe_strings(values: list[str]) -> list[str]:
-        seen: set[str] = set()
-        ordered: list[str] = []
-        for value in values:
-            if value and value not in seen:
-                ordered.append(value)
-                seen.add(value)
-        return ordered
-
-    @staticmethod
-    def _fingerprint_row(row: pd.Series) -> str:
-        payload = {
-            str(column): DeduplicationAgent._json_safe_value(value)
-            for column, value in row.items()
-        }
-        canonical = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
-        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-
-    @staticmethod
-    def _json_safe_value(value: Any) -> Any:
-        if pd.isna(value):
-            return None
-        if hasattr(value, "item"):
-            try:
-                return value.item()
-            except Exception:
-                return str(value)
-        return value
 
     def _rebuild_decision_from_state(
         self,
@@ -1823,6 +1572,21 @@ class DeduplicationAgent(BaseAgent):
         if hasattr(obj, "dict"):
             return obj.dict()
         return obj
+
+    @staticmethod
+    def _planner_keep_rule(strategy: dict[str, Any]) -> str:
+        explicit = strategy.get("keep_rule")
+        if explicit in {"keep_most_complete", "keep_first", "keep_last"}:
+            return explicit
+
+        key_based = strategy.get("key_based") or {}
+        survivor_policy = key_based.get("survivor_policy") or {}
+        fallback = survivor_policy.get("fallback")
+        if fallback == "last":
+            return "keep_last"
+        if fallback == "first":
+            return "keep_first"
+        return "keep_most_complete"
 
     @staticmethod
     def _clean_json_content(content: str) -> str:

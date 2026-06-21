@@ -18,8 +18,6 @@ def build_validation_results(
     unresolved_collisions: list[dict[str, Any]],
     fuzzy_candidate_count: int,
     fuzzy_notes: list[str],
-    pending_strategy_review: bool,
-    proposed_key_columns: list[str],
 ) -> list[ValidationResultItem]:
     """Build validation items using the current repo schema."""
 
@@ -43,11 +41,6 @@ def build_validation_results(
         replan_hints["fuzzy_notes"] = fuzzy_notes
 
     recommended_next_action = "pass" if not failed_rules else "retry_worker"
-    if pending_strategy_review:
-        metrics_observed["pending_strategy_review"] = True
-        metrics_observed["proposed_key_columns"] = proposed_key_columns
-        replan_hints["hitl_reason"] = "Dedup strategy review is required before cleaning."
-        recommended_next_action = "hitl"
 
     return [
         ValidationResultItem(
