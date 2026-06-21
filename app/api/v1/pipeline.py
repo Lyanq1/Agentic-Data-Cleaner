@@ -217,6 +217,10 @@ class ResolveRequest(BaseModel):
     answers: dict[str, str]
 
 
+class ApprovePlanRequest(BaseModel):
+    note: str | None = None
+
+
 @router.post("/pipeline/{run_id}/resolve", summary="Submit clarification answers and resume pipeline")
 async def api_resolve_pipeline(
     run_id: str,
@@ -349,6 +353,7 @@ async def api_resolve_pipeline(
 async def api_approve_plan(
     run_id: str,
     background_tasks: BackgroundTasks,
+    payload: ApprovePlanRequest | None = None,
 ):
     """Resume the pipeline from the plan-approval checkpoint."""
     config = {"configurable": {"thread_id": run_id}}
@@ -359,6 +364,24 @@ async def api_approve_plan(
         
         if not snapshot or not snapshot.values:
             raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found.")
+
+        state = snapshot.values
+        execution_plan = state.get("execution_plan")
+        review = None
+        if execution_plan is not None:
+            if hasattr(execution_plan, "review"):
+                review = execution_plan.review
+            elif isinstance(execution_plan, dict):
+                review = execution_plan.get("review")
+
+        if review is None:
+            raise HTTPException(status_code=400, detail="No pending execution plan review is available for this run.")
+
+        approval_updates = {
+            "hitl_status": "approved",
+            "messages": [HumanMessage(content=payload.note)] if payload and payload.note else [],
+        }
+        await graph.aupdate_state(snapshot.config if getattr(snapshot, "config", None) else config, approval_updates, as_node="planner")
             
     # Resume graph execution in the background
     async def resume_graph():

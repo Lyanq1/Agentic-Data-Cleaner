@@ -10,7 +10,16 @@ from app.agents.registry import AgentRegistry
 from datetime import datetime
 from app.graphs.states.global_state import GlobalState
 
-from app.graphs.states.planning import ExecutionPlan, TaskDetail, TaskDetailWrapper, PlanMetadata, GlobalConstraints
+from app.graphs.states.planning import (
+    ExecutionPlan,
+    TaskDetail,
+    TaskDetailWrapper,
+    PlanMetadata,
+    GlobalConstraints,
+    PlanReview,
+    ReviewField,
+    ReviewSection,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +31,8 @@ class PlannerAgent(BaseAgent):
     name = "planner"
     description = "Generates a structured execution plan for deduplication, null handling, and type casting."
     tools = []  # pure LLM reasoning
+
+    _EXECUTION_ORDER = ["deduplication", "null_handling", "type_casting"]
 
     async def run(self, state: GlobalState) -> dict[str, Any]:
         """Invoke the LLM to generate the ExecutionPlan.
@@ -193,16 +204,18 @@ class PlannerAgent(BaseAgent):
                 plan_summary=f"Fallback execution plan created because LLM plan parsing failed: {e}."
             )
 
+        response = response.model_copy(update={"review": self._build_plan_review(response)})
+
         logger.info("PlannerAgent successfully parsed execution plan.")
 
-        # Enforce execution sequence: deduplication -> type_casting -> null_handling
+        # Enforce execution sequence: deduplication -> null_handling -> type_casting
         active_tasks_set = {
             task.work_order.task_id
             for task in response.task_list
             if not task.work_order.skip
         }
         active_task_names = []
-        for task_id in ["deduplication", "type_casting", "null_handling"]:
+        for task_id in self._EXECUTION_ORDER:
             if task_id in active_tasks_set:
                 active_task_names.append(task_id)
 
@@ -217,7 +230,129 @@ class PlannerAgent(BaseAgent):
             "execution_plan": response,
             "task_list": active_task_names,
             "current_task_idx": 0,
-            "retry_count": 0
+            "retry_count": 0,
+            "hitl_status": "pending" if active_task_names else None,
+            "hitl_checkpoint": 0 if active_task_names else None,
         }
 
         return updates
+
+    def _build_plan_review(self, plan: ExecutionPlan) -> PlanReview:
+        sections: list[ReviewSection] = []
+        warnings: list[str] = []
+
+        for wrapper in plan.task_list:
+            task = wrapper.work_order
+            if task.skip:
+                continue
+            if task.task_id == "deduplication":
+                sections.append(self._build_dedup_review_section(task))
+                if task.rationale:
+                    warnings.append(f"{task.task_id}: {task.rationale}")
+                break
+
+        if not sections:
+            warnings.append("No deduplication task is active in the current execution plan.")
+
+        return PlanReview(sections=sections, warnings=warnings[:8])
+
+    def _build_dedup_review_section(self, task: TaskDetail) -> ReviewSection:
+        strategy = self._strategy_dict(task)
+        primary_keys = list(strategy.get("primary_keys") or task.columns)
+        identifier_columns = list(strategy.get("identifier_columns") or primary_keys)
+        ignored_columns = list(strategy.get("ignored_columns") or [])
+        keep_rule = self._planner_keep_rule(strategy)
+        dedup_mode = self._planner_dedup_mode(strategy)
+        fuzzy_enabled = bool((strategy.get("fuzzy_matching") or {}).get("enabled"))
+
+        return ReviewSection(
+            task_id=task.task_id,
+            title="Deduplication",
+            fields=[
+                ReviewField(
+                    field_key="mode",
+                    label="Dedup mode",
+                    value=dedup_mode,
+                    editable=False,
+                    input_type="readonly",
+                    help_text="Planner-selected broad deduplication mode.",
+                ),
+                ReviewField(
+                    field_key="key_columns",
+                    label="Key columns",
+                    value=primary_keys,
+                    editable=True,
+                    input_type="multiselect",
+                    help_text="Columns that define the same entity or record.",
+                ),
+                ReviewField(
+                    field_key="identifier_columns",
+                    label="Identifier columns",
+                    value=identifier_columns,
+                    editable=True,
+                    input_type="multiselect",
+                    help_text="Columns the planner considers strong or supporting identifiers.",
+                ),
+                ReviewField(
+                    field_key="ignored_columns",
+                    label="Ignored columns",
+                    value=ignored_columns,
+                    editable=True,
+                    input_type="multiselect",
+                    help_text="Columns that should not drive deduplication decisions.",
+                ),
+                ReviewField(
+                    field_key="keep_rule",
+                    label="Keep rule",
+                    value=keep_rule,
+                    editable=True,
+                    input_type="select",
+                    options=["keep_most_complete", "keep_first", "keep_last"],
+                    help_text="How to choose the survivor row within each duplicate group.",
+                ),
+                ReviewField(
+                    field_key="fuzzy_enabled",
+                    label="Fuzzy candidate generation",
+                    value=fuzzy_enabled,
+                    editable=False,
+                    input_type="readonly",
+                    help_text="Whether planner enabled fuzzy candidate generation for this task.",
+                ),
+            ],
+        )
+
+    @staticmethod
+    def _strategy_dict(task: TaskDetail) -> dict[str, Any]:
+        strategy = task.strategy
+        if strategy is None:
+            return {}
+        if hasattr(strategy, "model_dump"):
+            return strategy.model_dump()
+        if hasattr(strategy, "dict"):
+            return strategy.dict()
+        return strategy if isinstance(strategy, dict) else {}
+
+    @staticmethod
+    def _planner_keep_rule(strategy: dict[str, Any]) -> str:
+        explicit = strategy.get("keep_rule")
+        if explicit in {"keep_most_complete", "keep_first", "keep_last"}:
+            return explicit
+
+        key_based = strategy.get("key_based") or {}
+        survivor_policy = key_based.get("survivor_policy") or {}
+        fallback = survivor_policy.get("fallback")
+        if fallback == "last":
+            return "keep_last"
+        if fallback == "first":
+            return "keep_first"
+        return "keep_most_complete"
+
+    @staticmethod
+    def _planner_dedup_mode(strategy: dict[str, Any]) -> str:
+        primary_keys = strategy.get("primary_keys") or []
+        exact_match = strategy.get("exact_match") or {}
+        if primary_keys:
+            return "exact_key"
+        if exact_match.get("enabled"):
+            return "exact_full_row"
+        return "exact_full_row"

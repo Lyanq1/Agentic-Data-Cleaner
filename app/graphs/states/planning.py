@@ -11,14 +11,40 @@ class PlanMetadata(BaseModel):
     plan_version: int = 1
     created_at: str
 
+
 class GlobalConstraints(BaseModel):
     max_retries_per_task: int = 3
     preserve_columns: list[str] = Field(default_factory=list)
+
+
+class ReviewField(BaseModel):
+    field_key: str
+    label: str
+    value: Any
+    editable: bool = True
+    input_type: Literal["multiselect", "select", "text", "boolean", "readonly"] = "readonly"
+    options: list[str] = Field(default_factory=list)
+    help_text: str | None = None
+
+
+class ReviewSection(BaseModel):
+    task_id: str
+    title: str
+    fields: list[ReviewField] = Field(default_factory=list)
+
+
+class PlanReview(BaseModel):
+    review_type: Literal["execution_plan_review"] = "execution_plan_review"
+    sections: list[ReviewSection] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
 
 class DedupStrategy(BaseModel):
     dedup_scope: Literal["row_level", "key_level", "entity_level"]
     duplicate_types: list[Literal["exact_row", "duplicate_key", "fuzzy_entity"]]
     primary_keys: list[str] = Field(default_factory=list)
+    identifier_columns: list[str] = Field(default_factory=list)
+    ignored_columns: list[str] = Field(default_factory=list)
+    keep_rule: Literal["keep_most_complete", "keep_first", "keep_last"] = "keep_most_complete"
     exact_match: dict[str, Any] = Field(default_factory=dict)
     key_based: dict[str, Any] = Field(default_factory=dict)
     normalization: dict[str, list[str]] = Field(default_factory=dict)
@@ -73,4 +99,5 @@ class ExecutionPlan(BaseModel):
     plan_summary: str
     assumptions: list[str] = Field(default_factory=list)
     global_constraints: GlobalConstraints
+    review: PlanReview | None = None
     task_list: list[TaskDetailWrapper] = Field(default_factory=list)

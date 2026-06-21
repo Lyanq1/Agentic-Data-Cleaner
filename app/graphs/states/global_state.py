@@ -130,7 +130,6 @@ class GlobalState(TypedDict):
     # HITL Fields
     hitl_checkpoint: int | None
     hitl_status: Literal["pending", "approved", "rejected"] | None
-    hitl_feedback: str | None
 
     # Global Shared Errors
     global_errors: Annotated[list[str], append_list]
