@@ -301,10 +301,26 @@ class InputValidatorAgent(BaseAgent):
 
         # If pipeline_mode is benchmark and status is needs_clarification, auto-resolve
         pipeline_mode = state.get("pipeline_mode", "interactive")
+        
+        has_user_submitted = any(
+            isinstance(msg, HumanMessage) and "Here are my decisions" in msg.content
+            for msg in state.get("messages", [])
+        )
+
         if pipeline_mode == "benchmark" and response.status == "needs_clarification":
             from app.agents.input_validator.resolver import resolve_benchmark_clarifications
             logger.info("InputValidatorAgent: Auto-resolving clarifications in benchmark mode...")
             resolved_dict = resolve_benchmark_clarifications(state, response.model_dump())
+            
+            if not has_user_submitted:
+                # Keep status as needs_clarification to force the graph to pause for user review
+                resolved_dict["status"] = "needs_clarification"
+                resolved_dict["benchmark_approved"] = False
+            else:
+                # User has reviewed and approved/submitted decisions, so mark ready
+                resolved_dict["status"] = "ready"
+                resolved_dict["benchmark_approved"] = True
+                
             response = InputValidationResult.model_validate(resolved_dict)
 
         # Format the response into a JSON string for the message, 
@@ -334,7 +350,7 @@ class InputValidatorAgent(BaseAgent):
 
         # In benchmark mode, if we resolved clarifications, inject a summary HumanMessage
         # summarizing the auto-resolved decisions so the planner has access to them in message history.
-        if pipeline_mode == "benchmark" and is_answered_or_benchmark:
+        if pipeline_mode == "benchmark" and is_answered_or_benchmark and not has_user_submitted:
             clarifications = response.clarifications
             summary_lines = ["Here are my decisions for the clarification questions:"]
             if clarifications:

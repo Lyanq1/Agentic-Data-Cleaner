@@ -338,6 +338,7 @@ async def api_resolve_pipeline(
         original_filename=original_filename,
         data_schema=state.get("dataset_schema"),
         clean_dataset_path=state.get("clean_dataset_path"),
+        pipeline_mode=state.get("pipeline_mode", "interactive"),
     )
     
     return {

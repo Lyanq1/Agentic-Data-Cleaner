@@ -101,3 +101,7 @@ class InputValidationResult(BaseModel):
         default=None,
         description="Clarifications needed per active issue if status is 'needs_clarification'.",
     )
+    benchmark_approved: bool | None = Field(
+        default=None,
+        description="Whether the user approved the benchmark auto-resolved clarifications.",
+    )

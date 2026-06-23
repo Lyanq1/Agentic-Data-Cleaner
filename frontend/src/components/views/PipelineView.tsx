@@ -188,6 +188,7 @@ const CompletedPipelineReviewPanel: React.FC<{
             onGeneratePlan={() => undefined}
             isGenerating={false}
             hasExecutionPlan
+            pipelineMode={state.pipeline_mode}
           />
         </ReviewSection>
       )}
@@ -738,6 +739,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
                   validationResult={state.input_validation_result}
                   onGeneratePlan={handleGeneratePlan}
                   isGenerating={isGeneratingPlan}
+                  pipelineMode={state.pipeline_mode}
                 />
               )}
 

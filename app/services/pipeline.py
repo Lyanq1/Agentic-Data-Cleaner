@@ -81,10 +81,7 @@ async def run_pipeline(
     config = {"configurable": {"thread_id": run_id}}
 
     async with get_checkpointer_manager().get() as checkpointer:
-        if pipeline_mode == "benchmark":
-            graph = build_graph(checkpointer=checkpointer, interrupt_before=[])
-        else:
-            graph = build_graph(checkpointer=checkpointer)
+        graph = build_graph(checkpointer=checkpointer)
 
         logger.info(f"Pipeline started — run_id={run_id}, file={original_filename}, mode={pipeline_mode}")
         
@@ -197,6 +194,7 @@ async def run_pipeline(
         "completed_steps": final_state.get("completed_steps", []),
         "f1_metrics": final_state.get("f1_metrics"),
         "token_metrics": final_state.get("token_metrics"),
+        "pipeline_mode": final_state.get("pipeline_mode"),
     }
 
 
@@ -248,6 +246,7 @@ async def get_pipeline_state(run_id: str) -> dict[str, Any] | None:
         "errors": state.get("global_errors", []),
         "f1_metrics": state.get("f1_metrics"),
         "token_metrics": state.get("token_metrics"),
+        "pipeline_mode": state.get("pipeline_mode"),
         "next_node": snapshot.next,  # which node would run next (empty if done)
     }
 

@@ -134,6 +134,7 @@ const CircularProgress = ({ value, label }: { value: number, label: string }) =>
   const radius = 24;
   const circumference = 2 * Math.PI * radius;
   const offset = circumference - (value / 100) * circumference;
+  const decimalValue = (value / 100).toFixed(2);
   
   return (
     <div className="flex flex-col items-center justify-center gap-2">
@@ -149,7 +150,7 @@ const CircularProgress = ({ value, label }: { value: number, label: string }) =>
             strokeLinecap="round" 
           />
         </svg>
-        <span className="absolute text-xs font-bold text-foreground">{Math.round(value)}%</span>
+        <span className="absolute text-xs font-bold text-foreground">{decimalValue}</span>
       </div>
       <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">{label}</span>
     </div>

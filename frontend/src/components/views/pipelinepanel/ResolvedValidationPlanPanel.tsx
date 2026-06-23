@@ -8,7 +8,8 @@ export const ResolvedValidationPlanPanel: React.FC<{
   onGeneratePlan: () => void;
   isGenerating: boolean;
   hasExecutionPlan?: boolean;
-}> = ({ validationResult, onGeneratePlan, isGenerating, hasExecutionPlan }) => {
+  pipelineMode?: string;
+}> = ({ validationResult, onGeneratePlan, isGenerating, hasExecutionPlan, pipelineMode }) => {
   const reasoning = validationResult.reasoning || "";
   const actionPlan = validationResult.action_plan || {};
   const resolvedByUser = validationResult.resolved_by_user || [];
@@ -112,26 +113,49 @@ export const ResolvedValidationPlanPanel: React.FC<{
         )}
 
         {submittedAnswers.length > 0 && (
-          <details className="mt-4 text-xs font-semibold">
-            <summary className="cursor-pointer text-muted-foreground hover:text-foreground font-medium select-none transition-colors">
-              View your submitted answers
-            </summary>
-            <div className="mt-2.5 rounded-xl border bg-muted/15 p-4 space-y-2.5 divide-y divide-border/90">
-              {submittedAnswers.map((item) => (
-                <div key={item.key} className="pt-2 first:pt-0">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/90 block mb-0.5">
-                    {formatDisplayValue(item.label)}
-                  </span>
-                  <p className="text-xs text-foreground font-semibold leading-relaxed mb-1">
-                    {formatDisplayValue(item.question)}
-                  </p>
-                  <p className="text-xs text-foreground font-medium">
-                    {formatDisplayValue(item.answer)}
-                  </p>
-                </div>
-              ))}
+          pipelineMode === "benchmark" ? (
+            <div className="mt-4">
+              <h4 className="text-xs font-semibold text-violet-700 uppercase tracking-wider mb-2.5">
+                🤖 Auto-Resolved Decisions
+              </h4>
+              <div className="rounded-xl border bg-violet-50/20 border-violet-100/50 p-4 space-y-2.5 divide-y divide-border/90">
+                {submittedAnswers.map((item) => (
+                  <div key={item.key} className="pt-2 first:pt-0">
+                    <span className="text-[9px] font-bold uppercase tracking-wider text-violet-600 block mb-0.5">
+                      {formatDisplayValue(item.label)}
+                    </span>
+                    <p className="text-xs text-foreground font-semibold leading-relaxed mb-1">
+                      {formatDisplayValue(item.question)}
+                    </p>
+                    <p className="text-xs text-foreground font-medium bg-white/70 rounded px-2.5 py-1 border border-slate-100 mt-1 inline-block">
+                      Selected Strategy: <strong className="text-violet-700">{formatDisplayValue(item.answer)}</strong>
+                    </p>
+                  </div>
+                ))}
+              </div>
             </div>
-          </details>
+          ) : (
+            <details className="mt-4 text-xs font-semibold">
+              <summary className="cursor-pointer text-muted-foreground hover:text-foreground font-medium select-none transition-colors">
+                View your submitted answers
+              </summary>
+              <div className="mt-2.5 rounded-xl border bg-muted/15 p-4 space-y-2.5 divide-y divide-border/90">
+                {submittedAnswers.map((item) => (
+                  <div key={item.key} className="pt-2 first:pt-0">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/90 block mb-0.5">
+                      {formatDisplayValue(item.label)}
+                    </span>
+                    <p className="text-xs text-foreground font-semibold leading-relaxed mb-1">
+                      {formatDisplayValue(item.question)}
+                    </p>
+                    <p className="text-xs text-foreground font-medium">
+                      {formatDisplayValue(item.answer)}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </details>
+          )
         )}
 
         {!hasExecutionPlan && (

@@ -114,7 +114,7 @@ export const pipelineApi = {
     const reportCompleted =
       data.current_step === 'reporting' || (data.completed_steps || []).includes('reporting');
     const awaiting_hitl = data.pipeline_mode === 'benchmark'
-      ? false
+      ? ((isValidationClarification && valResult?.benchmark_approved !== true) || nextNodes.includes('report_agent'))
       : (hasUnansweredClarifications(valResult) || nextNodes.includes('report_agent'));
     const isResolvingClarification =
       isValidationClarification &&
@@ -239,6 +239,7 @@ export const pipelineApi = {
       input_validation_result: valResult,
       execution_plan: data.execution_plan,
       f1_metrics: data.f1_metrics,
+      pipeline_mode: data.pipeline_mode,
     };
   },
 
@@ -247,7 +248,9 @@ export const pipelineApi = {
     const state = await pipelineApi.getFullState(runId);
     const valResult = state.input_validation_result;
     
-    if (hasUnansweredClarifications(valResult)) {
+    const isBenchmarkAwaiting = state.pipeline_mode === 'benchmark' && valResult?.status === 'needs_clarification' && valResult?.benchmark_approved !== true;
+    
+    if (hasUnansweredClarifications(valResult) || isBenchmarkAwaiting) {
       return {
         checkpoint_id: runId,
         checkpoint_type: 'input_validation_clarification',

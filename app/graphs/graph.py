@@ -76,6 +76,15 @@ def route_from_input_validator(state: GlobalState) -> str:
         else getattr(val_result, "status", None)
     )
     if status == "needs_clarification":
+        from langchain_core.messages import HumanMessage
+        has_user_submitted = any(
+            isinstance(msg, HumanMessage) and "Here are my decisions" in msg.content
+            for msg in state.get("messages", [])
+        )
+        if state.get("pipeline_mode") == "benchmark" and not has_user_submitted:
+            logger.info("route_from_input_validator: Pausing benchmark run for user review of pre-filled answers.")
+            return "end"
+
         clarifications = (
             val_result.get("clarifications")
             if isinstance(val_result, dict)

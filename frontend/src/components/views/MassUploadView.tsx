@@ -584,7 +584,7 @@ export const MassUploadView: React.FC = () => {
         <div className="rounded-xl border bg-card p-4 shadow-sm">
           <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Average F1 Accuracy</div>
           <div className="text-2xl font-bold mt-2 text-primary">
-            {executiveStats.avgF1 !== null ? `${executiveStats.avgF1.toFixed(1)}%` : "N/A"}
+            {executiveStats.avgF1 !== null ? (executiveStats.avgF1 / 100).toFixed(2) : "N/A"}
           </div>
         </div>
       </div>
@@ -1272,16 +1272,16 @@ export const MassUploadView: React.FC = () => {
                           {Object.keys(rep.validation?.column_quality_after || {}).length || "N/A"}
                         </td>
                         <td className="py-2.5 text-center font-mono font-semibold text-primary">
-                          {typeof f1.f1_score === "number" ? `${(f1.f1_score * 100).toFixed(1)}%` : "—"}
+                          {typeof f1.f1_score === "number" ? f1.f1_score.toFixed(2) : "—"}
                         </td>
                         <td className="py-2.5 text-center font-mono">
-                          {typeof f1.error_correction_precision === "number" ? `${(f1.error_correction_precision * 100).toFixed(1)}%` : "—"}
+                          {typeof f1.error_correction_precision === "number" ? f1.error_correction_precision.toFixed(2) : "—"}
                         </td>
                         <td className="py-2.5 text-center font-mono">
-                          {typeof f1.error_correction_recall === "number" ? `${(f1.error_correction_recall * 100).toFixed(1)}%` : "—"}
+                          {typeof f1.error_correction_recall === "number" ? f1.error_correction_recall.toFixed(2) : "—"}
                         </td>
                         <td className="py-2.5 text-center font-mono">
-                          {typeof f1.cell_accuracy === "number" ? `${(f1.cell_accuracy * 100).toFixed(1)}%` : "—"}
+                          {typeof f1.cell_accuracy === "number" ? f1.cell_accuracy.toFixed(2) : "—"}
                         </td>
                         <td className="py-2.5 text-slate-600 max-w-[200px] truncate" title={
                           rep.transformations?.join(", ") || 
