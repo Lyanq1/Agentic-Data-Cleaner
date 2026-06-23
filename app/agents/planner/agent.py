@@ -70,8 +70,14 @@ class PlannerAgent(BaseAgent):
             # Remove thinking field to reduce token usage and avoid confusing the LLM parser
             del semantic_profile_dict["thinking"]
 
+        pipeline_mode = state.get("pipeline_mode", "interactive")
+        if pipeline_mode == "benchmark":
+            user_instruction_block = "N/A — no user requirement; goal is the cleanest possible version of this dataset."
+        else:
+            user_instruction_block = user_prompt
+
         human_content = (
-            f"## User Instruction\n{user_prompt}\n\n"
+            f"## User Instruction\n{user_instruction_block}\n\n"
         )
         if validation_dict:
             human_content += f"## Input Validation Decision\n```json\n{json.dumps(validation_dict, indent=2, default=str)}\n```\n\n"

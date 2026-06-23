@@ -44,6 +44,7 @@ export const UploadView: React.FC<UploadViewProps> = ({
   const [uploadedRunId, setUploadedRunId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'profile' | 'semantic' | 'preview'>('profile');
   const [error, setError] = useState<string | null>(null);
+  const [isBenchmarkMode, setIsBenchmarkMode] = useState(false);
 
   useEffect(() => {
     if (initialRunId && !profileData && !isUploading) {
@@ -174,6 +175,7 @@ export const UploadView: React.FC<UploadViewProps> = ({
     setPreviewData(null);
     setProfileData(null);
     setUploadedRunId(null);
+    setIsBenchmarkMode(false);
     const input = document.getElementById('file-upload') as HTMLInputElement;
     if (input) input.value = '';
     const cleanInput = document.getElementById('clean-file-upload') as HTMLInputElement;
@@ -194,6 +196,12 @@ export const UploadView: React.FC<UploadViewProps> = ({
     setError(null);
 
     try {
+      if (isBenchmarkMode && cleanFile) {
+        const response = await pipelineApi.uploadBenchmarkFile(file, cleanFile);
+        onUploadSuccess(response.run_id);
+        return;
+      }
+
       const response = await pipelineApi.uploadFile(file, requirements, cleanFile);
       setUploadedRunId(response.run_id);
       
@@ -382,17 +390,39 @@ export const UploadView: React.FC<UploadViewProps> = ({
                 )}
               </div>
 
-              <div className="space-y-2">
-                <label className="text-sm font-semibold text-slate-800">
-                  Business Cleaning Requirements (Optional)
-                </label>
-                <textarea
-                  className="flex w-full rounded-lg border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 min-h-[100px] transition-all"
-                  placeholder="e.g. Clean the email column, drop rows with missing values, extract domain names..."
-                  value={requirements}
-                  onChange={(e) => setRequirements(e.target.value)}
-                />
-              </div>
+              {cleanFile && (
+                <div className="flex items-center gap-3 p-3 border rounded-xl bg-slate-50/45 border-slate-100 hover:bg-slate-50 transition-all duration-300">
+                  <input
+                    type="checkbox"
+                    id="benchmark-mode"
+                    checked={isBenchmarkMode}
+                    onChange={(e) => setIsBenchmarkMode(e.target.checked)}
+                    className="h-4.5 w-4.5 rounded border-slate-200 text-primary focus:ring-primary/25 cursor-pointer"
+                  />
+                  <div className="flex flex-col cursor-pointer select-none" onClick={() => setIsBenchmarkMode(!isBenchmarkMode)}>
+                    <label className="text-xs font-semibold text-slate-800 cursor-pointer">
+                      Benchmark Mode
+                    </label>
+                    <span className="text-[10px] text-muted-foreground">
+                      Auto-resolve validations and evaluate F1-score without HIL interrupts.
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {!isBenchmarkMode && (
+                <div className="space-y-2">
+                  <label className="text-sm font-semibold text-slate-800">
+                    Business Cleaning Requirements (Optional)
+                  </label>
+                  <textarea
+                    className="flex w-full rounded-lg border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 min-h-[100px] transition-all"
+                    placeholder="e.g. Clean the email column, drop rows with missing values, extract domain names..."
+                    value={requirements}
+                    onChange={(e) => setRequirements(e.target.value)}
+                  />
+                </div>
+              )}
 
               {error && (
                 <div className="p-3 border border-destructive/20 bg-destructive/5 text-destructive text-sm rounded-lg flex items-start space-x-2">

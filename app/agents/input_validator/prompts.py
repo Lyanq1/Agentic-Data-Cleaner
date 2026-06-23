@@ -83,7 +83,7 @@ For each active issue (that is not already explicitly resolved by the user's ins
 
 **TYPECAST (if active and not explicitly resolved) — clarifications structured as follows:**
   Q1_cast_column_<column_name> (generate individually for ALL columns where there is a type mismatch, i.e., the column's expected_type in the Semantic Profile is NOT "str", and its current physical dtype in the Statistical Profile is string/object/mixed):
-      - Ask the user directly whether they want to cast this specific column to its expected semantic type (e.g. int, float, bool, date, or datetime).
+      - Ask the user directly whether they want to cast this specific column to its expected semantic type (e.g. int, float, bool, date, datetime, or time).
       - Do NOT include an "options" field for this question, so the frontend automatically displays it as a Yes/No option.
       - The answer field will contain "Yes" or "No".
       - You MUST generate this question for ALL columns with a type mismatch. Do not skip any column that meets this condition.

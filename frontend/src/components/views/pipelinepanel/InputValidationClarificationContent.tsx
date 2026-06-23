@@ -18,13 +18,49 @@ export const InputValidationClarificationContent: React.FC<{
 
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [customInputs, setCustomInputs] = useState<Record<string, string>>({});
+  const [fillValueSubOption, setFillValueSubOption] = useState<Record<string, string>>({});
+  const [fillValueCustom, setFillValueCustom] = useState<Record<string, string>>({});
   const hasInitializedRef = React.useRef(false);
+
+  const getFillValueSubOptions = (colName: string) => {
+    const semProfile = payload.semantic_profile || {};
+    const colDetail = semProfile.columns?.[colName];
+    const expectedType = colDetail?.expected_type || "str";
+
+    if (expectedType === "int" || expectedType === "float") {
+      return [
+        { label: "0", value: "0" },
+        { label: "-1", value: "-1" },
+        { label: "Custom value (natural language)", value: "custom" },
+      ];
+    } else if (expectedType === "datetime" || expectedType === "date") {
+      return [
+        { label: "Today", value: "Today" },
+        { label: "Custom date/time (natural language)", value: "custom" },
+      ];
+    } else if (expectedType === "bool") {
+      return [
+        { label: "True", value: "True" },
+        { label: "False", value: "False" },
+        { label: "Custom value (natural language)", value: "custom" },
+      ];
+    } else {
+      return [
+        { label: '"" (Empty string)', value: '""' },
+        { label: '"Unknown"', value: '"Unknown"' },
+        { label: '"N/A"', value: '"N/A"' },
+        { label: "Custom value (natural language)", value: "custom" },
+      ];
+    }
+  };
 
   useEffect(() => {
     if (hasInitializedRef.current) return;
 
     const nextAnswers: Record<string, string> = {};
     const nextCustom: Record<string, string> = {};
+    const nextFillValueSubOption: Record<string, string> = {};
+    const nextFillValueCustom: Record<string, string> = {};
     categories.forEach((cat) => {
       const catData = clarifications[cat];
       if (catData) {
@@ -36,6 +72,22 @@ export const InputValidationClarificationContent: React.FC<{
               if (ansVal.startsWith("Custom strategy:")) {
                 nextAnswers[`${cat}.${qKey}`] = "Custom strategy (describe in your next prompt)";
                 nextCustom[`${cat}.${qKey}`] = ansVal.substring("Custom strategy:".length).trim();
+              } else if (ansVal.startsWith("fill_value:")) {
+                const val = ansVal.substring("fill_value:".length).trim();
+                nextAnswers[`${cat}.${qKey}`] = "fill_value";
+                const colName = qKey.startsWith("Q2_strategy_column_")
+                  ? qKey.substring("Q2_strategy_column_".length)
+                  : "";
+                if (colName) {
+                  const subOpts = getFillValueSubOptions(colName);
+                  const matchingOpt = subOpts.find(o => o.value === val);
+                  if (matchingOpt && val !== "custom") {
+                    nextFillValueSubOption[`${cat}.${qKey}`] = val;
+                  } else {
+                    nextFillValueSubOption[`${cat}.${qKey}`] = "custom";
+                    nextFillValueCustom[`${cat}.${qKey}`] = val;
+                  }
+                }
               } else {
                 nextAnswers[`${cat}.${qKey}`] = ansVal;
               }
@@ -46,6 +98,8 @@ export const InputValidationClarificationContent: React.FC<{
     });
     setAnswers(nextAnswers);
     setCustomInputs(nextCustom);
+    setFillValueSubOption(nextFillValueSubOption);
+    setFillValueCustom(nextFillValueCustom);
     hasInitializedRef.current = true;
   }, [payload, clarifications, categories]);
 
@@ -61,6 +115,17 @@ export const InputValidationClarificationContent: React.FC<{
       }
       return nextAnswers;
     });
+
+    if (val === "fill_value" && !fillValueSubOption[key]) {
+      const parts = key.split(".");
+      if (parts.length === 2 && parts[1].startsWith("Q2_strategy_column_")) {
+        const colName = parts[1].substring("Q2_strategy_column_".length);
+        const subOpts = getFillValueSubOptions(colName);
+        if (subOpts.length > 0) {
+          setFillValueSubOption((prev) => ({ ...prev, [key]: subOpts[0].value }));
+        }
+      }
+    }
   };
 
   const handleCustomInputChange = (key: string, val: string) => {
@@ -91,6 +156,12 @@ export const InputValidationClarificationContent: React.FC<{
               !customInputs[key]?.trim()
             ) {
               // Must provide text for custom strategy
+            } else if (
+              answers[key] === "fill_value" &&
+              fillValueSubOption[key] === "custom" &&
+              !fillValueCustom[key]?.trim()
+            ) {
+              // Must provide text for custom fill value
             } else {
               count += 1;
             }
@@ -99,7 +170,7 @@ export const InputValidationClarificationContent: React.FC<{
       }
     });
     return count;
-  }, [clarifications, answers, customInputs]);
+  }, [clarifications, answers, customInputs, fillValueSubOption, fillValueCustom]);
 
   const allAnswered = answeredCount === totalQuestions;
 
@@ -108,6 +179,13 @@ export const InputValidationClarificationContent: React.FC<{
     Object.keys(finalAnswers).forEach((key) => {
       if (finalAnswers[key].includes("Custom strategy") && customInputs[key]) {
         finalAnswers[key] = `Custom strategy: ${customInputs[key].trim()}`;
+      } else if (finalAnswers[key] === "fill_value") {
+        const subOpt = fillValueSubOption[key];
+        if (subOpt === "custom") {
+          finalAnswers[key] = `fill_value: ${fillValueCustom[key]?.trim() || ""}`;
+        } else {
+          finalAnswers[key] = `fill_value: ${subOpt}`;
+        }
       }
     });
     onDecision("approve", "User resolved all clarifications", finalAnswers);
@@ -163,9 +241,16 @@ export const InputValidationClarificationContent: React.FC<{
                     const selectedVal = answers[key] || "";
                     const isStrategy = q && typeof q === "object" && "options" in q;
                     let optionsToRender = q.options || [];
+
+                    const colName = qKey.startsWith("Q2_strategy_column_")
+                      ? qKey.substring("Q2_strategy_column_".length)
+                      : qKey.startsWith("Q1_allow_missing_column_")
+                        ? qKey.substring("Q1_allow_missing_column_".length)
+                        : qKey.startsWith("Q1_cast_column_")
+                          ? qKey.substring("Q1_cast_column_".length)
+                          : "";
+
                     if (cat === "null" && qKey.startsWith("Q2_strategy_column_")) {
-                      const colName = qKey.substring("Q2_strategy_column_".length);
-                      
                       // 1. Filter out keep_null if allow_missing is answered "No"
                       const q1Key = `null.Q1_allow_missing_column_${colName}`;
                       const q1Answer = answers[q1Key];
@@ -250,7 +335,74 @@ export const InputValidationClarificationContent: React.FC<{
                                         {optionLabel}
                                       </span>
                                     </label>
-                                    {isSelected && optConsequence && (
+                                    {isSelected && optionLabel === "fill_value" && (
+                                      <div className="ml-6 p-3 rounded-lg bg-indigo-50/40 border border-indigo-100/50 text-md text-indigo-950/90 leading-relaxed flex flex-col gap-3 animate-fadeIn">
+                                        {optConsequence && (
+                                          <div className="flex items-start gap-2">
+                                            <TextIcon className="w-4 h-4 text-indigo-500 shrink-0 mt-0.5">
+                                              !
+                                            </TextIcon>
+                                            <div>
+                                              <strong className="font-semibold text-indigo-900 block mb-0.5">
+                                                Consequence:
+                                              </strong>
+                                              {formatDisplayValue(optConsequence)}
+                                            </div>
+                                          </div>
+                                        )}
+                                        <div className="border-t border-indigo-100/50 pt-2 space-y-2">
+                                          <p className="text-xs font-semibold text-indigo-900/80 uppercase tracking-wider">
+                                            Select or enter a fill value:
+                                          </p>
+                                          <div className="flex flex-wrap gap-2">
+                                            {getFillValueSubOptions(colName).map((subOpt) => {
+                                              const isSubSelected = fillValueSubOption[key] === subOpt.value;
+                                              return (
+                                                <label
+                                                  key={subOpt.value}
+                                                  className={`flex items-center gap-2 text-xs cursor-pointer rounded-full px-3 py-1.5 border transition-all ${
+                                                    isSubSelected
+                                                      ? "bg-indigo-600 border-indigo-600 text-white shadow-sm font-medium"
+                                                      : "bg-white border-indigo-100 hover:border-indigo-300 text-indigo-900"
+                                                  }`}
+                                                >
+                                                  <input
+                                                    type="radio"
+                                                    name={`${key}_sub`}
+                                                    value={subOpt.value}
+                                                    checked={isSubSelected}
+                                                    onChange={() =>
+                                                      setFillValueSubOption((prev) => ({ ...prev, [key]: subOpt.value }))
+                                                    }
+                                                    disabled={!isAwaiting}
+                                                    className="sr-only"
+                                                  />
+                                                  {subOpt.label}
+                                                </label>
+                                              );
+                                            })}
+                                          </div>
+                                          {fillValueSubOption[key] === "custom" && (
+                                            <div className="mt-2 w-full animate-fadeIn">
+                                              <input
+                                                type="text"
+                                                value={fillValueCustom[key] || ""}
+                                                onChange={(e) =>
+                                                  setFillValueCustom((prev) => ({ ...prev, [key]: e.target.value }))
+                                                }
+                                                placeholder="E.g. 'yesterday', 'unknown', or any value..."
+                                                className="w-full text-sm rounded-md border border-indigo-200 px-3 py-2 bg-white text-foreground focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+                                                disabled={!isAwaiting}
+                                              />
+                                              <p className="text-[10px] text-indigo-700/80 mt-1 italic">
+                                                Tip: You can write any custom value or describe it in natural language.
+                                              </p>
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
+                                    )}
+                                    {isSelected && optionLabel !== "fill_value" && optConsequence && (
                                       <div className="ml-6 p-3 rounded-lg bg-indigo-50/40 border border-indigo-100/50 text-md text-indigo-950/90 leading-relaxed flex flex-col gap-2 animate-fadeIn">
                                         <div className="flex items-start gap-2">
                                           <TextIcon className="w-4 h-4 text-indigo-500 shrink-0 mt-0.5">

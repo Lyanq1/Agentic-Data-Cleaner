@@ -563,12 +563,14 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
   const terminalLogs = useMemo(() => {
     const merged = [...(state?.agent_logs || []), ...liveLogs];
     const seen = new Set<string>();
-    return merged.filter((log: any) => {
+    const filtered = merged.filter((log: any) => {
       const key = `${log.timestamp}-${log.agent}-${log.message}`;
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
     });
+    // Sort chronologically by timestamp to avoid out-of-order display
+    return filtered.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
   }, [state?.agent_logs, liveLogs]);
 
   useEffect(() => {

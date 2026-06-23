@@ -144,6 +144,11 @@ class GlobalState(TypedDict):
     # Token Usage Metrics
     token_metrics: Annotated[dict[str, int], sum_metrics]
 
+    # Benchmark Flow Mode & References
+    pipeline_mode: Literal["interactive", "benchmark"] | None
+    ground_truth_path: str | None
+
+
 
 class AgentStatus:
     IDLE = "idle"

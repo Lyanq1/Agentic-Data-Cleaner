@@ -19,7 +19,7 @@ class ColumnSemanticProfileDetail(BaseModel):
     )
     allow_missing_reason: str = Field(default="", description="Reasoning explaining allow_missing.")
     expected_type: str = Field(
-        description="Ideal semantic type: int | float | str | bool | date | datetime."
+        description="Ideal semantic type: int | float | str | bool | date | datetime | time."
     )
     expected_type_reason: str = Field(default="", description="Reasoning explaining expected_type.")
     potential_dmv: list[str] = Field(

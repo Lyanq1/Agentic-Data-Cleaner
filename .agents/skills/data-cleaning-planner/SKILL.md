@@ -137,7 +137,7 @@ Your output must provide task-specific, structured cleaning configurations in th
      ```json
      {
        "<col_name>": {
-         "expected_type": "int" | "float" | "str" | "bool" | "date" | "datetime",
+         "expected_type": "int" | "float" | "str" | "bool" | "date" | "datetime" | "time",
          "parse_format": null | "<format_string>" (e.g. "%Y-%m-%d")
        }
      }

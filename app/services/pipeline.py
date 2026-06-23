@@ -48,6 +48,7 @@ async def run_pipeline(
     original_filename: str = "",
     data_schema: dict | None = None,
     clean_dataset_path: str | None = None,
+    pipeline_mode: str | None = None,
 ) -> dict[str, Any]:
     """Run the profiler → input_validator pipeline on a canonical Parquet dataset.
 
@@ -57,6 +58,9 @@ async def run_pipeline(
         input_format: Original file format before conversion (csv/excel/json).
         user_prompt: Optional user instruction for the cleaning task.
         original_filename: Original uploaded filename for reference.
+        data_schema: Optional dataset schema dict.
+        clean_dataset_path: Optional ground truth dataset path.
+        pipeline_mode: Mode of execution (e.g. 'benchmark').
 
     Returns:
         Dict with run_id and the final state snapshot.
@@ -65,19 +69,24 @@ async def run_pipeline(
         "messages": [],
         "dataset_path": canonical_path,
         "clean_dataset_path": clean_dataset_path,
+        "ground_truth_path": clean_dataset_path,
         "user_prompt": user_prompt,
         "project_id": run_id,
         "session_id": Path(canonical_path).stem,
         "original_filename": original_filename,
         "dataset_schema": data_schema,
+        "pipeline_mode": pipeline_mode,
     }
 
     config = {"configurable": {"thread_id": run_id}}
 
     async with get_checkpointer_manager().get() as checkpointer:
-        graph = build_graph(checkpointer=checkpointer)
+        if pipeline_mode == "benchmark":
+            graph = build_graph(checkpointer=checkpointer, interrupt_before=[])
+        else:
+            graph = build_graph(checkpointer=checkpointer)
 
-        logger.info(f"Pipeline started — run_id={run_id}, file={original_filename}")
+        logger.info(f"Pipeline started — run_id={run_id}, file={original_filename}, mode={pipeline_mode}")
         
         from app.core.websocket_manager import manager
         import asyncio

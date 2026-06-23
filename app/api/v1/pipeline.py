@@ -396,3 +396,60 @@ async def api_approve_plan(
     return {
         "message": "Plan approved, pipeline execution resumed."
     }
+
+
+@router.post("/pipeline/benchmark_run", summary="Upload dataset and run benchmark cleaning pipeline against ground truth")
+async def api_benchmark_run_pipeline(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(..., description="Dataset file (CSV, TSV, Excel, JSON, JSONL)"),
+    clean_file: UploadFile = File(..., description="Required ground truth file for testing"),
+):
+    """Upload a dataset and ground truth, then run profiler → input_validator → planner → workers → report_agent.
+    All clarifications are auto-resolved against the ground truth, and F1-score is calculated at the end.
+    """
+    contents = await file.read()
+
+    # Ingestion: validate → save → convert to Parquet
+    ingestion = get_ingestion_service()
+    try:
+        ingestion.validate(file.filename, contents)
+        result = ingestion.save_and_convert(file.filename, contents)
+    except IngestionError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    clean_contents = await clean_file.read()
+    try:
+        ingestion.validate(clean_file.filename, clean_contents)
+        # Write directly to disk
+        from app.config.config import get_settings
+        from pathlib import Path
+        upload_dir = Path(get_settings().upload_dir)
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        clean_path = upload_dir / f"clean_{clean_file.filename}"
+        clean_path.write_bytes(clean_contents)
+        clean_dataset_path = str(clean_path)
+    except IngestionError as e:
+        raise HTTPException(status_code=400, detail=f"Failed to process clean file: {e}")
+
+    # Run pipeline in background with pipeline_mode="benchmark"
+    run_id = uuid.uuid4().hex[:12]
+    background_tasks.add_task(
+        run_pipeline,
+        run_id=run_id,
+        canonical_path=result.canonical_path,
+        input_format=result.input_format,
+        user_prompt="",
+        original_filename=result.original_filename,
+        data_schema=result.data_schema,
+        clean_dataset_path=clean_dataset_path,
+        pipeline_mode="benchmark",
+    )
+
+    return {
+        "run_id": run_id,
+        "message": "Benchmark pipeline execution started in the background.",
+        "original_filename": result.original_filename,
+        "input_format": result.input_format,
+        "canonical_path": result.canonical_path,
+        "ground_truth_path": clean_dataset_path,
+    }

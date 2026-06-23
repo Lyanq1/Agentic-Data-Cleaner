@@ -27,7 +27,7 @@ class ColumnSemanticProfileOutput(BaseModel):
     )
     allow_missing: bool = Field(description="True if null values are logically acceptable from a business standpoint.")
     allow_missing_reason: str = Field(description="CoT reasoning explaining allow_missing.")
-    expected_type: str = Field(description="Target semantic type: int | float | str | bool | date | datetime.")
+    expected_type: str = Field(description="Target semantic type: int | float | str | bool | date | datetime | time.")
     expected_type_reason: str = Field(description="CoT reasoning explaining target expected_type.")
     potential_dmv: List[str] = Field(
         default_factory=list,
@@ -177,6 +177,8 @@ class SemanticProfilerAgent(BaseAgent):
                 return ["fill_mode", "fill_median"]
             elif "temporal" in dt:
                 return ["fill_median"]
+            elif "time" in dt:
+                return ["fill_mode", "keep_null"]
             elif "free text" in dt or "geospatial" in dt or "geo" in dt:
                 return ["fill_llm"]
             elif "structured text" in dt:
@@ -206,14 +208,42 @@ class SemanticProfilerAgent(BaseAgent):
                 is_already_datetime = "datetime" in str(physical_dtype) or "date" in str(physical_dtype)
                 
                 if is_string_dtype:
-                    expected_type = "datetime"
-                    strategies = ["fill_median", "fill_mode", "keep_null"]
+                    # Determine whether this string temporal column is time or datetime
+                    # By checking the values in the dataframe df
+                    try:
+                        vals = df[col.column_name].dropna().astype(str).str.strip()
+                        if not vals.empty:
+                            date_pat = re.compile(
+                                r"\b\d{4}[-/]\d{1,2}[-/]\d{1,2}\b|\b\d{1,2}[-/]\d{1,2}[-/]\d{2,4}\b|\b\d{2}[-/]\d{1,2}[-/]\d{1,2}\b|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)",
+                                re.IGNORECASE
+                            )
+                            time_pat = re.compile(
+                                r"\b\d{1,2}:\d{2}(?::\d{2})?\s*(?:am|pm)?\b|\b\d{1,2}\s*(?:am|pm)\b",
+                                re.IGNORECASE
+                            )
+                            has_date = vals.apply(lambda x: bool(date_pat.search(x)))
+                            has_time = vals.apply(lambda x: bool(time_pat.search(x)))
+                            
+                            datetime_count = (has_date & has_time).sum()
+                            time_only_count = ((~has_date) & has_time).sum()
+                            
+                            if time_only_count > datetime_count:
+                                expected_type = "time"
+                            else:
+                                expected_type = "datetime"
+                        else:
+                            expected_type = "datetime"
+                    except Exception as parse_err:
+                        logger.warning(f"Failed to analyze datetime/time distribution for column {col.column_name}: {parse_err}")
+                        expected_type = "datetime"
+                    
+                    strategies = ["fill_median", "fill_mode", "keep_null"] if expected_type == "datetime" else ["fill_mode", "keep_null"]
                 elif is_already_datetime:
                     expected_type = "datetime"
                     strategies = ["fill_median", "fill_mode", "keep_null"]
                 else:
-                    # Keep expected_type as non-datetime. If LLM predicted 'datetime' or 'date', map to an appropriate type based on physical dtype.
-                    if expected_type in ("datetime", "date"):
+                    # Keep expected_type as non-datetime. If LLM predicted 'datetime', 'date', or 'time', map to an appropriate type based on physical dtype.
+                    if expected_type in ("datetime", "date", "time"):
                         if "int" in str(physical_dtype):
                             expected_type = "int"
                         elif "float" in str(physical_dtype):

@@ -68,6 +68,24 @@ export const pipelineApi = {
     };
   },
 
+  uploadBenchmarkFile: async (file: File, cleanFile: File): Promise<UploadResponse> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('clean_file', cleanFile);
+
+    const response = await apiClient.post<any>('/pipeline/benchmark_run', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    
+    return {
+      run_id: response.data.run_id,
+      status: 'running',
+      message: 'Benchmark pipeline started successfully',
+    };
+  },
+
   getStatus: async (runId: string): Promise<RunStatusResponse> => {
     const state = await pipelineApi.getFullState(runId);
     return {
@@ -95,7 +113,9 @@ export const pipelineApi = {
     const graphAtEnd = nextNodes.length === 0 || nextNodes.includes('__end__');
     const reportCompleted =
       data.current_step === 'reporting' || (data.completed_steps || []).includes('reporting');
-    const awaiting_hitl = hasUnansweredClarifications(valResult) || nextNodes.includes('report_agent');
+    const awaiting_hitl = data.pipeline_mode === 'benchmark'
+      ? false
+      : (hasUnansweredClarifications(valResult) || nextNodes.includes('report_agent'));
     const isResolvingClarification =
       isValidationClarification &&
       hasAnsweredClarifications(valResult) &&

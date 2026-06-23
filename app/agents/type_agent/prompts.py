@@ -24,7 +24,7 @@ The type-casting plan must come from:
   "strategy": {
     "per_column": {
       "<column_name>": {
-        "expected_type": "int | float | str | bool | date | datetime",
+        "expected_type": "int | float | str | bool | date | datetime | time",
         "parse_format": null
       }
     }
@@ -43,6 +43,7 @@ Supported target types:
 - `bool`: accept true/false, yes/no, y/n, 1/0 variants.
 - `date`: parse date-like values and normalize time to midnight.
 - `datetime`: parse datetime-like values.
+- `time`: parse time-only values and convert using pandas dt.time.
 Parsing rules:
 - Keep null values null.
 - If a non-null value cannot be parsed, convert it to null and report the count.

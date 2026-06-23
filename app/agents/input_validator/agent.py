@@ -299,6 +299,14 @@ class InputValidatorAgent(BaseAgent):
 
         logger.info("InputValidatorAgent successfully parsed structured output.")
 
+        # If pipeline_mode is benchmark and status is needs_clarification, auto-resolve
+        pipeline_mode = state.get("pipeline_mode", "interactive")
+        if pipeline_mode == "benchmark" and response.status == "needs_clarification":
+            from app.agents.input_validator.resolver import resolve_benchmark_clarifications
+            logger.info("InputValidatorAgent: Auto-resolving clarifications in benchmark mode...")
+            resolved_dict = resolve_benchmark_clarifications(state, response.model_dump())
+            response = InputValidationResult.model_validate(resolved_dict)
+
         # Format the response into a JSON string for the message, 
         # and also put the raw dict into state for the frontend to consume.
         json_data = response.model_dump(exclude_none=True)
@@ -310,7 +318,8 @@ class InputValidatorAgent(BaseAgent):
         # patch semantic_profile.columns[col].allow_missing with the answer.
         # ------------------------------------------------------------------
         semantic_profile_update: SemanticProfile | None = None
-        if is_answered:
+        is_answered_or_benchmark = is_answered or (pipeline_mode == "benchmark" and response.status == "ready")
+        if is_answered_or_benchmark:
             semantic_profile_update = self._apply_allow_missing_overrides(
                 state.get("semantic_profile"), response
             )
@@ -322,6 +331,23 @@ class InputValidatorAgent(BaseAgent):
             "input_validation_result": json_data,
             "next_node": next_node,
         }
+
+        # In benchmark mode, if we resolved clarifications, inject a summary HumanMessage
+        # summarizing the auto-resolved decisions so the planner has access to them in message history.
+        if pipeline_mode == "benchmark" and is_answered_or_benchmark:
+            clarifications = response.clarifications
+            summary_lines = ["Here are my decisions for the clarification questions:"]
+            if clarifications:
+                clar_dict = clarifications.model_dump() if hasattr(clarifications, "model_dump") else clarifications.dict()
+                for cat in ["null", "duplicate", "typecast"]:
+                    cat_data = clar_dict.get(cat)
+                    if cat_data:
+                        for q_key, q in cat_data.items():
+                            if q and q.get("answer") is not None:
+                                summary_lines.append(f"- {cat}.{q_key}: {q['answer']}")
+            summary_msg = HumanMessage(content="\n".join(summary_lines))
+            updates["messages"].append(summary_msg)
+
         if semantic_profile_update is not None:
             updates["semantic_profile"] = semantic_profile_update
             logger.info(

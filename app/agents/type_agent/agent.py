@@ -280,9 +280,10 @@ class TypeCastingAgent(BaseAgent):
             "text": "str",
             "boolean": "bool",
             "timestamp": "datetime",
+            "time": "time",
         }
         normalized = aliases.get(normalized, normalized)
-        return normalized if normalized in {"int", "float", "str", "bool", "date", "datetime"} else None
+        return normalized if normalized in {"int", "float", "str", "bool", "date", "datetime", "time"} else None
 
     def _read_current_dataframe(self, state: GlobalState) -> tuple[pd.DataFrame, str]:
         source_path = state.get("physical_dataframe_path") or state.get("dataset_path")
@@ -330,6 +331,42 @@ class TypeCastingAgent(BaseAgent):
         if expected_type == "str":
             result = series.astype("string")
             notes.append("Casted with pandas StringDtype.")
+            return result, notes
+
+        if expected_type == "time":
+            import datetime
+            # 1. If already datetime-like, just extract time
+            if pd.api.types.is_datetime64_any_dtype(series):
+                result = series.dt.time
+            # 2. If timedelta-like, add to base date and extract time
+            elif pd.api.types.is_timedelta64_dtype(series):
+                result = (pd.to_datetime("2000-01-01") + series).dt.time
+            # 3. Otherwise, convert to datetime first
+            else:
+                # First try pd.to_datetime without format="mixed" (needed for time-only strings)
+                parsed_dt = pd.to_datetime(series, errors="coerce")
+                # If everything parsed to NaT but the original series was not all null/empty,
+                # try with format="mixed" or element-wise fallback
+                if parsed_dt.isna().all() and not series.dropna().empty:
+                    parsed_dt = pd.to_datetime(series, errors="coerce", format="mixed")
+                
+                result = parsed_dt.dt.time
+                
+                # If still all nulls, use element-wise parsing fallback
+                if result.isna().all() and not series.dropna().empty:
+                    def convert_item(val):
+                        if pd.isna(val):
+                            return None
+                        if isinstance(val, datetime.time):
+                            return val
+                        if isinstance(val, datetime.datetime):
+                            return val.time()
+                        try:
+                            return pd.to_datetime(str(val).strip(), errors="coerce").time()
+                        except Exception:
+                            return None
+                    result = series.apply(convert_item)
+            notes.append("Casted to datetime.time using pandas dt.time accessor.")
             return result, notes
 
         if expected_type == "float":
