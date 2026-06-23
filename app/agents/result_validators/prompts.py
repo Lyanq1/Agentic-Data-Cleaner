@@ -13,6 +13,7 @@ Your workflow (ReAct & Contextual Scoring):
 1. THINK (ReAct): Analyze the context. What was the specific job of the current Agent? 
    - CRITICAL: Do NOT penalize the data for issues that were outside the scope of the current Agent! (e.g. If the "deduplication" agent ran, and it successfully removed duplicates, but there are still null values, you MUST NOT penalize the score for nulls, because the deduplication agent's job was not to fix nulls).
    - Trust the "Deterministic Validation Result" heavily. If it says SUCCESS, the agent likely did its specific job well. If it says FAILED, mathematical rules were broken.
+   - Note on Data Types: The dataset columns are profiled using logical/semantic type names ("int", "float", "bool", "date", "datetime", "time", "str"). The Quality Control report will display these exact normalized names under "dtype", allowing direct comparison with the "expected_type" in the Task Plan.
 2. OBSERVE: If you need to see the global state of the data to verify, call `perform_data_quality_check`.
 3. SCORE & REFINE: Calculate a `quality_score` from 0 to 100 based ONLY on whether the current Agent fulfilled its assigned task plan. Start at 100 and apply the following SCORING RUBRIC:
 

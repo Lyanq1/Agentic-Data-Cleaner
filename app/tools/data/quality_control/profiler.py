@@ -76,7 +76,34 @@ class QualityProfiler:
     def _check_column(self, df: pd.DataFrame, col: str, total_rows: int) -> ColumnQuality:
         """Perform quality checks on a single column."""
         series = df[col]
+        
+        # Map physical Pandas dtypes to semantic/logical types
+        import datetime
         dtype_str = str(series.dtype)
+        if pd.api.types.is_integer_dtype(series):
+            dtype_str = "int"
+        elif pd.api.types.is_float_dtype(series):
+            dtype_str = "float"
+        elif pd.api.types.is_bool_dtype(series) or dtype_str in ("bool", "boolean"):
+            dtype_str = "bool"
+        elif pd.api.types.is_datetime64_any_dtype(series):
+            non_nulls = series.dropna()
+            # If all times are 00:00:00, map to date, otherwise datetime
+            if not non_nulls.empty and (non_nulls.dt.time == datetime.time(0)).all():
+                dtype_str = "date"
+            else:
+                dtype_str = "datetime"
+        elif dtype_str == "string":
+            dtype_str = "str"
+        elif dtype_str == "object":
+            # Check if it contains time objects
+            non_nulls = series.dropna()
+            if not non_nulls.empty and non_nulls.apply(lambda x: isinstance(x, datetime.time)).all():
+                dtype_str = "time"
+            else:
+                dtype_str = "str"
+        else:
+            dtype_str = "str"
 
         # 1. Null metrics
         null_count = int(series.isna().sum())
