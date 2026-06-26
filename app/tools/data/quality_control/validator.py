@@ -151,10 +151,27 @@ def validate_dataframe(
                     )
                     
             if semantic.expected_str_pattern:
-                # Skip pattern check for datetime-like columns to avoid false failures due to format normalization.
-                if not pd.api.types.is_datetime64_any_dtype(dataframe[column_name]):
+                # Only skip pattern check if the data was successfully cast to a temporal type.
+                # If the user declined casting, the data remains a regular string and MUST be pattern-checked.
+                is_datetime_dtype = pd.api.types.is_datetime64_any_dtype(dataframe[column_name])
+                
+                import datetime
+                non_null_series = dataframe[column_name].dropna()
+                is_time_objects = False
+                if not non_null_series.empty and non_null_series.apply(lambda x: isinstance(x, datetime.time)).all():
+                    is_time_objects = True
+
+                is_iso_time_strings = False
+                if not non_null_series.empty and non_null_series.apply(lambda x: isinstance(x, str)).all():
+                    time_pattern = r"^([01]?\d|2[0-3]):([0-5]\d)(:([0-5]\d)(\.\d+)?)?$"
+                    if non_null_series.astype(str).str.strip().str.match(time_pattern).all():
+                        is_iso_time_strings = True
+
+                is_casted_temporal = is_datetime_dtype or is_time_objects or is_iso_time_strings
+                
+                if not is_casted_temporal:
                     pattern = semantic.expected_str_pattern
-                    non_nulls = dataframe[column_name].dropna().astype(str)
+                    non_nulls = non_null_series.astype(str)
                     if not non_nulls.empty:
                         match_mask = non_nulls.str.match(pattern)
                         if not match_mask.all():

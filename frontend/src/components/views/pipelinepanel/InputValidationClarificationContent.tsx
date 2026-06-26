@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from "react";
 import { StepFooter } from "./StepFooter";
 import { TextIcon } from "./TextIcon";
-import { formatDisplayValue, getOptionConsequence } from "./utils";
+import { formatDisplayValue, getOptionConsequence, tryFormatToISO } from "./utils";
 
 export const InputValidationClarificationContent: React.FC<{
   payload: any;
@@ -54,6 +54,33 @@ export const InputValidationClarificationContent: React.FC<{
     }
   };
 
+  const getColumnExpectedType = (qKey: string, currentAnswers?: Record<string, string>): string => {
+    const colName = qKey.startsWith("Q2_strategy_column_")
+      ? qKey.substring("Q2_strategy_column_".length)
+      : qKey.startsWith("Q1_allow_missing_column_")
+        ? qKey.substring("Q1_allow_missing_column_".length)
+        : qKey.startsWith("Q1_cast_column_")
+          ? qKey.substring("Q1_cast_column_".length)
+          : "";
+    if (!colName) return "str";
+    const semProfile = payload.semantic_profile || {};
+    const colDetail = semProfile.columns?.[colName];
+    const expectedType = colDetail?.expected_type || "str";
+
+    // If the user explicitly declined type casting, treat it as a regular string
+    let castAnswer: string | undefined = currentAnswers?.[`typecast.Q1_cast_column_${colName}`];
+    if (!castAnswer && clarifications?.typecast?.[`Q1_cast_column_${colName}`]) {
+      const castQ = clarifications.typecast[`Q1_cast_column_${colName}`];
+      castAnswer = castQ.answer || castQ.previous_answer || undefined;
+    }
+    
+    if (castAnswer === "No") {
+      return "str";
+    }
+
+    return expectedType;
+  };
+
   useEffect(() => {
     if (hasInitializedRef.current) return;
 
@@ -71,7 +98,9 @@ export const InputValidationClarificationContent: React.FC<{
             if (ansVal) {
               if (ansVal.startsWith("Custom strategy:")) {
                 nextAnswers[`${cat}.${qKey}`] = "Custom strategy (describe in your next prompt)";
-                nextCustom[`${cat}.${qKey}`] = ansVal.substring("Custom strategy:".length).trim();
+                const rawCustom = ansVal.substring("Custom strategy:".length).trim();
+                const expectedType = getColumnExpectedType(qKey);
+                nextCustom[`${cat}.${qKey}`] = tryFormatToISO(rawCustom, expectedType);
               } else if (ansVal.startsWith("fill_value:")) {
                 const val = ansVal.substring("fill_value:".length).trim();
                 nextAnswers[`${cat}.${qKey}`] = "fill_value";
@@ -85,7 +114,8 @@ export const InputValidationClarificationContent: React.FC<{
                     nextFillValueSubOption[`${cat}.${qKey}`] = val;
                   } else {
                     nextFillValueSubOption[`${cat}.${qKey}`] = "custom";
-                    nextFillValueCustom[`${cat}.${qKey}`] = val;
+                    const expectedType = getColumnExpectedType(qKey);
+                    nextFillValueCustom[`${cat}.${qKey}`] = tryFormatToISO(val, expectedType);
                   }
                 }
               } else {
@@ -176,18 +206,41 @@ export const InputValidationClarificationContent: React.FC<{
 
   const handleSubmit = () => {
     const finalAnswers = { ...answers };
+    let hasChanges = false;
+    const nextCustomInputs = { ...customInputs };
+    const nextFillValueCustom = { ...fillValueCustom };
+
     Object.keys(finalAnswers).forEach((key) => {
+      const qKey = key.split(".")[1];
+      const expectedType = getColumnExpectedType(qKey, finalAnswers);
+
       if (finalAnswers[key].includes("Custom strategy") && customInputs[key]) {
-        finalAnswers[key] = `Custom strategy: ${customInputs[key].trim()}`;
+        const val = tryFormatToISO(customInputs[key], expectedType);
+        finalAnswers[key] = `Custom strategy: ${val.trim()}`;
+        if (val !== customInputs[key]) {
+          nextCustomInputs[key] = val;
+          hasChanges = true;
+        }
       } else if (finalAnswers[key] === "fill_value") {
         const subOpt = fillValueSubOption[key];
         if (subOpt === "custom") {
-          finalAnswers[key] = `fill_value: ${fillValueCustom[key]?.trim() || ""}`;
+          const val = tryFormatToISO(fillValueCustom[key] || "", expectedType);
+          finalAnswers[key] = `fill_value: ${val.trim()}`;
+          if (val !== fillValueCustom[key]) {
+            nextFillValueCustom[key] = val;
+            hasChanges = true;
+          }
         } else {
           finalAnswers[key] = `fill_value: ${subOpt}`;
         }
       }
     });
+
+    if (hasChanges) {
+      setCustomInputs(nextCustomInputs);
+      setFillValueCustom(nextFillValueCustom);
+    }
+
     onDecision("approve", "User resolved all clarifications", finalAnswers);
   };
 
@@ -390,6 +443,13 @@ export const InputValidationClarificationContent: React.FC<{
                                                 onChange={(e) =>
                                                   setFillValueCustom((prev) => ({ ...prev, [key]: e.target.value }))
                                                 }
+                                                onBlur={(e) => {
+                                                  const expectedType = getColumnExpectedType(qKey);
+                                                  const formatted = tryFormatToISO(e.target.value, expectedType);
+                                                  if (formatted !== e.target.value) {
+                                                    setFillValueCustom((prev) => ({ ...prev, [key]: formatted }));
+                                                  }
+                                                }}
                                                 placeholder="E.g. 'yesterday', 'unknown', or any value..."
                                                 className="w-full text-sm rounded-md border border-indigo-200 px-3 py-2 bg-white text-foreground focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
                                                 disabled={!isAwaiting}
@@ -423,6 +483,13 @@ export const InputValidationClarificationContent: React.FC<{
                                               onChange={(e) =>
                                                 handleCustomInputChange(key, e.target.value)
                                               }
+                                              onBlur={(e) => {
+                                                const expectedType = getColumnExpectedType(qKey);
+                                                const formatted = tryFormatToISO(e.target.value, expectedType);
+                                                if (formatted !== e.target.value) {
+                                                  handleCustomInputChange(key, formatted);
+                                                }
+                                              }}
                                               placeholder="E.g. fill with 'Unknown', drop the row..."
                                               className="w-full text-sm rounded-md border border-indigo-200 px-3 py-2 bg-white text-foreground focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
                                               disabled={!isAwaiting}

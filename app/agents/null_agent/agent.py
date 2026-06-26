@@ -441,6 +441,18 @@ class NullAgent(BaseAgent):
             if null_ratio == 1.0:
                 fill_val = cfg.get("fill_value")
                 if fill_val is not None:
+                    # Coerce fill_val to temporal object to avoid PyArrow mixed type serialization errors
+                    if semantic_type == "Temporal" and isinstance(fill_val, str):
+                        try:
+                            import datetime
+                            non_nulls = cleaned_df[col].dropna()
+                            if pd.api.types.is_datetime64_any_dtype(cleaned_df[col]):
+                                fill_val = pd.to_datetime(fill_val)
+                            elif not non_nulls.empty and non_nulls.apply(lambda x: isinstance(x, datetime.time)).all():
+                                fill_val = pd.to_datetime(fill_val).time()
+                        except Exception as e:
+                            logger.warning("NullAgent: could not parse fill_value '%s' to temporal for column '%s': %s", fill_val, col, e)
+
                     # fill_constant
                     cleaned_df[col] = cleaned_df[col].fillna(fill_val)
                     filled_per_column[col] = count
@@ -535,6 +547,19 @@ class NullAgent(BaseAgent):
 
             elif coerced_strategy == "fill_value":
                 fill_val = cfg.get("fill_value", "Unknown")
+
+                # Coerce fill_val to temporal object to avoid PyArrow mixed type serialization errors
+                if semantic_type == "Temporal" and isinstance(fill_val, str):
+                    try:
+                        import datetime
+                        non_nulls = cleaned_df[col].dropna()
+                        if pd.api.types.is_datetime64_any_dtype(cleaned_df[col]):
+                            fill_val = pd.to_datetime(fill_val)
+                        elif not non_nulls.empty and non_nulls.apply(lambda x: isinstance(x, datetime.time)).all():
+                            fill_val = pd.to_datetime(fill_val).time()
+                    except Exception as e:
+                        logger.warning("NullAgent: could not parse fill_value '%s' to temporal for column '%s': %s", fill_val, col, e)
+
                 cleaned_df[col] = cleaned_df[col].fillna(fill_val)
                 filled_per_column[col] = count
                 notes.append(

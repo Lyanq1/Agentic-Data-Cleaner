@@ -93,13 +93,24 @@ class QualityProfiler:
                 dtype_str = "date"
             else:
                 dtype_str = "datetime"
-        elif dtype_str == "string":
-            dtype_str = "str"
-        elif dtype_str == "object":
-            # Check if it contains time objects
+        elif dtype_str in ("string", "object"):
+            # Check if it contains time objects or ISO time strings
             non_nulls = series.dropna()
-            if not non_nulls.empty and non_nulls.apply(lambda x: isinstance(x, datetime.time)).all():
-                dtype_str = "time"
+            if not non_nulls.empty:
+                # 1. Native datetime.time objects (e.g., from Parquet)
+                if non_nulls.apply(lambda x: isinstance(x, datetime.time)).all():
+                    dtype_str = "time"
+                else:
+                    # 2. String representations of ISO time (e.g., from CSV)
+                    # Matches HH:MM or HH:MM:SS or HH:MM:SS.mmmmmm (24-hour format)
+                    time_pattern = r"^([01]?\d|2[0-3]):([0-5]\d)(:([0-5]\d)(\.\d+)?)?$"
+                    if non_nulls.apply(lambda x: isinstance(x, str)).all():
+                        if non_nulls.astype(str).str.strip().str.match(time_pattern).all():
+                            dtype_str = "time"
+                        else:
+                            dtype_str = "str"
+                    else:
+                        dtype_str = "str"
             else:
                 dtype_str = "str"
         else:

@@ -230,6 +230,7 @@ class InputValidatorAgent(BaseAgent):
                 "CRITICAL: You MUST check if the user's answers and requirements are feasible according to STEP 3 — UNFEASIBLE SCENARIOS. "
                 "For example, the user must not request mean/median imputation on non-numeric columns, "
                 "impute nulls on columns with no nulls, cast non-date strings to datetime, or provide invalid/incompatible custom fill values. "
+                "(Note: For time/datetime columns, ANY valid 24-hour ISO time/datetime format like HH:MM:SS or YYYY-MM-DD is ALWAYS feasible and valid, even if the sample values use AM/PM. Do not reject valid ISO time formats.) "
                 "If any user answer is unfeasible or conflicts with the dataset constraints, you MUST: "
                 "1. Set status = 'needs_clarification'. "
                 "2. Clear the 'answer' field of that specific unfeasible question to null so the user can re-answer. "

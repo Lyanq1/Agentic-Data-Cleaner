@@ -14,7 +14,7 @@ import {
   Database,
   Loader2
 } from "lucide-react";
-import { formatDisplayValue, getOptionConsequence } from "./pipelinepanel/utils";
+import { formatDisplayValue, getOptionConsequence, tryFormatToISO } from "./pipelinepanel/utils";
 
 interface QueueItem {
   id: string;
@@ -57,6 +57,65 @@ export const MassUploadView: React.FC = () => {
   useEffect(() => {
     selectedInspectIdRef.current = selectedInspectId;
   }, [selectedInspectId]);
+
+  const getColumnExpectedTypeFromPayload = (payload: any, qKey: string): string => {
+    const colName = qKey.startsWith("Q2_strategy_column_")
+      ? qKey.substring("Q2_strategy_column_".length)
+      : qKey.startsWith("Q1_allow_missing_column_")
+        ? qKey.substring("Q1_allow_missing_column_".length)
+        : qKey.startsWith("Q1_cast_column_")
+          ? qKey.substring("Q1_cast_column_".length)
+          : "";
+    if (!colName) return "str";
+    const semProfile = payload?.semantic_profile || {};
+    const colDetail = semProfile.columns?.[colName];
+    return colDetail?.expected_type || "str";
+  };
+
+  useEffect(() => {
+    if (!activeItem || !activeItem.checkpoint || activeItem.checkpoint.checkpoint_type !== "input_validation_clarification") {
+      setMcqAnswers({});
+      setCustomInputs({});
+      return;
+    }
+
+    const payload = activeItem.checkpoint.payload || {};
+    const clarifications = payload.clarifications || {};
+    const categories = ["typecast", "null", "duplicate"] as const;
+
+    const nextAnswers: Record<string, string> = {};
+    const nextCustom: Record<string, string> = {};
+
+    categories.forEach((cat) => {
+      const catData = clarifications[cat];
+      if (catData) {
+        Object.keys(catData).forEach((qKey) => {
+          const q = catData[qKey];
+          if (q) {
+            const ansVal = q.answer || q.previous_answer;
+            if (ansVal) {
+              if (ansVal.startsWith("Custom strategy:")) {
+                nextAnswers[`${cat}.${qKey}`] = "Custom strategy (describe in your next prompt)";
+                const rawCustom = ansVal.substring("Custom strategy:".length).trim();
+                const expectedType = getColumnExpectedTypeFromPayload(payload, qKey);
+                nextCustom[`${cat}.${qKey}`] = tryFormatToISO(rawCustom, expectedType);
+              } else if (ansVal.startsWith("fill_value:")) {
+                nextAnswers[`${cat}.${qKey}`] = "fill_value";
+                const val = ansVal.substring("fill_value:".length).trim();
+                const expectedType = getColumnExpectedTypeFromPayload(payload, qKey);
+                nextCustom[`${cat}.${qKey}`] = tryFormatToISO(val, expectedType);
+              } else {
+                nextAnswers[`${cat}.${qKey}`] = ansVal;
+              }
+            }
+          }
+        });
+      }
+    });
+
+    setMcqAnswers(nextAnswers);
+    setCustomInputs(nextCustom);
+  }, [activeItem?.id, activeItem?.checkpoint?.checkpoint_id]);
 
   // Add a new row to the queue
   const addRow = () => {
@@ -1048,6 +1107,13 @@ export const MassUploadView: React.FC = () => {
                                                               type="text"
                                                               value={customInputs[key] || ""}
                                                               onChange={(e) => setCustomInputs((prev) => ({ ...prev, [key]: e.target.value }))}
+                                                              onBlur={(e) => {
+                                                                const expectedType = getColumnExpectedTypeFromPayload(payload, qKey);
+                                                                const formatted = tryFormatToISO(e.target.value, expectedType);
+                                                                if (formatted !== e.target.value) {
+                                                                  setCustomInputs((prev) => ({ ...prev, [key]: formatted }));
+                                                                }
+                                                              }}
                                                               placeholder="Describe custom behavior..."
                                                               className="w-full text-xs rounded border border-indigo-200 px-2 py-1 bg-white text-foreground focus:outline-none focus:ring-1 focus:ring-indigo-500"
                                                             />

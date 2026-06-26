@@ -125,3 +125,94 @@ export const SEVERITY_STYLES: Record<string, string> = {
   warning: "bg-amber-100 text-amber-700 border-amber-200",
   info: "bg-blue-100 text-blue-700 border-blue-200",
 };
+
+export function tryFormatToISO(input: string, expectedType: string): string {
+  if (!input) return input;
+  
+  let prefix = "";
+  let valPart = input.trim();
+  
+  const prefixes = [
+    "custom strategy:", 
+    "fill_value:", 
+    "fill_value", 
+    "fill", 
+    "impute",
+    "strategy:"
+  ];
+  
+  for (const p of prefixes) {
+    if (valPart.toLowerCase().startsWith(p)) {
+      const idx = p.length;
+      prefix = valPart.substring(0, idx);
+      let remaining = valPart.substring(idx);
+      const spacesMatch = remaining.match(/^\s+/);
+      if (spacesMatch) {
+        prefix += spacesMatch[0];
+        remaining = remaining.substring(spacesMatch[0].length);
+      }
+      valPart = remaining.trim();
+      break;
+    }
+  }
+  
+  if (expectedType === "time" || expectedType === "datetime" || expectedType === "str" || !expectedType) {
+    const timeRegex = /^(\d{1,2})[:h](\d{2})(?::m?(\d{2}))?\s*(a\.?m\.?|p\.?m\.?)?$/i;
+    const match = valPart.match(timeRegex);
+    if (match) {
+      let hours = parseInt(match[1], 10);
+      const minutes = parseInt(match[2], 10);
+      const seconds = match[3] ? parseInt(match[3], 10) : 0;
+      const ampm = match[4] ? match[4].toLowerCase().replace(/\./g, "") : null;
+      
+      if (hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59 && seconds >= 0 && seconds <= 59) {
+        if (ampm) {
+          if (ampm === "pm" && hours < 12) {
+            hours += 12;
+          } else if (ampm === "am" && hours === 12) {
+            hours = 0;
+          }
+        }
+        const hStr = String(hours).padStart(2, "0");
+        const mStr = String(minutes).padStart(2, "0");
+        const sStr = String(seconds).padStart(2, "0");
+        
+        if (expectedType !== "datetime") {
+          return `${prefix}${hStr}:${mStr}:${sStr}`;
+        } else {
+          // If expectedType is datetime but they only provided time, use today's date
+          const today = new Date();
+          const y = today.getFullYear();
+          const m = String(today.getMonth() + 1).padStart(2, "0");
+          const d = String(today.getDate()).padStart(2, "0");
+          return `${prefix}${y}-${m}-${d}T${hStr}:${mStr}:${sStr}`;
+        }
+      }
+    }
+  }
+
+  if (expectedType === "date" || expectedType === "str" || !expectedType) {
+    const dateRegex = /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/;
+    const match = valPart.match(dateRegex);
+    if (match) {
+      const y = match[1];
+      const m = match[2].padStart(2, "0");
+      const d = match[3].padStart(2, "0");
+      return `${prefix}${y}-${m}-${d}`;
+    }
+    const date = new Date(valPart);
+    if (!isNaN(date.getTime())) {
+      const y = date.getFullYear();
+      const m = String(date.getMonth() + 1).padStart(2, "0");
+      const d = String(date.getDate()).padStart(2, "0");
+      return `${prefix}${y}-${m}-${d}`;
+    }
+  } else if (expectedType === "datetime") {
+    const date = new Date(valPart);
+    if (!isNaN(date.getTime())) {
+      return `${prefix}${date.toISOString().split(".")[0]}`;
+    }
+  }
+  
+  return input;
+}

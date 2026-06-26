@@ -242,9 +242,12 @@ class SemanticProfilerAgent(BaseAgent):
                     expected_type = "datetime"
                     strategies = ["fill_median", "fill_mode", "keep_null"]
                 else:
-                    # Keep expected_type as non-datetime. If LLM predicted 'datetime', 'date', or 'time', map to an appropriate type based on physical dtype.
+                    # Keep expected_type as non-datetime. If LLM predicted 'datetime' or 'date', map to an appropriate type based on physical dtype.
+                    # If LLM predicted 'time', we keep it as 'time' so type_agent can cast it using pd.to_datetime(...).dt.time
                     if expected_type in ("datetime", "date", "time"):
-                        if "int" in str(physical_dtype):
+                        if expected_type == "time":
+                            pass # allow time to be preserved
+                        elif "int" in str(physical_dtype):
                             expected_type = "int"
                         elif "float" in str(physical_dtype):
                             expected_type = "float"

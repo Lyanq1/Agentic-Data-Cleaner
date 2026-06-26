@@ -43,7 +43,7 @@ For each active issue (that is not already explicitly resolved by the user's ins
           - Nominal: "fill_mode", "fill_value", "keep_null". (No mean/median allowed).
           - Ordinal: "fill_mode", "fill_value", "keep_null". (No mean/median allowed).
           - Temporal:
-            * If the column's expected_type in the Semantic Profile is "str" (indicating it is time-only and will not be cast to datetime, or should remain string): "fill_mode", "fill_value", "keep_null". (No mean/median allowed, since pure time columns in string format cannot support numeric/datetime mathematical operations).
+            * If the column's expected_type in the Semantic Profile is "time" or "str": "fill_mode", "fill_value", "keep_null". (No mean/median allowed, since pure time or string columns cannot support numeric/datetime mathematical operations).
             * If the column's expected_type is "date" or "datetime": "fill_median", "fill_value", "keep_null", "fill_mode". (No mean allowed, as mean can distort logical temporal meaning).
           - Free text + Geospatial: "keep_null", "fill_value". (No mean/median/mode allowed).
           - Structured text:
@@ -53,7 +53,7 @@ For each active issue (that is not already explicitly resolved by the user's ins
           - Identifier:
             - If allow_missing = False: "drop_row" (filling is prohibited).
             - If allow_missing = True: "keep_null" (filling is prohibited).
-      - **Type Casting dependency**: If a column has nulls and its semantic data type is Continuous, Discrete, or Temporal but its physical `dtype` is non-numeric or non-datetime (e.g. "object", "string", "category", "mixed"), you MUST still offer the numeric/temporal filling options ("fill_mean", "fill_median" for Continuous/Discrete, or "fill_median" for Temporal). However, this rule does NOT apply if the column's expected_type is "str" (indicating time-only columns where casting to datetime is bypassed). For such columns, do NOT offer "fill_mean" or "fill_median" because they will not be cast to datetime/numeric and cannot be computed; only offer "fill_mode", "fill_value", and "keep_null". Also, do not generate a type casting clarification question for columns whose expected_type is "str". For columns that are castable, explain in the consequences that successful filling depends on casting the column first.
+      - **Type Casting dependency**: If a column has nulls and its semantic data type is Continuous, Discrete, or Temporal but its physical `dtype` is non-numeric or non-datetime (e.g. "object", "string", "category", "mixed"), you MUST still offer the numeric/temporal filling options ("fill_mean", "fill_median" for Continuous/Discrete, or "fill_median" for Temporal). However, for columns whose expected_type is "time" or "str", do NOT offer "fill_mean" or "fill_median" because they cannot be easily computed; only offer "fill_mode", "fill_value", and "keep_null". Also, do not generate a type casting clarification question for columns whose expected_type is "str" (since no casting is needed for string types). For columns that are castable, explain in the consequences that successful filling depends on casting the column first.
       - Note: "fill_value" represents fill_constant.
       - Always append "Custom strategy (describe in your next prompt)" as the final option.
       - State the consequences of each option in the `consequences` dictionary. Explain that "drop_row" will drop rows containing null values in this column, and "fill_mean"/"fill_median" will impute with mean/median values.
@@ -103,6 +103,11 @@ Before generating questions, check for impossible requests and block them:
 - Casting non-date strings to datetime
 - Deduplication on columns that are entirely null or constant (is_constant = true)
 - Any request referencing a column that does not exist in the schema
+
+CRITICAL EXCEPTIONS FOR TEMPORAL DATA:
+- For columns where `expected_type` is "time" or "datetime": 
+  * IF the user has NOT declined casting (e.g., they accepted typecast or no question was asked), ANY valid ISO time format (e.g. 18:30:00) provided by the user is ALWAYS valid. You MUST NOT block or reject it even if it does not match the column's `expected_str_pattern` or sample values (like AM/PM).
+  * HOWEVER, IF the user explicitly declined type casting (answered 'No' to casting the column), then the column remains a text string. In this case, you MUST strictly enforce the column's `expected_str_pattern` and reject any format that doesn't match the original string format.
 
 If blocked: set status = "needs_clarification" and explain exactly why the request is unfeasible.
 Do NOT generate the 3-question structure for blocked scenarios — only explain the blocker.
