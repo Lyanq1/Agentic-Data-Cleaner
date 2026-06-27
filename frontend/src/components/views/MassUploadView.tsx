@@ -58,7 +58,7 @@ export const MassUploadView: React.FC = () => {
     selectedInspectIdRef.current = selectedInspectId;
   }, [selectedInspectId]);
 
-  const getColumnExpectedTypeFromPayload = (payload: any, qKey: string): string => {
+  const getColumnExpectedTypeFromPayload = (payload: any, qKey: string, currentAnswers?: Record<string, string>): string => {
     const colName = qKey.startsWith("Q2_strategy_column_")
       ? qKey.substring("Q2_strategy_column_".length)
       : qKey.startsWith("Q1_allow_missing_column_")
@@ -69,7 +69,19 @@ export const MassUploadView: React.FC = () => {
     if (!colName) return "str";
     const semProfile = payload?.semantic_profile || {};
     const colDetail = semProfile.columns?.[colName];
-    return colDetail?.expected_type || "str";
+    const expectedType = colDetail?.expected_type || "str";
+
+    let castAnswer: string | undefined = currentAnswers?.[`typecast.Q1_cast_column_${colName}`];
+    if (!castAnswer && payload?.clarifications?.typecast?.[`Q1_cast_column_${colName}`]) {
+      const castQ = payload.clarifications.typecast[`Q1_cast_column_${colName}`];
+      castAnswer = castQ.answer || castQ.previous_answer || undefined;
+    }
+    
+    if (castAnswer === "No") {
+      return "str";
+    }
+
+    return expectedType;
   };
 
   useEffect(() => {
@@ -97,12 +109,12 @@ export const MassUploadView: React.FC = () => {
               if (ansVal.startsWith("Custom strategy:")) {
                 nextAnswers[`${cat}.${qKey}`] = "Custom strategy (describe in your next prompt)";
                 const rawCustom = ansVal.substring("Custom strategy:".length).trim();
-                const expectedType = getColumnExpectedTypeFromPayload(payload, qKey);
+                const expectedType = getColumnExpectedTypeFromPayload(payload, qKey, nextAnswers);
                 nextCustom[`${cat}.${qKey}`] = tryFormatToISO(rawCustom, expectedType);
               } else if (ansVal.startsWith("fill_value:")) {
                 nextAnswers[`${cat}.${qKey}`] = "fill_value";
                 const val = ansVal.substring("fill_value:".length).trim();
-                const expectedType = getColumnExpectedTypeFromPayload(payload, qKey);
+                const expectedType = getColumnExpectedTypeFromPayload(payload, qKey, nextAnswers);
                 nextCustom[`${cat}.${qKey}`] = tryFormatToISO(val, expectedType);
               } else {
                 nextAnswers[`${cat}.${qKey}`] = ansVal;
@@ -1108,7 +1120,7 @@ export const MassUploadView: React.FC = () => {
                                                               value={customInputs[key] || ""}
                                                               onChange={(e) => setCustomInputs((prev) => ({ ...prev, [key]: e.target.value }))}
                                                               onBlur={(e) => {
-                                                                const expectedType = getColumnExpectedTypeFromPayload(payload, qKey);
+                                                                const expectedType = getColumnExpectedTypeFromPayload(payload, qKey, mcqAnswers);
                                                                 const formatted = tryFormatToISO(e.target.value, expectedType);
                                                                 if (formatted !== e.target.value) {
                                                                   setCustomInputs((prev) => ({ ...prev, [key]: formatted }));

@@ -128,6 +128,7 @@ export const SEVERITY_STYLES: Record<string, string> = {
 
 export function tryFormatToISO(input: string, expectedType: string): string {
   if (!input) return input;
+  if (expectedType === "str") return input;
   
   let prefix = "";
   let valPart = input.trim();

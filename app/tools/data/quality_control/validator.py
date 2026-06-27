@@ -171,16 +171,32 @@ def validate_dataframe(
                 
                 if not is_casted_temporal:
                     pattern = semantic.expected_str_pattern
-                    non_nulls = non_null_series.astype(str)
-                    if not non_nulls.empty:
-                        match_mask = non_nulls.str.match(pattern)
-                        if not match_mask.all():
-                            errors.append(
-                                PandasValidationError(
-                                    "expected_str_pattern",
-                                    f"Column '{column_name}' does not match expected pattern {pattern}.",
-                                )
-                            )
+                    
+                    if task.task_id == "null_handling" and task.strategy:
+                        strategy_raw = task.strategy
+                        if hasattr(strategy_raw, "model_dump"):
+                            strategy_dict = strategy_raw.model_dump()
+                        elif isinstance(strategy_raw, dict):
+                            strategy_dict = strategy_raw
+                        else:
+                            strategy_dict = {}
+                            
+                        per_column = strategy_dict.get("per_column", {})
+                        col_cfg = per_column.get(column_name, {})
+                        
+                        if isinstance(col_cfg, dict) and col_cfg.get("strategy") == "fill_value":
+                            fill_val = col_cfg.get("fill_value")
+                            if fill_val is not None:
+                                import re
+                                fill_str = str(fill_val).strip()
+                                # Check if the intended fill value matches the pattern
+                                if not re.match(pattern, fill_str):
+                                    errors.append(
+                                        PandasValidationError(
+                                            "expected_str_pattern",
+                                            f"Column '{column_name}': the provided fill_value '{fill_str}' does not match expected pattern {pattern}.",
+                                        )
+                                    )
                         
     if errors:
         raise PandasValidationErrors(errors)

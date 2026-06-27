@@ -99,7 +99,7 @@ export const InputValidationClarificationContent: React.FC<{
               if (ansVal.startsWith("Custom strategy:")) {
                 nextAnswers[`${cat}.${qKey}`] = "Custom strategy (describe in your next prompt)";
                 const rawCustom = ansVal.substring("Custom strategy:".length).trim();
-                const expectedType = getColumnExpectedType(qKey);
+                const expectedType = getColumnExpectedType(qKey, nextAnswers);
                 nextCustom[`${cat}.${qKey}`] = tryFormatToISO(rawCustom, expectedType);
               } else if (ansVal.startsWith("fill_value:")) {
                 const val = ansVal.substring("fill_value:".length).trim();
@@ -114,7 +114,7 @@ export const InputValidationClarificationContent: React.FC<{
                     nextFillValueSubOption[`${cat}.${qKey}`] = val;
                   } else {
                     nextFillValueSubOption[`${cat}.${qKey}`] = "custom";
-                    const expectedType = getColumnExpectedType(qKey);
+                    const expectedType = getColumnExpectedType(qKey, nextAnswers);
                     nextFillValueCustom[`${cat}.${qKey}`] = tryFormatToISO(val, expectedType);
                   }
                 }
@@ -444,7 +444,7 @@ export const InputValidationClarificationContent: React.FC<{
                                                   setFillValueCustom((prev) => ({ ...prev, [key]: e.target.value }))
                                                 }
                                                 onBlur={(e) => {
-                                                  const expectedType = getColumnExpectedType(qKey);
+                                                  const expectedType = getColumnExpectedType(qKey, answers);
                                                   const formatted = tryFormatToISO(e.target.value, expectedType);
                                                   if (formatted !== e.target.value) {
                                                     setFillValueCustom((prev) => ({ ...prev, [key]: formatted }));
@@ -484,7 +484,7 @@ export const InputValidationClarificationContent: React.FC<{
                                                 handleCustomInputChange(key, e.target.value)
                                               }
                                               onBlur={(e) => {
-                                                const expectedType = getColumnExpectedType(qKey);
+                                                const expectedType = getColumnExpectedType(qKey, answers);
                                                 const formatted = tryFormatToISO(e.target.value, expectedType);
                                                 if (formatted !== e.target.value) {
                                                   handleCustomInputChange(key, formatted);
