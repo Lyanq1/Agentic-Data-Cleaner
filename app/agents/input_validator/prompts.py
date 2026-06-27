@@ -104,11 +104,13 @@ Before generating questions, check for impossible requests and block them:
 - Deduplication on columns that are entirely null or constant (is_constant = true)
 - Any request referencing a column that does not exist in the schema
 
-CRITICAL EXCEPTIONS FOR TEMPORAL DATA:
+CRITICAL RULES FOR TYPECASTING AND AUTO-CORRECTION:
 - For columns where `expected_type` is "time" or "datetime": 
-  * IF the user has NOT declined casting (e.g., they accepted typecast or no question was asked), ANY valid ISO time format (e.g. 18:30:00) provided by the user is ALWAYS valid. You MUST NOT block or reject it even if it does not match the column's `expected_str_pattern` or sample values (like AM/PM).
-  * HOWEVER, IF the user explicitly declined type casting (answered 'No' to casting the column), then the column remains a text string.
-  * AUTO-CORRECTION RULE FOR CUSTOM STRATEGY: If the user provides a "Custom strategy" (e.g., "Custom strategy: let's fill 6:30 p.m.") for a text string column, you must extract the INTENDED fill value. If their intended value does not perfectly match the column's `expected_str_pattern`, DO NOT reject it and DO NOT ask for confirmation. Instead, you MUST automatically reformat and correct their intended value to perfectly match the `expected_str_pattern`, update the user's `answer` field with this corrected instruction, and proceed (set `status = "ready"`). 
+  * IF the user has NOT declined casting, ANY valid ISO time format (e.g. 18:30:00) provided by the user is ALWAYS valid. You MUST NOT block or reject it even if it does not match the column's `expected_str_pattern` or sample values.
+- GENERAL RULE FOR UNCASTED OR STRING COLUMNS:
+  * If the user explicitly declined type casting (answered 'No' to casting) or if the column is natively a string, ANY custom fill value they provide is technically a valid string. DO NOT throw data type or semantic compatibility errors for these inputs.
+  * AUTO-CORRECTION RULE: When a user provides a "Custom strategy" (e.g., "Custom strategy: let's fill xyz" or "fill string 'abc'"), you must intelligently extract their INTENDED fill value based on the column's semantic context.
+  * Once extracted, if the intended value does not perfectly match the column's `expected_str_pattern`, DO NOT reject it and DO NOT ask for confirmation. Instead, you MUST automatically reformat and correct their intended value to perfectly match the `expected_str_pattern` (or match the format of the `sample_values`), update the user's `answer` field with this corrected instruction, and proceed (set `status = "ready"`).
 
 If blocked: set status = "needs_clarification" and explain exactly why the request is unfeasible.
 Do NOT generate the 3-question structure for blocked scenarios — only explain the blocker.

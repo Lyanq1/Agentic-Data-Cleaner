@@ -63,7 +63,17 @@ class InputValidatorAgent(BaseAgent):
                                         if col_detail:
                                             expected_type = col_detail.get("expected_type", "str")
                                 
-                                if expected_type in ("datetime", "date"):
+                                cast_answer = None
+                                typecast_data = getattr(clar_obj, "typecast", None)
+                                if typecast_data:
+                                    cast_q = getattr(typecast_data, f"Q1_cast_column_{col_name}", None)
+                                    if cast_q:
+                                        if isinstance(cast_q, dict):
+                                            cast_answer = cast_q.get("answer")
+                                        elif hasattr(cast_q, "answer"):
+                                            cast_answer = getattr(cast_q, "answer")
+                                            
+                                if expected_type in ("datetime", "date") and cast_answer != "No":
                                     answer = None
                                     if isinstance(q_val, dict):
                                         answer = q_val.get("answer")
@@ -121,7 +131,14 @@ class InputValidatorAgent(BaseAgent):
                                             if col_detail:
                                                 expected_type = col_detail.get("expected_type", "str")
                                     
-                                    if expected_type in ("datetime", "date"):
+                                    cast_answer = None
+                                    typecast_data = clar_dict.get("typecast")
+                                    if isinstance(typecast_data, dict):
+                                        cast_q = typecast_data.get(f"Q1_cast_column_{col_name}")
+                                        if isinstance(cast_q, dict):
+                                            cast_answer = cast_q.get("answer")
+                                            
+                                    if expected_type in ("datetime", "date") and cast_answer != "No":
                                         answer = q_val.get("answer")
                                         if answer and not answer.lower().startswith("keep_null"):
                                             prefix = ""
@@ -229,12 +246,16 @@ class InputValidatorAgent(BaseAgent):
                 "convert them into metadata cleaning rules, and combine them with the semantic and statistical profiles. "
                 "CRITICAL: You MUST check if the user's answers and requirements are feasible according to STEP 3 — UNFEASIBLE SCENARIOS. "
                 "For example, the user must not request mean/median imputation on non-numeric columns, "
-                "impute nulls on columns with no nulls, cast non-date strings to datetime, or provide invalid/incompatible custom fill values. "
-                "(Note: For time/datetime columns, ANY valid 24-hour ISO time/datetime format like HH:MM:SS or YYYY-MM-DD is ALWAYS feasible and valid, even if the sample values use AM/PM. Do not reject valid ISO time formats.) "
-                "If any user answer is unfeasible or conflicts with the dataset constraints, you MUST: "
+                "impute nulls on columns with no nulls, or provide invalid/incompatible custom fill values. "
+                "(Note: For time/datetime columns, ANY valid 24-hour ISO time/datetime format like HH:MM:SS or YYYY-MM-DD is ALWAYS feasible and valid. "
+                "IMPORTANT FOR UNCASTED COLUMNS: If the user answered 'No' to typecasting a column (or if it is natively a string), ANY custom fill value provided is a valid string. "
+                "DO NOT throw data type or semantic compatibility errors for these columns. "
+                "Instead, strictly apply the AUTO-CORRECTION RULE: parse their intended value from the prompt based on the semantic context, and format it EXACTLY like the `sample_values` or `expected_str_pattern` of that column. "
+                "DO NOT throw an error for this!) "
+                "If any user answer is TRULY unfeasible or conflicts with the dataset constraints (and cannot be auto-corrected), you MUST: "
                 "1. Set status = 'needs_clarification'. "
                 "2. Clear the 'answer' field of that specific unfeasible question to null so the user can re-answer. "
-                "3. Set the 'error' field of that question with a clear explanation of why it was unfeasible (e.g., 'The custom strategy \"fill abc\" is invalid because this is a datetime column, not string. Please provide a valid ISO datetime format.'). "
+                "3. Set the 'error' field of that question with a clear explanation of why it was unfeasible (e.g., 'The strategy \"fill abc\" is invalid because this is a numeric column'). "
                 "4. Set the 'previous_answer' field of that question to the exact user answer they submitted (e.g., 'Custom strategy: fill abc'). "
                 "5. Keep the valid answers for other questions in their 'answer' field (leaving 'error' and 'previous_answer' as null for valid questions). "
                 "Only if ALL user answers are feasible, you must: "
