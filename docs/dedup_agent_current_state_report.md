@@ -2,298 +2,218 @@
 
 ## Scope
 
-This report documents the current deduplication worker state in the repo, the exact schema changes made for the worker, the current API testing path, and the expected output and verification flow.
+This report describes the **current live dedup implementation** after the move
+to:
 
-This report is intentionally precise about:
+- planner-owned strategy review
+- dedup-owned runtime validation and execution
+- full workflow integration with planner -> worker -> validator
 
-- which fields already existed
-- which fields were added
-- which fields are internal-only
-- which fields are exposed publicly
-- where there is still duplication in the current design
+It focuses on:
 
-## Current Dedup Worker Scope
+- what dedup does now
+- what fields it reads and writes
+- why those fields exist
+- how it fits into the full workflow
 
-The current deduplication worker is a deterministic pandas-based worker. It does not call an LLM.
+---
 
-Current supported use cases:
+## Current Role of the Dedup Worker
 
-1. Exact full-row duplicates
-- Uses `df.drop_duplicates(keep="first")`
-- Removes rows only when every column matches
+The dedup worker is now a **runtime execution worker**, not the primary owner
+of plan approval.
 
-2. Exact key-based duplicates
-- Uses `df.drop_duplicates(subset=key_columns, keep="first")`
-- Runs when a key is explicitly provided or inferred from planner/profile
+Responsibility split:
 
-3. No-op dedup pass
-- If no duplicates are found, the worker still writes an output parquet and records a dedup result
+- planner owns:
+  - task order
+  - dedup strategy intent
+  - user-facing review payload before execution
+- dedup owns:
+  - validating the planner strategy against the real dataframe
+  - resolving semantic intent into deterministic handlers
+  - executing exact dedup and fuzzy candidate generation
+  - returning execution results for validator
 
-Current non-goals:
+This is the intended authority boundary:
 
-- fuzzy matching
-- MinHash / LSH
-- phone normalization
-- email normalization
-- cross-language matching
-- conflict resolution such as `keep_most_complete`
-- merge of partial records
+- planner decides **what should happen**
+- dedup decides **how to execute it safely**
 
-## Exact Schema Audit
+---
 
-### 1. `GlobalState` fields that already existed before the current endpoint work
+## Full Workflow Placement
 
-These fields already existed in `app/graphs/states/global_state.py` and were not introduced by the dedup debug endpoint work:
+Dedup runs inside the merged graph workflow:
 
+1. `profiler`
+2. `semantic_profile`
+3. `input_validator`
+4. `planner`
+5. plan approval
+6. `deduplication`
+7. `validator`
+8. `null_handling`
+9. `validator`
+10. `type_casting`
+11. `validator`
+12. `report_agent`
+
+Why this matters:
+
+- dedup is not a standalone pipeline anymore
+- downstream workers read persisted approved state, not temporary HTTP response
+  payloads
+- validator remains the promotion gate between workers
+
+---
+
+## Current Approval Model
+
+### Primary approval
+
+Primary pre-execution approval is now planner-owned.
+
+It comes from:
+
+- `ExecutionPlan.review`
+- approved via:
+  - `POST /api/v1/pipeline/{run_id}/approve_plan`
+
+Editable dedup review fields submitted through that endpoint:
+
+- `dedup_review.key_columns`
+- `dedup_review.identifier_columns`
+- `dedup_review.ignored_columns`
+- `dedup_review.keep_rule`
+
+What happens on approval:
+
+- planner-owned dedup review values are validated against `dataset_schema`
+- the dedup task inside `execution_plan.task_list` is patched in-place
+- the dedup review payload inside `execution_plan.review` is updated to reflect
+  the approved values
+- the graph resumes from the planner checkpoint
+
+### What was removed
+
+The following dedup-local approval flow is no longer part of the active
+contract:
+
+- `POST /api/v1/dedup/review/{run_id}`
+- `DedupStrategyReview`
+- `DeduplicationHitlFeedback`
+- `DeduplicationResult.pending_strategy_review`
+- worker-local `hitl_feedback` consumption inside dedup
+
+### What remains
+
+- `POST /api/v1/dedup/run` still exists
+- but it is now only a debug/manual worker execution surface
+- it no longer drives a separate worker-local approval cycle
+
+---
+
+## End-to-End Dedup Runtime Flow
+
+### Step 1: Build runtime input from `GlobalState`
+
+Dedup narrows `GlobalState` into a worker-specific input contract.
+
+Fields used:
+
+- `project_id`
 - `dataset_path`
 - `dataset_schema`
 - `user_prompt`
-- `current_dataset_version`
-- `physical_dataframe_path`
-- `current_step`
-- `completed_steps`
 - `statistical_profile`
 - `semantic_profile`
-- `input_validation_result`
 - `execution_plan`
-- `worker_states`
-- `validation_results`
-- `current_task_idx`
 - `retry_count`
-- `global_errors`
-
-### 2. `GlobalState` fields added for dedup support
-
-These were added in `app/graphs/states/global_state.py`:
-
-#### `DeduplicationResult`
-
-New typed model:
-
-```python
-class DeduplicationResult(BaseModel):
-    applied_modes: List[Literal["exact_full_row", "exact_key"]] = Field(default_factory=list)
-    key_columns: List[str] = Field(default_factory=list)
-    keep_strategy: str = "first"
-    source_path: str
-    output_path: str
-    before_row_count: int
-    after_row_count: int
-    dropped_row_count: int
-    full_row_duplicate_count: int = 0
-    key_duplicate_count: int = 0
-    duplicate_group_count: int = 0
-    notes: List[str] = Field(default_factory=list)
-```
-
-Why this field is needed:
-
-- the dedup worker needs a structured result payload
-- row counts and mode applied should not be inferred from logs
-- output path should be kept in a typed result, not only in `physical_dataframe_path`
-
-#### `deduplication_result`
-
-New top-level state field:
-
-```python
-deduplication_result: Optional[DeduplicationResult]
-```
-
-Why this field is needed:
-
-- `physical_dataframe_path` only tells where the output dataset is
-- it does not describe what dedup logic was applied
-- dedup metrics need a stable home in state
-
-### 3. `ExecutionPlan` schema change
-
-The plan schema is now richer than before.
-
-Current typed shape:
-
-```python
-class ExecutionPlan(BaseModel):
-    metadata: PlanMetadata
-    plan_summary: str
-    assumptions: List[str]
-    global_constraints: GlobalConstraints
-    task_list: List[TaskDetailWrapper]
-```
-
-Important change:
-
-- `task_list` is no longer `List[TaskDetail]`
-- it is now `List[TaskDetailWrapper]`
-- each item holds the real task under `work_order`
-
-Example:
-
-```python
-task_wrapper.work_order.task_id
-task_wrapper.work_order.columns
-```
-
-This affects dedup integration in two places:
-
-- planner-task extraction inside the dedup agent
-- debug injection of a temporary dedup task into `execution_plan`
-
-The current dedup code was updated to use the wrapped form.
-
-### 4. `task_list` audit
-
-Current `GlobalState` also contains:
-
-```python
-task_list: Optional[List[str]]
-execution_plan: Optional[ExecutionPlan]
-```
-
-This is the main current duplication in the state model.
-
-Why both exist today:
-
-- `execution_plan.task_list` is the typed planner output
-
-Where top-level `task_list` is currently used:
-
-- `app/graphs/graph.py`
-- `app/graphs/nodes.py`
-- `app/agents/planner/agent.py`
-
-Conclusion:
-
-- yes, this is duplicated information
-- no, it was not introduced by the dedup debug endpoint
-- it should remain for now because the graph router depends on it
-- if we want to remove it later, that is a separate graph/planner refactor
-
-## Public API Schema Audit
-
-### Existing endpoint
-
-`GET /api/v1/pipeline/{run_id}/state`
-
-Original public shape already included:
-
-- `run_id`
-- `dataset_path`
-- `dataset_schema`
-- `user_prompt`
-- `statistical_profile`
-- `data_profile`
-- `semantic_profile`
-- `input_validation_result`
-- `current_step`
-- `completed_steps`
-- `errors`
-- `next_node`
-
-### Additional public fields kept for dedup inspection
-
-Only these extra fields are now exposed publicly because they are needed to inspect dedup execution:
-
-- `physical_dataframe_path`
-- `worker_states`
-- `validation_results`
-- `deduplication_result`
-- `current_dataset_version`
-
-Why each is needed:
-
-- `physical_dataframe_path`
-  - tells where the current deduped dataset version is written
-
-- `worker_states`
-  - shows whether the dedup worker finished or failed
-
-- `validation_results`
-  - shows the worker-level pass/fail validation entry
-
-- `deduplication_result`
-  - contains dedup metrics and notes
-
-- `current_dataset_version`
-  - identifies that the current dataframe is now the dedup output version
-
-### Fields intentionally not exposed publicly
-
-These are still available internally in the checkpointed raw state, but are not returned from `GET /state`:
-
-- `task_list`
-- `execution_plan`
 
 Why:
 
-- they are not required to inspect dedup output
-- exposing both creates duplicate planning representations in the public response
-- the dedup debug endpoint uses the internal raw checkpoint state directly and does not need them in the public state payload
+- the worker should not execute directly against the full global state blob
+- a narrow runtime contract is easier to validate and test
 
-## New File Audit
+### Step 2: Load the current dataframe
 
-### `app/api/v1/deduplication.py`
+Dedup reads the current dataset path from:
 
-Why this file was added:
+- `physical_dataframe_path`
+- fallback `dataset_path`
 
-- dedup cannot be reached through `POST /api/v1/pipeline/run`
-- the repo had no direct endpoint for running only the dedup worker
+Why:
 
-This file provides:
+- this is the worker-path convention already used in the workflow
+- the validator and later workers rely on persisted path-based handoff
 
-- `POST /api/v1/dedup/run`
+### Step 3: Reuse prior decision when context matches
 
-Request:
+If the previous `DedupDecisionTrace.context_hash` matches the current dedup
+context, the worker can rebuild and reuse the previous validated decision.
 
-```json
-{
-  "run_id": "483d2083455c",
-  "key_columns": ["Id"]
-}
-```
+Why:
 
-Behavior:
+- avoids unnecessary repeated LLM planning
+- stabilizes reruns
 
-1. load checkpointed state by `run_id`
-2. inject the requested `key_columns` into a working dedup task
-3. run `DeduplicationAgent`
-4. persist dedup output back into the checkpointed run state
-5. return the updated dedup-facing state
+### Step 4: Prefer planner-owned strategy
 
-### Internal service helpers added in `app/services/pipeline.py`
+If no reusable decision exists, dedup now first tries to build its runtime
+decision from the planner-owned dedup task.
 
-Added internal helpers:
+That includes:
 
-- `get_pipeline_raw_state(run_id)`
-- `_inject_dedup_key_columns(state, key_columns)`
-- `run_dedup_agent_for_run(run_id, key_columns=None)`
+- primary keys
+- ignored columns
+- keep rule
+- semantic/fuzzy hints from planner strategy
 
-Why they are needed:
+Why:
 
-- `get_pipeline_state()` returns the public view, not the raw checkpoint payload
-- the dedup worker needs the real saved state
-- the debug endpoint needs a safe place to inject requested key columns without changing the public state schema
-- the injected debug task must now respect the richer `ExecutionPlan` schema:
-  - `metadata`
-  - `global_constraints`
-  - `task_list: List[TaskDetailWrapper]`
+- planner now owns the primary dedup strategy intent
 
-## Current Dedup Agent Behavior
+### Step 5: Fall back to local LLM planning only when needed
 
-### Inputs used by the worker
+If there is no reusable decision and planner strategy is insufficient, dedup can
+still invoke its own LLM-guided planning.
 
-The dedup worker reads from `GlobalState`:
+Why:
 
-- `physical_dataframe_path` or `dataset_path`
-- `dataset_schema`
-- `statistical_profile`
-- `execution_plan`
-- `retry_count`
-- `hitl_feedback`
+- this preserves worker robustness
+- planner owns the primary path, but dedup still needs a safety fallback
 
-### Output fields written by the worker
+### Step 6: Deterministically validate the chosen decision
 
-The dedup worker returns:
+Dedup never executes raw LLM or raw planner intent directly.
+
+It validates:
+
+- column existence
+- unsafe technical identifiers
+- weak single-key choices
+- name-only key risks
+- fuzzy plan compatibility with available columns
+
+Why:
+
+- planner owns intent, not safety
+- worker must still reject unsafe runtime choices
+
+### Step 7: Execute dedup
+
+Current deterministic execution includes:
+
+- exact full-row dedup
+- exact key / composite-key dedup
+- generic phone normalization
+- generic email normalization
+- plan-driven fuzzy candidate generation
+
+### Step 8: Return worker output for validator
+
+Dedup writes:
 
 - `deduplication_result`
 - `physical_dataframe_path`
@@ -303,221 +223,256 @@ The dedup worker returns:
 - `current_step`
 - `completed_steps`
 
-### Why these output fields are needed
+This is the same integration pattern expected of the other workers.
+
+---
+
+## Active Schemas and Why They Exist
+
+## `DeduplicationAgentInput`
+
+Purpose:
+- narrowed runtime input for the worker
+
+Fields:
+
+- `project_id`
+  - output naming and traceability
+- `dataset_path`
+  - file the worker reads
+- `dataset_schema`
+  - validates planner-selected keys
+- `user_prompt`
+  - optional context for LLM fallback
+- `statistical_profile`
+  - uniqueness/null signals
+- `semantic_profile`
+  - semantic hints for normalization and comparison
+- `planner_task`
+  - planner-owned dedup task
+- `retry_count`
+  - retry context
+- `fuzzy_enabled`
+  - whether fuzzy candidate generation should run
+
+Why this model exists:
+- avoid passing the entire `GlobalState` into every execution helper
+
+## `DedupDecision`
+
+Purpose:
+- raw LLM proposal when local planning is required
+
+Fields:
+
+- `mode`
+- `key_columns`
+- `column_semantics`
+- `ignore_columns`
+- `fuzzy_plan`
+- `confidence`
+- `reasoning_summary`
+
+Why it exists:
+- separates raw planning output from validated execution input
+
+## `ValidatedDedupDecision`
+
+Purpose:
+- the actual execution decision trusted by the runtime
+
+Fields:
+
+- `mode`
+- `key_columns`
+- `column_semantics`
+- `ignore_columns`
+- `fuzzy_plan`
+- `decision_source`
+- `confidence`
+- `reasoning_summary`
+- `keep_rule`
+- `validation_notes`
+- `unresolved_collisions`
+
+Why it exists:
+- raw planner/LLM intent must be sanitized before execution
+
+## `DedupDecisionTrace`
+
+Purpose:
+- audit and replay metadata persisted inside the result
+
+Fields:
+
+- `decision_source`
+- `column_semantics`
+- `ignore_columns`
+- `fuzzy_plan`
+- `confidence`
+- `reasoning_summary`
+- `validation_notes`
+- `context_hash`
+
+Why it exists:
+- rerun reuse
+- debugging
+- reproducibility
+
+## `DeduplicationResult`
+
+Purpose:
+- final persisted worker output contract
+
+Fields:
+
+- `applied_modes`
+  - which execution modes actually removed rows
+- `key_columns`
+  - effective key columns actually used
+- `keep_strategy`
+  - final survivor rule used
+- `source_path`
+  - input path for this worker run
+- `output_path`
+  - output path produced by this worker run
+- `before_row_count`
+  - row count before execution
+- `after_row_count`
+  - row count after execution
+- `dropped_row_count`
+  - how many rows were removed
+- `full_row_duplicate_count`
+  - exact full-row removal count
+- `key_duplicate_count`
+  - exact-key removal count
+- `duplicate_group_count`
+  - duplicate group count
+- `notes`
+  - human-readable worker summary
+- `decision_trace`
+  - audit/replay metadata
+
+Why this model exists:
+- downstream systems should read one stable worker result object
+
+---
+
+## What Dedup Reads from Global State
+
+- `dataset_path`
+- `physical_dataframe_path`
+- `dataset_schema`
+- `user_prompt`
+- `statistical_profile`
+- `semantic_profile`
+- `execution_plan`
+- `retry_count`
+- `worker_states`
+- `deduplication_result`
+
+Why these matter:
+
+- they provide the current data source
+- planner intent
+- execution context
+- and prior decision reuse metadata
+
+---
+
+## What Dedup Writes to Global State
 
 - `deduplication_result`
-  - summary metrics and mode used
-
 - `physical_dataframe_path`
-  - concrete path to the new dataset version
-
 - `current_dataset_version`
-  - tracks the stage label of the current dataset
-
-- `worker_states`
-  - worker-level success/failure state
-
-- `validation_results`
-  - self-validation artifact written by the worker
-
-## Current Testing Flow
-
-### 1. Run the normal pipeline first
-
-Use:
-
-```http
-POST /api/v1/pipeline/run
-```
-
-This creates the checkpointed state and `run_id`.
-
-### 2. Run the dedup worker directly
-
-Use:
-
-```http
-POST /api/v1/dedup/run
-Content-Type: application/json
-
-{
-  "run_id": "483d2083455c",
-  "key_columns": ["Id"]  
-}
-```
-key_columns is optional:
-
-  - if omitted, the agent can still run exact full-row dedup
-  - if provided, the agent will also check exact key-based duplicates using those columns
-
-  You can pass one or many keys:
-
-  {
-    "run_id": "483d2083455c",
-    "key_columns": ["Id"]
-  }
-
-  {
-    "run_id": "483d2083455c",
-    "key_columns": ["Phone", "Email"]
-  }
-
-### 3. Inspect the updated state
-
-Use:
-
-```http
-GET /api/v1/pipeline/483d2083455c/state
-```
-
-Inspect these fields:
-
-- `physical_dataframe_path`
-- `deduplication_result`
 - `worker_states`
 - `validation_results`
-- `current_dataset_version`
+- `current_step`
+- `completed_steps`
+- `hitl_checkpoint`
+  - cleared by dedup after execution
 
-## Expected Output for the Current Sample State
+Why these writes exist:
 
-Given the current sample state:
+- downstream workers and APIs depend on persisted state, not local variables
 
-- `statistical_profile.duplicate_rows = 0`
-- `pk_candidates = ["Id"]`
-- `Id` is unique across all rows
+---
 
-Expected dedup result:
+## Fuzzy Execution Status
 
-- no full-row duplicates removed
-- no key-based duplicates removed on `Id`
-- output parquet still written
-- dedup result still recorded
-
-Expected shape:
-
-```json
-{
-  "run_id": "483d2083455c",
-  "requested_key_columns": ["Id"],
-  "state": {
-    "physical_dataframe_path": ".../483d2083455c_deduplicated.parquet",
-    "current_dataset_version": "deduplication_v1",
-    "current_step": "deduplication",
-    "deduplication_result": {
-      "applied_modes": [],
-      "key_columns": ["Id"],
-      "keep_strategy": "first",
-      "before_row_count": 3337,
-      "after_row_count": 3337,
-      "dropped_row_count": 0,
-      "full_row_duplicate_count": 0,
-      "key_duplicate_count": 0,
-      "duplicate_group_count": 0,
-      "notes": [
-        "Checked key-based duplicates on ['Id'] (source=execution_plan.columns); none were detected.",
-        "No duplicate rows were detected; dataset was carried forward unchanged."
-      ]
-    }
-  }
-}
-```
-
-## How To Verify The Result
-
-### Verify through API
-
-Check:
-
-- `state.deduplication_result.before_row_count`
-- `state.deduplication_result.after_row_count`
-- `state.deduplication_result.dropped_row_count`
-- `state.physical_dataframe_path`
-
-### Verify the output file exists
-
-Expected current fallback output path pattern:
-
-```text
-.tmp/agentic-data-cleaner/outputs/{run_id}_deduplicated.parquet
-```
-
-### Verify with pandas locally
-
-```powershell
-@'
-import pandas as pd
-
-before_path = r"\tmp\agentic-data-cleaner\uploads\b2996a5d51ae43e6b17cd49ac9f65d4c.parquet"
-after_path = r"D:\personal\hcmus\DoAnTotNghiep\Agentic-Data-Cleaner\.tmp\agentic-data-cleaner\outputs\483d2083455c_deduplicated.parquet"
-
-before_df = pd.read_parquet(before_path)
-after_df = pd.read_parquet(after_path)
-
-print("before_rows =", len(before_df))
-print("after_rows =", len(after_df))
-print("before_full_dup =", int(before_df.duplicated().sum()))
-print("after_full_dup =", int(after_df.duplicated().sum()))
-print("after_id_dup =", int(after_df.duplicated(subset=['Id']).sum()))
-'@ | .\.venv\Scripts\python -
-```
-
-Expected for the current sample:
-
-- `before_rows = 3337`
-- `after_rows = 3337`
-- `before_full_dup = 0`
-- `after_full_dup = 0`
-- `after_id_dup = 0`
-
-## Current Known Design Issues
-
-### 1. `task_list` duplicates `execution_plan.task_list`
-
-Status:
-
-- known
-- intentional for current graph routing
-- not changed by the dedup debug endpoint
-
-### 2. Windows storage path handling
+Fuzzy execution is still supported as **candidate generation**, not final merge.
 
 Current behavior:
 
-- configured `/tmp/.../outputs` path was not writable in this environment
-- dedup worker now falls back to:
+- planner or worker planning may enable fuzzy
+- worker validates the fuzzy plan
+- worker executes bounded blocking/candidate logic
+- worker returns candidate summary metrics
 
-```text
-.tmp/agentic-data-cleaner/outputs/
-```
+Still not active:
 
-This is a runtime compatibility fix, not a new schema field.
+- direct fuzzy auto-merge into final dataset
+- pair-level LLM entity resolution
+- dedicated MinHash backend
 
-### 3. LangGraph checkpoint type warnings
+---
 
-Current behavior:
+## Validation Contract
 
-- checkpoint deserialization logs warnings for custom types like `ExecutionPlan`, `StatisticalProfile`, and `DeduplicationResult`
-- current functionality still works
-- this is not a blocking issue for dedup endpoint testing
+Dedup uses `ValidationResultItem` only as a signaling and audit surface.
 
-## Summary
+Typical dedup metrics written there:
 
-The dedup debug path currently introduces one new typed result model and one new top-level state field that are actually required:
+- before/after row count
+- decision source
+- unresolved collision counts/types
+- fuzzy candidate counts
 
-- `DeduplicationResult`
-- `deduplication_result`
+Why this matters:
 
-The public `GET /state` response has been narrowed so it only exposes dedup-relevant additional fields:
+- `validation_results` is not the worker result object
+- `DeduplicationResult` is the worker result object
 
-- `physical_dataframe_path`
-- `worker_states`
-- `validation_results`
-- `deduplication_result`
-- `current_dataset_version`
+---
 
-The main duplication that still exists in the typed state is:
+## Debug Endpoint
 
-- top-level `task_list`
-- `execution_plan.task_list`
+### `POST /api/v1/dedup/run`
 
-That duplication predates the current endpoint work and remains because the graph router depends on it.
+Purpose:
+- manually execute the dedup worker against a saved run state
+
+Current role:
+- debug/manual execution only
+- not the primary approval path
+
+What it returns:
+- persisted state after dedup worker execution
+
+What it no longer does:
+- no worker-local review roundtrip
+- no `/dedup/review` follow-up step
+
+---
+
+## Current Limits
+
+- planner review is primary, but other workers still need full lineage-first
+  alignment in later phases
+- dedup still contains fallback local planning for resilience
+- validator is not yet the only authoritative lineage promotion point across
+  every worker
+- final report approval is still a later phase
+
+---
+
+## Bottom Line
+
+The dedup worker is now repo-aligned:
+
+- planner owns primary strategy approval
+- planner approval can now override dedup business fields before execution
+- dedup owns safe execution
+- validator remains the promotion gate
+- worker-local review state and review endpoint have been removed from the
+  active contract

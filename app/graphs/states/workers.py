@@ -1,6 +1,6 @@
 """State models for specific agent workers and their results."""
 
-from typing import Literal
+from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 class WorkerStateDetail(BaseModel):
@@ -17,7 +17,9 @@ class WorkerStates(BaseModel):
 
 class DedupDecisionTrace(BaseModel):
     decision_source: Literal["llm", "planner_fallback", "profile_fallback", "safe_default"]
+    column_semantics: dict[str, dict[str, Any]] = Field(default_factory=dict)
     ignore_columns: list[str] = Field(default_factory=list)
+    fuzzy_plan: dict[str, Any] | None = None
     confidence: float | None = None
     reasoning_summary: str = ""
     validation_notes: list[str] = Field(default_factory=list)

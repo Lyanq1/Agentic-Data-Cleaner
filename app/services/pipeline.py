@@ -237,6 +237,8 @@ async def get_pipeline_state(run_id: str) -> dict[str, Any] | None:
         "agent_logs": state.get("agent_logs", {}),
         "deduplication_result": state.get("deduplication_result"),
         "current_dataset_version": state.get("current_dataset_version"),
+        "hitl_status": state.get("hitl_status"),
+        "hitl_checkpoint": state.get("hitl_checkpoint"),
         "execution_plan": state.get("execution_plan").model_dump() if state.get("execution_plan") and hasattr(state.get("execution_plan"), "model_dump") else state.get("execution_plan"),
         "task_list": state.get("task_list", []),
         "current_task_idx": state.get("current_task_idx", 0),
@@ -335,10 +337,12 @@ async def run_dedup_agent_for_run(
     agent = DeduplicationAgent()
     updates = await agent.run(working_state)
 
-    config = {"configurable": {"thread_id": run_id}}
     async with get_checkpointer_manager().get() as checkpointer:
         graph = build_graph(checkpointer=checkpointer)
-        await graph.aupdate_state(config, updates, as_node="deduplication")
+        base_config = {"configurable": {"thread_id": run_id}}
+        snapshot = await graph.aget_state(base_config)
+        update_config = snapshot.config if snapshot and getattr(snapshot, "config", None) else base_config
+        await graph.aupdate_state(update_config, updates, as_node="deduplication")
 
     persisted_state = await get_pipeline_state(run_id)
     return {

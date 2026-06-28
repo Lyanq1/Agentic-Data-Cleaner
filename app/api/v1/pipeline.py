@@ -1,7 +1,9 @@
 """Pipeline API — upload dataset, run pipeline, check state."""
+import copy
 import io
 import uuid
 import logging
+from typing import Any
 
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
@@ -16,6 +18,7 @@ from app.services.ingestion import get_ingestion_service
 from app.services.pipeline import run_pipeline, get_pipeline_state
 from app.graphs.graph import build_graph
 from app.graphs.checkpointer import get_checkpointer_manager
+from app.graphs.states.planning import DedupStrategy, ExecutionPlan
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -217,6 +220,152 @@ class ResolveRequest(BaseModel):
     answers: dict[str, str]
 
 
+class ApproveDedupReview(BaseModel):
+    key_columns: list[str] | None = None
+    identifier_columns: list[str] | None = None
+    ignored_columns: list[str] | None = None
+    keep_rule: str | None = None
+
+
+class ApprovePlanRequest(BaseModel):
+    note: str | None = None
+    dedup_review: ApproveDedupReview | None = None
+
+
+def _dedupe_columns(columns: list[str] | None) -> list[str]:
+    if not columns:
+        return []
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for column in columns:
+        if column not in seen:
+            ordered.append(column)
+            seen.add(column)
+    return ordered
+
+
+def _validate_review_columns(columns: list[str], dataset_schema: dict[str, Any] | None, field_name: str) -> None:
+    if not dataset_schema:
+        return
+    missing = [column for column in columns if column not in dataset_schema]
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown columns in dedup_review.{field_name}: {missing}",
+        )
+
+
+def _apply_dedup_review_override(
+    execution_plan: Any,
+    dedup_review: ApproveDedupReview,
+    dataset_schema: dict[str, Any] | None,
+) -> ExecutionPlan:
+    plan = ExecutionPlan.model_validate(execution_plan)
+
+    key_columns = _dedupe_columns(dedup_review.key_columns)
+    identifier_columns = _dedupe_columns(dedup_review.identifier_columns)
+    ignored_columns = _dedupe_columns(dedup_review.ignored_columns)
+    keep_rule = dedup_review.keep_rule
+
+    _validate_review_columns(key_columns, dataset_schema, "key_columns")
+    _validate_review_columns(identifier_columns, dataset_schema, "identifier_columns")
+    _validate_review_columns(ignored_columns, dataset_schema, "ignored_columns")
+    if keep_rule is not None and keep_rule not in {"keep_most_complete", "keep_first", "keep_last"}:
+        raise HTTPException(
+            status_code=400,
+            detail="dedup_review.keep_rule must be one of keep_most_complete, keep_first, keep_last.",
+        )
+
+    updated_task = False
+    for wrapper in plan.task_list:
+        task = wrapper.work_order
+        if task.task_id != "deduplication":
+            continue
+
+        strategy: dict[str, Any] = {}
+        if task.strategy is not None:
+            if hasattr(task.strategy, "model_dump"):
+                strategy = task.strategy.model_dump()
+            elif hasattr(task.strategy, "dict"):
+                strategy = task.strategy.dict()
+            elif isinstance(task.strategy, dict):
+                strategy = copy.deepcopy(task.strategy)
+
+        if dedup_review.key_columns is not None:
+            strategy["primary_keys"] = key_columns
+            task.columns = key_columns
+        if dedup_review.identifier_columns is not None:
+            strategy["identifier_columns"] = identifier_columns
+        if dedup_review.ignored_columns is not None:
+            strategy["ignored_columns"] = ignored_columns
+        if keep_rule is not None:
+            strategy["keep_rule"] = keep_rule
+
+        effective_keys = [
+            column for column in strategy.get("primary_keys", []) if column not in set(strategy.get("ignored_columns", []))
+        ]
+        strategy["dedup_scope"] = "key_level" if effective_keys else "row_level"
+        strategy["duplicate_types"] = ["duplicate_key"] if effective_keys else ["exact_row"]
+        strategy["exact_match"] = {"enabled": not bool(effective_keys)}
+        strategy["key_based"] = {
+            **(strategy.get("key_based") if isinstance(strategy.get("key_based"), dict) else {}),
+            "keys": effective_keys,
+            "survivor_policy": {"fallback": "first" if strategy.get("keep_rule") == "keep_first" else "last" if strategy.get("keep_rule") == "keep_last" else "most_complete"},
+        }
+        strategy.setdefault("normalization", {})
+        strategy.setdefault("fuzzy_matching", {})
+        strategy.setdefault("llm_review", {})
+        strategy.setdefault("output_artifacts", {})
+
+        task.skip = False
+        task.skip_reason = None
+        task.rationale = "Approved through planner HITL override."
+        task.strategy = DedupStrategy.model_validate(strategy)
+        updated_task = True
+        break
+
+    if not updated_task:
+        raise HTTPException(status_code=400, detail="No deduplication task exists in the execution plan.")
+
+    if plan.review is not None:
+        for section in plan.review.sections:
+            if section.task_id != "deduplication":
+                continue
+            for field in section.fields:
+                if field.field_key == "mode":
+                    field.value = "exact_key" if key_columns else "exact_full_row"
+                if field.field_key == "key_columns" and dedup_review.key_columns is not None:
+                    field.value = key_columns
+                elif field.field_key == "identifier_columns" and dedup_review.identifier_columns is not None:
+                    field.value = identifier_columns
+                elif field.field_key == "ignored_columns" and dedup_review.ignored_columns is not None:
+                    field.value = ignored_columns
+                elif field.field_key == "keep_rule" and keep_rule is not None:
+                    field.value = keep_rule
+            break
+        plan.review.warnings = [
+            warning for warning in plan.review.warnings
+            if "No duplicate rows or key-level duplicates detected" not in warning
+        ]
+
+    if "Deduplication is skipped" in plan.plan_summary or "Deduplication is skipped as no duplicate rows or key-level duplicates are detected." in plan.plan_summary:
+        plan.plan_summary = (
+            "The cleaning plan includes planner-approved deduplication, followed by "
+            "null handling and type casting."
+        )
+    return plan
+
+
+def _active_task_list_from_plan(plan: ExecutionPlan) -> list[str]:
+    ordered_task_ids = ["deduplication", "null_handling", "type_casting"]
+    active = {
+        wrapper.work_order.task_id
+        for wrapper in plan.task_list
+        if not wrapper.work_order.skip
+    }
+    return [task_id for task_id in ordered_task_ids if task_id in active]
+
+
 @router.post("/pipeline/{run_id}/resolve", summary="Submit clarification answers and resume pipeline")
 async def api_resolve_pipeline(
     run_id: str,
@@ -310,6 +459,14 @@ async def api_resolve_pipeline(
             if key not in cleaned_answers:
                 cleaned_answers[key] = answer
         
+        # Treat fully answered clarification payloads as ready for planner consumption.
+        # The planner already reads the answered clarification structure directly.
+        val_result_dict["status"] = "ready"
+        val_result_dict["reasoning"] = (
+            "User provided clarification answers; planner can proceed using the "
+            "resolved clarification payload."
+        )
+
         # Build HumanMessage summarizing answers for the LLM chat history
         summary_lines = ["Here are my decisions for the clarification questions:"]
         for key, answer in cleaned_answers.items():
@@ -319,27 +476,55 @@ async def api_resolve_pipeline(
         # Prepare state updates
         state_updates = {
             "input_validation_result": val_result_dict,
-            "messages": [summary_msg]
+            "messages": [summary_msg],
+            "next_node": "planner",
         }
         
         # Update the thread state in checkpointer
-        await graph.aupdate_state(config, state_updates, as_node="input_validator")
+        await graph.aupdate_state(
+            snapshot.config if getattr(snapshot, "config", None) else config,
+            state_updates,
+            as_node="input_validator",
+        )
         
-    # Resume graph execution in the background
-    canonical_path = state.get("dataset_path")
-    original_filename = state.get("original_filename", "dataset.parquet")
-    
-    background_tasks.add_task(
-        run_pipeline,
-        run_id=run_id,
-        canonical_path=canonical_path,
-        input_format="parquet",
-        user_prompt=state.get("user_prompt", ""),
-        original_filename=original_filename,
-        data_schema=state.get("dataset_schema"),
-        clean_dataset_path=state.get("clean_dataset_path"),
-        pipeline_mode=state.get("pipeline_mode", "interactive"),
-    )
+    # Resume the existing checkpointed graph state in the background.
+    # Do not restart via run_pipeline(), because this thread already has
+    # persisted state and should continue from planner after input validation.
+    async def resume_graph():
+        from app.core.websocket_manager import manager
+        import time
+        async with get_checkpointer_manager().get() as cp:
+            gr = build_graph(checkpointer=cp)
+            try:
+                async for event in gr.astream_events(None, config=config, version="v2"):
+                    kind = event["event"]
+                    name = event.get("name", "")
+
+                    if kind == "on_tool_start":
+                        await manager.broadcast_to_run(run_id, {"event": "log", "log": {"timestamp": time.time(), "agent": name, "message": f"Calling tool '{name}'...", "level": "info"}})
+                    elif kind == "on_tool_end":
+                        await manager.broadcast_to_run(run_id, {"event": "log", "log": {"timestamp": time.time(), "agent": name, "message": f"Tool '{name}' completed successfully.", "level": "info"}})
+                    elif kind == "on_tool_error":
+                        err = event.get("data", {}).get("error", "Unknown error")
+                        await manager.broadcast_to_run(run_id, {"event": "log", "log": {"timestamp": time.time(), "agent": name, "message": f"Tool '{name}' failed. Error: {err}", "level": "error"}})
+                    elif kind == "on_chain_start":
+                        if name in ["profiler", "semantic_profile", "input_validator", "planner", "supervisor", "deduplication", "null_handling", "type_casting", "validator", "report_agent"]:
+                            await manager.broadcast_to_run(run_id, {"event": "log", "log": {"timestamp": time.time(), "agent": "system", "message": f"Starting step: {name}", "level": "info"}})
+                    elif kind == "on_chain_error":
+                        err = event.get("data", {}).get("error", "Unknown error")
+                        if name != "LangGraph":
+                            await manager.broadcast_to_run(run_id, {"event": "log", "log": {"timestamp": time.time(), "agent": "system", "message": f"Error in {name}: {err}", "level": "error"}})
+
+                snapshot_after = await gr.aget_state(config)
+                if snapshot_after and snapshot_after.next:
+                    await manager.broadcast_to_run(run_id, {"event": "status_change", "status": "paused"})
+                else:
+                    await manager.broadcast_to_run(run_id, {"event": "status_change", "status": "completed"})
+            except Exception as e:
+                logger.error(f"Pipeline resume after resolve error: {e}")
+                await manager.broadcast_to_run(run_id, {"event": "status_change", "status": "failed"})
+
+    background_tasks.add_task(resume_graph)
     
     return {
         "message": "Answers submitted and pipeline resume triggered successfully."
@@ -350,6 +535,7 @@ async def api_resolve_pipeline(
 async def api_approve_plan(
     run_id: str,
     background_tasks: BackgroundTasks,
+    payload: ApprovePlanRequest | None = None,
 ):
     """Resume the pipeline from the plan-approval checkpoint."""
     config = {"configurable": {"thread_id": run_id}}
@@ -360,6 +546,37 @@ async def api_approve_plan(
         
         if not snapshot or not snapshot.values:
             raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found.")
+
+        state = snapshot.values
+        execution_plan = state.get("execution_plan")
+        review = None
+        if execution_plan is not None:
+            if hasattr(execution_plan, "review"):
+                review = execution_plan.review
+            elif isinstance(execution_plan, dict):
+                review = execution_plan.get("review")
+
+        if review is None:
+            raise HTTPException(status_code=400, detail="No pending execution plan review is available for this run.")
+
+        updated_plan = execution_plan
+        updated_task_list = state.get("task_list", [])
+        if payload and payload.dedup_review is not None:
+            updated_plan = _apply_dedup_review_override(
+                execution_plan=execution_plan,
+                dedup_review=payload.dedup_review,
+                dataset_schema=state.get("dataset_schema"),
+            )
+            updated_task_list = _active_task_list_from_plan(updated_plan)
+
+        approval_updates = {
+            "execution_plan": updated_plan,
+            "task_list": updated_task_list,
+            "current_task_idx": 0,
+            "hitl_status": "approved",
+            "messages": [HumanMessage(content=payload.note)] if payload and payload.note else [],
+        }
+        await graph.aupdate_state(snapshot.config if getattr(snapshot, "config", None) else config, approval_updates, as_node="planner")
             
     # Resume graph execution in the background
     async def resume_graph():
