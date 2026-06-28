@@ -57,6 +57,7 @@ from app.graphs.states.workers import (
     WorkerStateDetail,
     WorkerStates,
 )
+from app.graphs.utils import _load_latest_dataframe_with_source
 from app.tools.data.dedup import inspect_duplicate_candidates, profile_fuzzy_columns
 
 logger = logging.getLogger(__name__)
@@ -79,15 +80,16 @@ class DeduplicationAgent(BaseAgent):
         self._tool_map = {tool.name: tool for tool in self.tools}
 
     async def run(self, state: GlobalState) -> dict[str, Any]:
-        source_path = self._resolve_source_path(state)
-        if not source_path:
+        planner_task = self._extract_planner_task(state.get("execution_plan"))
+        df, source_path = _load_latest_dataframe_with_source(state, planner_task)
+        if df is None or not source_path:
             return self._failure_update(
                 state,
-                "DeduplicationAgent: no dataset_path or physical_dataframe_path found in state.",
+                "DeduplicationAgent: no approved lineage version or readable dataframe path found in state.",
                 failed_rules=["missing_dataset_path"],
             )
 
-        dedup_input = self._build_input(state, source_path)
+        dedup_input = self._build_input(state, source_path, planner_task=planner_task)
         logger.info(
             "DeduplicationAgent: starting | source_path=%s | project_id=%s",
             dedup_input.dataset_path,
@@ -95,7 +97,6 @@ class DeduplicationAgent(BaseAgent):
         )
 
         try:
-            df = self._read_dataframe(dedup_input.dataset_path)
             context_hash = self._compute_context_hash(dedup_input)
             validated_decision = None
             reused_decision = False
@@ -172,6 +173,8 @@ class DeduplicationAgent(BaseAgent):
         worker_states = self._coerce_worker_states(state)
         worker_states.dedup_agent = WorkerStateDetail(status="done", retries=0, error_log=[])
         worker_states.last_completed_agent = self.name
+        worker_outputs = dict(state.get("worker_outputs") or {})
+        worker_outputs[self.name] = result.model_dump(mode="json")
 
         logger.info(
             "DeduplicationAgent: completed | output_path=%s | before_rows=%s | after_rows=%s | modes=%s | source=%s",
@@ -184,6 +187,7 @@ class DeduplicationAgent(BaseAgent):
 
         return {
             "deduplication_result": result,
+            "worker_outputs": worker_outputs,
             "physical_dataframe_path": output_path,
             "current_dataset_version": "deduplication_v1",
             "worker_states": worker_states,
@@ -204,12 +208,13 @@ class DeduplicationAgent(BaseAgent):
             "completed_steps": "deduplication",
         }
 
-    @staticmethod
-    def _resolve_source_path(state: GlobalState) -> str | None:
-        return state.get("physical_dataframe_path") or state.get("dataset_path")
-
-    def _build_input(self, state: GlobalState, dataset_path: str) -> DeduplicationAgentInput:
-        execution_plan = state.get("execution_plan")
+    def _build_input(
+        self,
+        state: GlobalState,
+        dataset_path: str,
+        *,
+        planner_task: TaskDetail | None = None,
+    ) -> DeduplicationAgentInput:
         return DeduplicationAgentInput(
             project_id=state.get("project_id"),
             dataset_path=dataset_path,
@@ -217,7 +222,7 @@ class DeduplicationAgent(BaseAgent):
             user_prompt=state.get("user_prompt"),
             statistical_profile=state.get("statistical_profile"),
             semantic_profile=state.get("semantic_profile"),
-            planner_task=self._extract_planner_task(execution_plan),
+            planner_task=planner_task,
             retry_count=state.get("retry_count") or 0,
             fuzzy_enabled=self._should_run_fuzzy(state),
         )
@@ -796,13 +801,6 @@ class DeduplicationAgent(BaseAgent):
             validation_notes=list(trace.validation_notes),
             unresolved_collisions=[],
         )
-
-    @staticmethod
-    def _read_dataframe(dataset_path: str) -> pd.DataFrame:
-        path = Path(dataset_path)
-        if path.suffix.lower() == ".parquet":
-            return pd.read_parquet(path)
-        return pd.read_csv(path)
 
     @staticmethod
     def _count_duplicate_groups(df: pd.DataFrame, key_columns: list[str]) -> int:

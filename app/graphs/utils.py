@@ -39,30 +39,39 @@ def _resolve_active_task(state: GlobalState) -> TaskDetail | None:
     return None
 
 
-def _load_latest_dataframe(state: GlobalState, task: TaskDetail) -> pd.DataFrame | None:
+def _load_latest_dataframe_with_source(
+    state: GlobalState,
+    task: TaskDetail | None,
+) -> tuple[pd.DataFrame | None, str | None]:
     """Prefer the latest persisted lineage version, then fall back to file paths."""
     session_id = resolve_lineage_session_id(state)
     if session_id:
         try:
             dataframe = LineageService.get_latest_version(session_id)
             if not dataframe.empty:
-                return restore_original_column_order(dataframe, state)
+                return restore_original_column_order(dataframe, state), f"lineage:{session_id}"
         except Exception:
             # Keep file-based validation usable for local/dev runs when lineage is unavailable.
             pass
 
     dataset_path = _resolve_dataset_path(state, task)
     if dataset_path:
-        return _load_dataframe(dataset_path)
+        return _load_dataframe(dataset_path), dataset_path
 
-    return None
+    return None, None
 
 
-def _resolve_dataset_path(state: GlobalState, task: TaskDetail) -> str | None:
+def _load_latest_dataframe(state: GlobalState, task: TaskDetail | None) -> pd.DataFrame | None:
+    """Compatibility wrapper returning only the dataframe."""
+    dataframe, _ = _load_latest_dataframe_with_source(state, task)
+    return dataframe
+
+
+def _resolve_dataset_path(state: GlobalState, task: TaskDetail | None) -> str | None:
     candidate_keys: list[str] = []
-    if task.outputs:
+    if task and task.outputs:
         candidate_keys.append(task.outputs.write_path_key)
-    if task.inputs:
+    if task and task.inputs:
         candidate_keys.append(task.inputs.read_path_key)
     candidate_keys.extend(
         [

@@ -30,6 +30,7 @@ from app.graphs.states.global_state import (
 from app.graphs.states.planning import TaskDetail
 from app.graphs.states.workers import WorkerStateDetail
 from app.graphs.states.profiles import SemanticProfile
+from app.graphs.utils import _load_latest_dataframe_with_source
 
 logger = logging.getLogger(__name__)
 
@@ -130,30 +131,21 @@ class NullAgent(BaseAgent):
     # ------------------------------------------------------------------
 
     async def run(self, state: GlobalState) -> dict[str, Any]:
-        source_path = self._resolve_source_path(state)
-        if not source_path:
+        planner_task = self._extract_planner_task(state.get("execution_plan"))
+        df, source_path = _load_latest_dataframe_with_source(state, planner_task)
+        if df is None or not source_path:
             return self._failure_update(
                 state,
-                "NullAgent: no dataset_path or physical_dataframe_path found in state.",
+                "NullAgent: no approved lineage version or readable dataframe path found in state.",
                 failed_rules=["missing_dataset_path"],
             )
 
-        agent_input = self._build_input(state, source_path)
+        agent_input = self._build_input(state, source_path, planner_task=planner_task)
         logger.info(
             "NullAgent: starting | source_path=%s | project_id=%s",
             agent_input.dataset_path,
             agent_input.project_id,
         )
-
-        # ---- Load dataframe ------------------------------------------------
-        try:
-            df = self._read_dataframe(agent_input.dataset_path)
-        except Exception as exc:
-            return self._failure_update(
-                state,
-                f"NullAgent: failed to read dataset: {exc}",
-                failed_rules=["dataset_read_failed"],
-            )
 
         before_row_count = len(df)
 
@@ -216,6 +208,8 @@ class NullAgent(BaseAgent):
         worker_states = self._coerce_worker_states(state)
         worker_states.null_agent = WorkerStateDetail(status="done", retries=0, error_log=[])
         worker_states.last_completed_agent = self.name
+        worker_outputs = dict(state.get("worker_outputs") or {})
+        worker_outputs[self.name] = result.model_dump(mode="json")
 
         logger.info(
             "NullAgent: completed | output_path=%s | before_rows=%d | after_rows=%d | dropped=%d",
@@ -226,7 +220,7 @@ class NullAgent(BaseAgent):
         )
 
         return {
-            "worker_outputs": {"null_agent": result.model_dump()},
+            "worker_outputs": worker_outputs,
             "physical_dataframe_path": output_path,
             "current_dataset_version": "null_handling_v1",
             "worker_states": worker_states,
@@ -251,15 +245,17 @@ class NullAgent(BaseAgent):
     # Private helpers
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _resolve_source_path(state: GlobalState) -> str | None:
-        return state.get("physical_dataframe_path") or state.get("dataset_path")
-
-    def _build_input(self, state: GlobalState, dataset_path: str) -> NullAgentInput:
+    def _build_input(
+        self,
+        state: GlobalState,
+        dataset_path: str,
+        *,
+        planner_task: TaskDetail | None = None,
+    ) -> NullAgentInput:
         return NullAgentInput(
             project_id=state.get("project_id"),
             dataset_path=dataset_path,
-            planner_task=self._extract_planner_task(state.get("execution_plan")),
+            planner_task=planner_task,
             retry_count=state.get("retry_count") or 0,
         )
 
@@ -705,19 +701,6 @@ class NullAgent(BaseAgent):
                 notes.append(f"NullAgent: strategy '{coerced_strategy}' not handled; leaving as-is.")
 
         return cleaned_df, dropped_per_column, filled_per_column, dropped_columns, skipped_columns, notes
-
-    @staticmethod
-    def _read_dataframe(dataset_path: str) -> pd.DataFrame:
-        path = Path(dataset_path)
-        if path.suffix.lower() in {".parquet", ".pq"}:
-            return pd.read_parquet(path)
-        if path.suffix.lower() in {".csv", ".txt"}:
-            return pd.read_csv(path)
-        if path.suffix.lower() in {".xlsx", ".xls"}:
-            return pd.read_excel(path)
-        if path.suffix.lower() in {".json", ".jsonl"}:
-            return pd.read_json(path, lines=path.suffix.lower() == ".jsonl")
-        raise ValueError(f"Unsupported dataset format: {path.suffix}")
 
     def _validate_output(
         self,

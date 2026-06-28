@@ -20,9 +20,7 @@ from app.graphs.states.planning import ExecutionPlan, TaskDetail
 from app.graphs.states.profiles import SemanticProfile
 from app.graphs.states.output_validation import ValidationResultItem
 from app.graphs.states.workers import WorkerStateDetail, WorkerStates
-from app.services.dataframe_order import restore_original_column_order
-from app.services.lineage_service import LineageService
-from app.services.lineage_utils import resolve_lineage_session_id
+from app.graphs.utils import _load_latest_dataframe_with_source
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +68,7 @@ class TypeCastingAgent(BaseAgent):
             )
 
         try:
-            df, read_source = self._read_current_dataframe(state)
+            df, read_source = self._read_current_dataframe(state, task)
         except Exception as exc:
             return self._failure_update(
                 state,
@@ -158,7 +156,6 @@ class TypeCastingAgent(BaseAgent):
 
         try:
             output_path = self._write_output_dataframe(result_df, state.get("project_id"))
-            lineage_version = self._append_lineage_version(state, result_df, column_results)
         except Exception as exc:
             return self._failure_update(
                 state,
@@ -173,7 +170,6 @@ class TypeCastingAgent(BaseAgent):
         report = {
             **self._serialize_results(column_results, plan, read_source),
             "output_path": output_path,
-            "lineage_version": lineage_version,
             "before_row_count": before_row_count,
             "after_row_count": len(result_df),
         }
@@ -188,12 +184,7 @@ class TypeCastingAgent(BaseAgent):
 
         return {
             "physical_dataframe_path": output_path,
-            "dataset_version": (
-                str(lineage_version) if lineage_version is not None else state.get("dataset_version")
-            ),
-            "current_dataset_version": (
-                str(lineage_version) if lineage_version is not None else "type_casting_v1"
-            ),
+            "current_dataset_version": "type_casting_v1",
             "worker_states": worker_states,
             "worker_outputs": worker_outputs,
             "validation_results": ValidationResultItem(
@@ -285,25 +276,15 @@ class TypeCastingAgent(BaseAgent):
         normalized = aliases.get(normalized, normalized)
         return normalized if normalized in {"int", "float", "str", "bool", "date", "datetime", "time"} else None
 
-    def _read_current_dataframe(self, state: GlobalState) -> tuple[pd.DataFrame, str]:
-        source_path = state.get("physical_dataframe_path") or state.get("dataset_path")
-        if source_path:
-            return self._read_dataframe(str(source_path)), str(source_path)
-
-        session_id = resolve_lineage_session_id(state)
-        if session_id:
-            lineage_df = LineageService.get_latest_version(session_id)
-            if not lineage_df.empty:
-                return restore_original_column_order(lineage_df, state), f"lineage:{session_id}"
-
-        raise ValueError("missing physical_dataframe_path, dataset_path, and lineage dataframe")
-
-    @staticmethod
-    def _read_dataframe(dataset_path: str) -> pd.DataFrame:
-        path = Path(dataset_path)
-        if path.suffix.lower() in {".parquet", ".pq"}:
-            return pd.read_parquet(path)
-        return pd.read_csv(path)
+    def _read_current_dataframe(
+        self,
+        state: GlobalState,
+        task: TaskDetail | None,
+    ) -> tuple[pd.DataFrame, str]:
+        dataframe, source = _load_latest_dataframe_with_source(state, task)
+        if dataframe is None or source is None:
+            raise ValueError("missing approved lineage version and readable dataframe path")
+        return dataframe, source
 
     def _skipped_update(self, state: GlobalState) -> dict[str, Any]:
         worker_states = self._coerce_worker_states(state)
@@ -543,23 +524,6 @@ class TypeCastingAgent(BaseAgent):
         output_path = output_dir / f"{file_id}_type_casted.parquet"
         df.to_parquet(output_path, index=False)
         return str(output_path)
-
-    @staticmethod
-    def _append_lineage_version(
-        state: GlobalState,
-        df: pd.DataFrame,
-        column_results: list[TypeCastColumnResult],
-    ) -> int | None:
-        session_id = resolve_lineage_session_id(state)
-        if not session_id:
-            return None
-        converted_columns = [result.column for result in column_results]
-        return LineageService.append_new_version(
-            session_id=session_id,
-            df=df,
-            agent_name=AgentRole.TYPECAST_AGENT.value,
-            description=f"Type-casted columns: {', '.join(converted_columns)}.",
-        )
 
     @staticmethod
     def _normalize_storage_path(raw_path: str) -> Path:
