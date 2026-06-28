@@ -97,8 +97,7 @@ class DeduplicationAgent(BaseAgent):
         try:
             df = self._read_dataframe(dedup_input.dataset_path)
             context_hash = self._compute_context_hash(dedup_input)
-            validated_decision = self._extract_debug_override_decision(dedup_input, df)
-            used_debug_override = validated_decision is not None
+            validated_decision = None
             reused_decision = False
             used_planner_strategy = False
             if validated_decision is None:
@@ -121,8 +120,6 @@ class DeduplicationAgent(BaseAgent):
         notes: list[str] = []
         if reused_decision:
             notes.append("Reused the previous dedup decision because the context hash matched.")
-        elif used_debug_override:
-            notes.append("Used the service-layer debug override instead of invoking the LLM.")
         elif used_planner_strategy:
             notes.append("Used the planner-approved dedup strategy as the primary execution input.")
 
@@ -252,47 +249,6 @@ class DeduplicationAgent(BaseAgent):
             strategy.get("dedup_scope") == "entity_level"
             or "fuzzy_entity" in duplicate_types
             or bool(fuzzy_matching)
-        )
-
-    def _extract_debug_override_decision(
-        self,
-        dedup_input: DeduplicationAgentInput,
-        df: pd.DataFrame,
-    ) -> ValidatedDedupDecision | None:
-        planner_task = dedup_input.planner_task
-        if not planner_task or planner_task.rationale != "Injected by the debug dedup endpoint.":
-            return None
-
-        key_columns = [column for column in planner_task.columns if column in df.columns]
-        if not key_columns:
-            return ValidatedDedupDecision(
-                mode="exact_full_row",
-                key_columns=[],
-                column_semantics={},
-                ignore_columns=[],
-                fuzzy_plan=self._build_default_fuzzy_plan(df, dedup_input, column_semantics={}),
-                decision_source="planner_fallback",
-                confidence=1.0,
-                reasoning_summary="Debug override was invalid, so the agent fell back to exact full-row dedup.",
-                validation_notes=["Debug override supplied no usable key columns."],
-                unresolved_collisions=[],
-            )
-
-        return ValidatedDedupDecision(
-            mode="exact_key",
-            key_columns=key_columns,
-            column_semantics=self._resolve_column_semantics(key_columns, dedup_input),
-            ignore_columns=[],
-            fuzzy_plan=self._build_default_fuzzy_plan(
-                df,
-                dedup_input,
-                column_semantics=self._resolve_column_semantics(key_columns, dedup_input),
-            ),
-            decision_source="planner_fallback",
-            confidence=1.0,
-            reasoning_summary="Used the service-layer debug override for key-based dedup testing.",
-            validation_notes=["Debug override applied at the service layer."],
-            unresolved_collisions=[],
         )
 
     def _build_planner_owned_decision(

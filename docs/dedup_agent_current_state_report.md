@@ -108,8 +108,8 @@ contract:
 
 ### What remains
 
-- `POST /api/v1/dedup/run` still exists
-- but it is now only a debug/manual worker execution surface
+- planner-owned approval is the only active pre-execution dedup HITL path
+- dedup runs only through the normal pipeline worker flow
 - it no longer drives a separate worker-local approval cycle
 
 ---
@@ -432,26 +432,6 @@ Why this matters:
 
 - `validation_results` is not the worker result object
 - `DeduplicationResult` is the worker result object
-
----
-
-## Debug Endpoint
-
-### `POST /api/v1/dedup/run`
-
-Purpose:
-- manually execute the dedup worker against a saved run state
-
-Current role:
-- debug/manual execution only
-- not the primary approval path
-
-What it returns:
-- persisted state after dedup worker execution
-
-What it no longer does:
-- no worker-local review roundtrip
-- no `/dedup/review` follow-up step
 
 ---
 
