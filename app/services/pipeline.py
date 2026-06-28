@@ -227,6 +227,7 @@ async def get_pipeline_state(run_id: str) -> dict[str, Any] | None:
         "semantic_profile": state.get("semantic_profile"),
         "input_validation_result": state.get("input_validation_result"),
         "worker_states": state.get("worker_states"),
+        "worker_outputs": state.get("worker_outputs"),
         "validation_results": state.get("validation_results", []),
         "agent_logs": state.get("agent_logs", {}),
         "deduplication_result": state.get("deduplication_result"),

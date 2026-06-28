@@ -184,7 +184,6 @@ class TypeCastingAgent(BaseAgent):
 
         return {
             "physical_dataframe_path": output_path,
-            "current_dataset_version": "type_casting_v1",
             "worker_states": worker_states,
             "worker_outputs": worker_outputs,
             "validation_results": ValidationResultItem(

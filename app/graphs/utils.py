@@ -76,8 +76,6 @@ def _resolve_dataset_path(state: GlobalState, task: TaskDetail | None) -> str | 
     candidate_keys.extend(
         [
             "physical_dataframe_path",
-            "dataset_version",
-            "current_dataset_version",
             "dataset_path",
         ]
     )

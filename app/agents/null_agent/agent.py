@@ -222,7 +222,6 @@ class NullAgent(BaseAgent):
         return {
             "worker_outputs": worker_outputs,
             "physical_dataframe_path": output_path,
-            "current_dataset_version": "null_handling_v1",
             "worker_states": worker_states,
             "validation_results": ValidationResultItem(
                 agent=self.name,

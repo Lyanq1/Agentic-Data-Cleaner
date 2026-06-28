@@ -189,7 +189,6 @@ class DeduplicationAgent(BaseAgent):
             "deduplication_result": result,
             "worker_outputs": worker_outputs,
             "physical_dataframe_path": output_path,
-            "current_dataset_version": "deduplication_v1",
             "worker_states": worker_states,
             "validation_results": build_validation_results(
                 agent_name=self.name,

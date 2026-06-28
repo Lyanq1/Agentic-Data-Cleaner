@@ -1,6 +1,7 @@
 """Combined Semantic Profiler Agent — single agent for columns, relationships, and validation."""
 import json
 import logging
+import re
 import pandas as pd
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
@@ -80,6 +81,7 @@ class SemanticProfilerAgent(BaseAgent):
                 df = pd.read_parquet(dataset_path)
             else:
                 df = pd.read_csv(dataset_path)
+            physical_dtypes = {column: str(dtype) for column, dtype in df.dtypes.items()}
 
             id_cols = {"id", "__id__"}
             profile_by_name = {
@@ -124,6 +126,7 @@ class SemanticProfilerAgent(BaseAgent):
         except Exception as e:
             logger.error(f"SemanticProfilerAgent: failed to read top popular sample rows: {e}")
             sample_text = "Failed to load sample rows"
+            physical_dtypes = {}
 
 
         # 2. Format statistical schema
@@ -210,7 +213,8 @@ class SemanticProfilerAgent(BaseAgent):
         for col in response.columns:
             # Rely on LLM prediction for semantic_data_type
             semantic_data_type = col.semantic_data_type or "Nominal"
-            expected_type = col.expected_type
+            expected_type = col.expected_type or "str"
+            strategies = col.fill_strategies or map_fill_strategies(semantic_data_type)
 
             if semantic_data_type.strip().lower() == "temporal":
                 physical_dtype = physical_dtypes.get(col.column_name, "object")
@@ -265,7 +269,7 @@ class SemanticProfilerAgent(BaseAgent):
                             expected_type = "bool"
                         else:
                             expected_type = "str"
-                    strategies = col.fill_strategies or map_fill_strategies(expected_type)
+                    strategies = col.fill_strategies or map_fill_strategies(semantic_data_type)
                 
             columns_dict[col.column_name] = ColumnSemanticProfileDetail(
                 description=col.description,
