@@ -16,6 +16,7 @@ from app.services.lineage_service import LineageService
 from app.services.lineage_utils import resolve_lineage_session_id
 from app.services.ingestion import get_ingestion_service
 from app.services.pipeline import run_pipeline, get_pipeline_state
+from app.graphs.utils import _load_dataframe
 from app.graphs.graph import build_graph
 from app.graphs.checkpointer import get_checkpointer_manager
 from app.graphs.states.planning import DedupStrategy, ExecutionPlan
@@ -109,11 +110,14 @@ def _load_latest_processed_dataframe(state: dict):
         if not df.empty:
             return restore_original_column_order(df, state)
 
-    dataset_path = state.get("dataset_path")
-    if dataset_path:
-        import pandas as pd
-
-        return pd.read_parquet(dataset_path)
+    for key in ["physical_dataframe_path", "dataset_path"]:
+        candidate_path = state.get(key)
+        if not candidate_path:
+            continue
+        try:
+            return _load_dataframe(candidate_path)
+        except Exception:
+            continue
 
     return None
 

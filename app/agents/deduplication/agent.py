@@ -50,14 +50,14 @@ from app.config.config import get_settings
 from app.core.llm_factory import create_llm
 from app.graphs.states.global_state import GlobalState
 from app.graphs.states.output_validation import ValidationResultItem
-from app.graphs.states.planning import ExecutionPlan, TaskDetail
+from app.graphs.states.planning import TaskDetail
 from app.graphs.states.profiler_state import StatisticalProfile
 from app.graphs.states.workers import (
     DeduplicationResult,
     WorkerStateDetail,
     WorkerStates,
 )
-from app.graphs.utils import _load_latest_dataframe_with_source
+from app.graphs.utils import _load_latest_dataframe_with_source, _resolve_active_task
 from app.tools.data.dedup import inspect_duplicate_candidates, profile_fuzzy_columns
 
 logger = logging.getLogger(__name__)
@@ -80,7 +80,13 @@ class DeduplicationAgent(BaseAgent):
         self._tool_map = {tool.name: tool for tool in self.tools}
 
     async def run(self, state: GlobalState) -> dict[str, Any]:
-        planner_task = self._extract_planner_task(state.get("execution_plan"))
+        planner_task = _resolve_active_task(state)
+        if planner_task is None or planner_task.task_id != "deduplication":
+            return self._failure_update(
+                state,
+                "DeduplicationAgent: active task is not deduplication.",
+                failed_rules=["active_task_mismatch"],
+            )
         df, source_path = _load_latest_dataframe_with_source(state, planner_task)
         if df is None or not source_path:
             return self._failure_update(
@@ -222,26 +228,14 @@ class DeduplicationAgent(BaseAgent):
             semantic_profile=state.get("semantic_profile"),
             planner_task=planner_task,
             retry_count=state.get("retry_count") or 0,
-            fuzzy_enabled=self._should_run_fuzzy(state),
+            fuzzy_enabled=self._should_run_fuzzy(state, planner_task),
         )
 
-    @staticmethod
-    def _extract_planner_task(execution_plan: Any) -> TaskDetail | None:
-        if not execution_plan:
-            return None
-        plan = ExecutionPlan.model_validate(execution_plan)
-        for wrapper in plan.task_list:
-            task = wrapper.work_order
-            if task.task_id == "deduplication" or task.agent == AgentRole.DEDUP_AGENT:
-                return task
-        return None
-
-    def _should_run_fuzzy(self, state: GlobalState) -> bool:
+    def _should_run_fuzzy(self, state: GlobalState, planner_task: TaskDetail | None) -> bool:
         active_tasks = state.get("task_list") or []
         if "deduplication" not in active_tasks:
             return False
 
-        planner_task = self._extract_planner_task(state.get("execution_plan"))
         if planner_task is None or planner_task.strategy is None:
             return False
 
