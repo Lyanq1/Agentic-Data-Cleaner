@@ -186,7 +186,6 @@ class DeduplicationAgent(BaseAgent):
         )
 
         return {
-            "deduplication_result": result,
             "worker_outputs": worker_outputs,
             "physical_dataframe_path": output_path,
             "worker_states": worker_states,
@@ -763,9 +762,9 @@ class DeduplicationAgent(BaseAgent):
             "notes": notes,
         }
 
-    @staticmethod
-    def _coerce_existing_result(state: GlobalState) -> DeduplicationResult | None:
-        existing = state.get("deduplication_result")
+    def _coerce_existing_result(self, state: GlobalState) -> DeduplicationResult | None:
+        worker_outputs = state.get("worker_outputs") or {}
+        existing = worker_outputs.get(self.name) if isinstance(worker_outputs, dict) else None
         if not existing:
             return None
         return DeduplicationResult.model_validate(existing)
@@ -775,18 +774,17 @@ class DeduplicationAgent(BaseAgent):
         state: GlobalState,
         context_hash: str,
     ) -> ValidatedDedupDecision | None:
-        existing_result = state.get("deduplication_result")
+        existing_result = self._coerce_existing_result(state)
         if not existing_result:
             return None
-        result = DeduplicationResult.model_validate(existing_result)
-        trace = result.decision_trace
+        trace = existing_result.decision_trace
         if trace is None or trace.context_hash != context_hash:
             return None
 
-        mode = "exact_key" if result.key_columns else "exact_full_row"
+        mode = "exact_key" if existing_result.key_columns else "exact_full_row"
         return ValidatedDedupDecision(
             mode=mode,
-            key_columns=list(result.key_columns),
+            key_columns=list(existing_result.key_columns),
             column_semantics={
                 column: ColumnSemanticDescriptor.model_validate(descriptor)
                 for column, descriptor in trace.column_semantics.items()
@@ -796,7 +794,7 @@ class DeduplicationAgent(BaseAgent):
             decision_source=trace.decision_source,
             confidence=trace.confidence,
             reasoning_summary=trace.reasoning_summary,
-            keep_rule=result.keep_strategy if result.keep_strategy in {"keep_most_complete", "keep_first", "keep_last"} else "keep_most_complete",
+            keep_rule=existing_result.keep_strategy if existing_result.keep_strategy in {"keep_most_complete", "keep_first", "keep_last"} else "keep_most_complete",
             validation_notes=list(trace.validation_notes),
             unresolved_collisions=[],
         )

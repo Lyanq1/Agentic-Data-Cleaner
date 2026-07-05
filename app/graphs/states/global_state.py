@@ -9,7 +9,7 @@ from app.graphs.states.profiler_state import StatisticalProfile
 from app.graphs.states.input_validation import InputValidationResult
 from app.graphs.states.planning import ExecutionPlan
 from app.graphs.states.profiles import SemanticProfile
-from app.graphs.states.workers import WorkerStates, DeduplicationResult
+from app.graphs.states.workers import WorkerStates
 from app.graphs.states.output_validation import ValidationResultItem
 
 ### helper function ###
@@ -117,7 +117,6 @@ class GlobalState(TypedDict):
     worker_outputs: dict[str, Any] | None
     validation_results: Annotated[list[ValidationResultItem], append_list]
     agent_logs: Annotated[dict[str, Any], merge_agent_logs]
-    deduplication_result: DeduplicationResult | None
 
     # Control flow variables
     current_task_idx: int | None
