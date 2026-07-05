@@ -96,7 +96,6 @@ class GlobalState(TypedDict):
 
     # Data Schema and Requirements
     dataset_schema: dict[str, Any] | None
-    dataset_version: str | None
     raw_requirement_input: str | None
 
     # Data References & Progress
