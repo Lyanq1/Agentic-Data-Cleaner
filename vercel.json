@@ -1,0 +1,13 @@
+{
+  "functions": {
+    "app/main.py": {
+      "excludeFiles": "{tests/**,docs/**,scratch/**,.agents/**,frontend/**}"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "/app/main.py"
+    }
+  ]
+}
