@@ -1,0 +1,207 @@
+HƯỚNG DẪN CÀI ĐẶT HỆ THỐNG AGENTIC DATA CLEANER
+
+1. GIỚI THIỆU
+Agentic Data Cleaner là hệ thống làm sạch dữ liệu có kiến trúc gồm:
+
+- Backend: Python, FastAPI, LangGraph/LangChain.
+- Frontend: React, TypeScript, Vite và Tailwind CSS.
+- Cơ sở dữ liệu: PostgreSQL 16.
+- Bộ nhớ đệm dùng để lưu phiên: Redis 7.
+- Mô hình ngôn ngữ: OpenAI (cần API key tương ứng).
+
+Tài liệu này ưu tiên cách cài đặt trên Windows 10/11 bằng PowerShell.
+
+2. CÔNG CỤ VÀ MÔI TRƯỜNG CẦN THIẾT
+-----------------------------------
+Cài đặt các công cụ sau trước khi tiếp tục:
+
+2.1. Công cụ bắt buộc
+
+- Python 3.13 trở lên (dự án khai báo requires-python >= 3.13).
+- Node.js 20.19 trở lên hoặc 22.12 trở lên. Khuyến nghị Node.js 24.x.
+- npm (được cài kèm Node.js).
+- Docker Desktop, có hỗ trợ lệnh "docker compose".
+- Kết nối Internet trong lần đầu cài thư viện và tải Docker image.
+
+2.2. Công cụ khuyến nghị
+
+- Git: dùng để tải và quản lý mã nguồn.
+- Visual Studio Code hoặc PyCharm: dùng để xem/chỉnh sửa mã nguồn.
+- Trình duyệt Chrome, Edge hoặc Firefox phiên bản mới.
+
+2.3. Kiểm tra công cụ
+
+- Mở PowerShell và chạy:
+
+    python --version
+    node --version
+    npm --version
+    docker --version
+    docker compose version
+
+- Nếu một lệnh không được nhận diện, cần cài công cụ tương ứng và mở lại PowerShell. Phải khởi động Docker Desktop trước khi chạy Docker Compose.
+
+
+3. CÁC THƯ VIỆN CHÍNH
+----------------------
+Các thư viện được cài tự động từ pyproject.toml và frontend/package-lock.json. Không cần cài riêng từng thư viện.
+
+3.1. Backend
+
+- Xử lý dữ liệu: pandas, NumPy, PyArrow, openpyxl.
+- AI/agent: LangGraph, LangChain, langchain-openai, langchain-anthropic.
+- Web API: FastAPI, Uvicorn, WebSockets, python-multipart.
+- Lưu trữ: PostgreSQL, Psycopg, SQLAlchemy, Redis.
+- Cấu hình/kiểm thử: Pydantic, pydantic-settings, pytest, Ruff, mypy.
+
+3.2. Frontend
+
+- React 19, React DOM, TypeScript và Vite 8.
+- Tailwind CSS.
+- Axios và TanStack React Query.
+- PapaParse và xlsx để hỗ trợ dữ liệu CSV/Excel.
+
+
+4. CÀI ĐẶT TRÊN WINDOWS (KHUYẾN NGHỊ)
+--------------------------------------
+
+4.1. Mở thư mục dự án
+
+- Giải nén hoặc sao chép mã nguồn, sau đó mở PowerShell tại thư mục gốc dự án, nơi có các file pyproject.toml, make.ps1 và docker-compose.yml.
+
+- Ví dụ:
+
+    cd "C:\duong-dan\Agentic-Data-Cleaner"
+
+4.2. Tạo file cấu hình môi trường
+
+- Nếu thư mục chưa có file .env, chạy:
+
+    Copy-Item .env.example .env
+
+- Mở file .env và cấu hình nhà cung cấp mô hình ngôn ngữ.
+
+- Ví dụ dùng OpenAI:
+
+    OPENAI_API_KEY=<API_KEY_CUA_BAN>
+    DEFAULT_LLM_PROVIDER=openai
+    DEFAULT_LLM_MODEL=gpt-4o
+
+- Ví dụ dùng Anthropic:
+
+    ANTHROPIC_API_KEY=<API_KEY_CUA_BAN>
+    DEFAULT_LLM_PROVIDER=anthropic
+    DEFAULT_LLM_MODEL=<TEN_MODEL_ANTHROPIC>
+
+- Nếu không dùng LangSmith, nên đặt:
+
+    LANGCHAIN_TRACING_V2=false
+    LANGCHAIN_API_KEY=
+
+- Giữ nguyên cấu hình dịch vụ cục bộ:
+
+    POSTGRES_URL=postgresql://user:password@localhost:5432/agentic_data_cleaner_db
+    REDIS_URL=redis://localhost:6379/0
+
+=> Lưu ý: không đưa file .env hoặc API key lên kho mã nguồn công khai.
+
+4.3. Cài backend và khởi động PostgreSQL/Redis tự động
+
+Tại thư mục gốc dự án, chạy:
+
+    Set-ExecutionPolicy -Scope Process Bypass
+    .\make.ps1 setup
+
+Lệnh trên thực hiện các công việc sau:
+
+- Tạo môi trường ảo Python tại .venv.
+- Cài package backend và các thư viện phát triển.
+- Tạo .env từ .env.example nếu .env chưa tồn tại.
+- Tải và chạy PostgreSQL 16 cùng Redis 7 bằng Docker Compose.
+
+4.4. Cài frontend
+
+    cd frontend
+    npm ci
+    cd ..
+
+Nên dùng "npm ci" để cài đúng các phiên bản trong package-lock.json.
+
+
+5. CÀI ĐẶT THỦ CÔNG (KHI KHÔNG DÙNG make.ps1)
+------------------------------------------------
+- Tại thư mục gốc dự án, chạy lần lượt:
+
+    python -m venv .venv
+    .\.venv\Scripts\Activate.ps1
+    python -m pip install --upgrade pip setuptools wheel
+    python -m pip install -e ".[dev]"
+    Copy-Item .env.example .env
+    docker compose up -d
+    cd frontend
+    npm ci
+    cd ..
+
+- Nếu file .env đã tồn tại thì bỏ qua lệnh Copy-Item để không ghi đè cấu hình.
+
+
+6. PHƯƠNG ÁN CHẠY BACKEND HOÀN TOÀN BẰNG DOCKER
+------------------------------------------------
+- Sau khi đã tạo và điền file .env, chạy tại thư mục gốc:
+
+    docker compose --profile full up -d --build
+
+- Lệnh này tạo backend API, PostgreSQL và Redis trong Docker. Frontend chưa được
+đóng gói trong docker-compose.yml nên vẫn cần cài và chạy bằng npm.
+
+
+7. KIỂM TRA SAU KHI CÀI ĐẶT
+---------------------------
+
+7.1. Kiểm tra dịch vụ Docker
+
+    docker compose ps
+
+=> PostgreSQL và Redis phải ở trạng thái đang chạy/healthy.
+
+7.2. Kiểm tra thư viện backend
+
+    .\.venv\Scripts\python.exe -c "import fastapi, langgraph, pandas, redis; print('Backend OK')"
+
+7.3. Kiểm tra khả năng build frontend
+
+    cd frontend
+    npm run build
+    cd ..
+
+Nếu xuất hiện thư mục frontend/dist và lệnh không báo lỗi thì frontend đã được
+cài đặt đúng.
+
+
+8. CỔNG (PORT) MẶC ĐỊNH
+----------------------
+
+- Frontend Vite: 5173.
+- Backend FastAPI: 8000.
+- PostgreSQL: 5432.
+- Redis: 6379.
+
+Nếu các cổng trên đang được chương trình khác sử dụng, cần dừng chương trình đó
+hoặc thay đổi cấu hình cổng trước khi khởi chạy hệ thống.
+
+
+9. CÀI ĐẶT TRÊN LINUX/macOS (THAM KHẢO)
+---------------------------------------
+Yêu cầu phiên bản công cụ giống mục 2. Tại thư mục gốc dự án, chạy:
+
+    python3.13 -m venv .venv
+    source .venv/bin/activate
+    python -m pip install --upgrade pip setuptools wheel
+    python -m pip install -e ".[dev]"
+    cp .env.example .env
+    docker compose up -d
+    cd frontend
+    npm ci
+    cd ..
+
+Sau đó chỉnh file .env tương tự hướng dẫn tại mục 4.2.

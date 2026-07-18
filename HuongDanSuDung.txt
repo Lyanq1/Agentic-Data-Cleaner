@@ -1,0 +1,182 @@
+HƯỚNG DẪN BIÊN DỊCH VÀ CHẠY AGENTIC DATA CLEANER
+================================================
+
+1. ĐIỀU KIỆN TRƯỚC KHI CHẠY
+---------------------------
+
+- Đã hoàn tất các bước trong HuongDanCaiDat.txt.
+- Docker Desktop đang hoạt động, và đã cài djadwt.
+- File .env đã có API key hợp lệ của OpenAI hoặc Anthropic.
+- Các thư viện backend và frontend đã được cài đặt.
+
+Các lệnh dưới đây được chạy bằng PowerShell trên Windows.
+
+
+2. CHẠY CHƯƠNG TRÌNH Ở CHẾ ĐỘ PHÁT TRIỂN
+----------------------------------------
+Hệ thống cần ba nhóm dịch vụ: PostgreSQL/Redis, backend và frontend.
+
+2.1. Khởi động PostgreSQL và Redis
+
+- Mở PowerShell tại thư mục gốc dự án và chạy:
+
+    docker compose up -d
+
+- Kiểm tra trạng thái:
+
+    docker compose ps
+
+2.2. Khởi động backend
+
+- Tại thư mục gốc, mở một cửa sổ PowerShell riêng và chạy:
+
+    .\make.ps1 run
+
+- Hoặc chạy trực tiếp bằng Uvicorn:
+
+    .\.venv\Scripts\uvicorn.exe app.main:app --reload --host 0.0.0.0 --port 8000
+
+- Khi thấy thông báo Uvicorn đang lắng nghe tại http://0.0.0.0:8000, kiểm tra:
+
+    http://localhost:8000/api/v1/health
+
+- Kết quả mong đợi:
+
+    {"status":"ok"}
+
+- Tài liệu API tự động của backend:
+
+    http://localhost:8000/docs
+
+2.3. Khởi động frontend
+
+- Giữ backend đang chạy. Mở thêm một cửa sổ PowerShell tại thư mục gốc và chạy:
+
+    cd frontend
+    npm run dev
+
+- Mở trình duyệt tại:
+
+    http://localhost:5173
+
+- Không đóng các cửa sổ backend và frontend trong thời gian sử dụng chương trình.
+
+
+3. BIÊN DỊCH/BUILD CHƯƠNG TRÌNH
+-------------------------------
+
+3.1. Backend
+
+- Backend Python được thông dịch nên không cần biên dịch thành file thực thi. Có thể kiểm tra cú pháp toàn bộ mã nguồn bằng lệnh:
+
+    .\.venv\Scripts\python.exe -m compileall app
+
+- Có thể chạy kiểm thử (nếu bộ kiểm thử tương ứng có trong mã nguồn) bằng:
+
+    .\.venv\Scripts\pytest.exe
+
+3.2. Frontend
+
+- Khi build frontend để chạy độc lập trên máy cục, cần khai báo địa chỉ backend và WebSocket trước thời điểm build:
+
+    cd frontend
+    $env:VITE_API_URL="http://localhost:8000"
+    $env:VITE_WS_URL="ws://localhost:8000/ws"
+    npm run build
+
+- Mã đã build được tạo trong thư mục:
+
+    frontend\dist
+
+- Để xem thử bản build trên cổng 5173, chạy:
+
+    npm run preview -- --host 0.0.0.0 --port 5173
+
+- Sau đó mở:
+
+    http://localhost:5173
+
+=> Lưu ý: các biến VITE_API_URL và VITE_WS_URL được nhúng vào frontend lúc build.
+Nếu địa chỉ backend thay đổi thì phải đặt lại biến và build lại.
+
+
+4. CHẠY BACKEND BẰNG DOCKER
+---------------------------
+- Có thể thay thế mục 2.1 và 2.2 bằng một lệnh tại thư mục gốc:
+
+    docker compose --profile full up -d --build
+
+- Kiểm tra log backend:
+
+    docker compose logs -f api
+
+- Nhấn Ctrl+C để ngừng xem log; container vẫn tiếp tục chạy.
+
+- Sau đó vẫn khởi động frontend theo mục 2.3 hoặc chạy bản build theo mục 3.2.
+
+
+5. CÁCH SỬ DỤNG GIAO DIỆN
+-------------------------
+
+1) Truy cập http://localhost:5173.
+2) Chọn chức năng tải dữ liệu lên hệ thống.
+3) Chọn file dữ liệu cần làm sạch. Hệ thống hỗ trợ các định dạng dữ liệu có cấu trúc như CSV, Excel và JSON.
+4) Nhập hoặc chọn yêu cầu làm sạch dữ liệu.
+5) Theo dõi quá trình phân tích, lập kế hoạch và thực thi trên giao diện.
+6) Khi chương trình yêu cầu xác nhận, xem kế hoạch/đề xuất và chấp thuận hoặc cung cấp thông tin bổ sung.
+7) Sau khi tiến trình hoàn tất, xem trước và tải file kết quả.
+
+Không tải file lớn hơn giới hạn MAX_FILE_SIZE_MB được cấu hình trong file .env.
+
+
+6. DỪNG CHƯƠNG TRÌNH
+--------------------
+
+- Tại cửa sổ chạy backend: nhấn Ctrl+C.
+- Tại cửa sổ chạy frontend: nhấn Ctrl+C.
+- Dừng PostgreSQL và Redis:
+
+    docker compose down
+
+Lệnh trên dừng container nhưng giữ dữ liệu PostgreSQL trong Docker volume.
+
+Nếu đang chạy profile full, cũng dùng:
+
+    docker compose --profile full down
+
+
+7. XỬ LÝ MỘT SỐ LỖI THƯỜNG GẶP
+-------------------------------
+
+7.1. Lỗi không kết nối được PostgreSQL hoặc Redis
+
+- Kiểm tra Docker Desktop đã chạy.
+- Chạy "docker compose ps".
+- Khởi động lại dịch vụ bằng "docker compose up -d".
+- Kiểm tra các cổng 5432 và 6379 có bị chương trình khác sử dụng hay không (thông thường là Postgres local sẽ ghi đè port lên 6379).
+
+7.2. Lỗi 401 hoặc lỗi gọi mô hình AI
+
+- Kiểm tra OPENAI_API_KEY hoặc ANTHROPIC_API_KEY trong file .env.
+- Kiểm tra DEFAULT_LLM_PROVIDER và DEFAULT_LLM_MODEL phù hợp với API key.
+- Sau khi sửa .env, dừng và chạy lại backend.
+
+7.3. Frontend không gọi được backend
+
+- Kiểm tra http://localhost:8000/api/v1/health trả về {"status":"ok"}.
+- Chế độ phát triển phải mở frontend ở http://localhost:5173.
+- Nếu dùng bản build, đặt đúng VITE_API_URL và VITE_WS_URL rồi build lại.
+- Kiểm tra cổng 8000 không bị tường lửa chặn.
+
+7.4. PowerShell chặn chạy make.ps1 hoặc Activate.ps1
+
+Chỉ cho phép script trong cửa sổ PowerShell hiện tại bằng lệnh:
+
+    Set-ExecutionPolicy -Scope Process Bypass
+
+Sau đó chạy lại lệnh trước đó.
+
+7.5. Cổng đã được sử dụng
+
+Đóng chương trình đang chiếm cổng hoặc đổi cổng. Khi đổi cổng backend, cần cập nhật CORS_ORIGINS trong .env và địa chỉ API/WebSocket của frontend cho phù hợp.
+
