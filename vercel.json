@@ -1,13 +1,29 @@
 {
-  "functions": {
-    "app/main.py": {
-      "excludeFiles": "{tests/**,docs/**,scratch/**,.agents/**,frontend/**}"
-    }
-  },
-  "rewrites": [
+  "builds": [
     {
-      "source": "/api/(.*)",
-      "destination": "/app/main.py"
+      "src": "app/main.py",
+      "use": "@vercel/python"
+    },
+    {
+      "src": "frontend/package.json",
+      "use": "@vercel/static-build",
+      "config": {
+        "distDir": "dist"
+      }
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "app/main.py"
+    },
+    {
+      "src": "/((?!api/).*\\.[a-zA-Z0-9]+)$",
+      "dest": "/frontend/$1"
+    },
+    {
+      "src": "/((?!api/).*)",
+      "dest": "/frontend/index.html"
     }
   ]
 }

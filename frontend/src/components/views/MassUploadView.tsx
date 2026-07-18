@@ -58,6 +58,19 @@ export const MassUploadView: React.FC = () => {
     selectedInspectIdRef.current = selectedInspectId;
   }, [selectedInspectId]);
 
+  const activeItem = useMemo(() => {
+    if (selectedInspectId) {
+      return queue.find((item) => item.id === selectedInspectId) || null;
+    }
+    // Fallback to first running/needs_clarification item if nothing selected
+    const priorityItem = queue.find((item) => 
+      item.status === "needs_clarification" || 
+      item.status === "running" || 
+      item.status === "uploading"
+    );
+    return priorityItem || queue[0] || null;
+  }, [queue, selectedInspectId]);
+
   const getColumnExpectedTypeFromPayload = (payload: any, qKey: string, currentAnswers?: Record<string, string>): string => {
     const colName = qKey.startsWith("Q2_strategy_column_")
       ? qKey.substring("Q2_strategy_column_".length)
@@ -609,19 +622,6 @@ export const MassUploadView: React.FC = () => {
       avgF1: countF1 > 0 ? (sumF1 / countF1) * 100 : null,
     };
   }, [queue]);
-
-  const activeItem = useMemo(() => {
-    if (selectedInspectId) {
-      return queue.find((item) => item.id === selectedInspectId) || null;
-    }
-    // Fallback to first running/needs_clarification item if nothing selected
-    const priorityItem = queue.find((item) => 
-      item.status === "needs_clarification" || 
-      item.status === "running" || 
-      item.status === "uploading"
-    );
-    return priorityItem || queue[0] || null;
-  }, [queue, selectedInspectId]);
 
   const isAwaitingHitl = activeItem && activeItem.status === "needs_clarification" && activeItem.checkpoint;
 
