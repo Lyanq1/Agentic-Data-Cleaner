@@ -445,7 +445,7 @@ async def validator_node(state: GlobalState) -> dict[str, Any]:
         
         # Persist to LineageService since it passed
         session_id = resolve_lineage_session_id(state)
-        new_version_str = state.get("current_dataset_version")
+        approved_version_str = state.get("current_dataset_version")
         if session_id and df_validated_path is not None:
             try:
                 new_version = LineageService.append_new_version_from_file(
@@ -454,8 +454,8 @@ async def validator_node(state: GlobalState) -> dict[str, Any]:
                     agent_name=agent_name,
                     description=f"Output from {task_id} approved by ValidatorAgent."
                 )
-                new_version_str = str(new_version)
-                logger.info(f"validator_node: dataset persisted as version {new_version_str}")
+                approved_version_str = str(new_version)
+                logger.info(f"validator_node: dataset persisted as version {approved_version_str}")
             except Exception as e:
                 logger.error(f"validator_node: failed to persist to lineage: {e}")
 
@@ -475,8 +475,7 @@ async def validator_node(state: GlobalState) -> dict[str, Any]:
             "replan_reason": None,
             "next_node": None,
             "validation_results": validation_item,
-            "dataset_version": new_version_str,
-            "current_dataset_version": new_version_str,
+            "current_dataset_version": approved_version_str,
             "current_step": "validation",
             "completed_steps": "validation",
             "agent_logs": {

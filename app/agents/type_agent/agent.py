@@ -16,11 +16,11 @@ from app.agents.registry import AgentRegistry
 from app.agents.roles import AgentRole
 from app.config.config import get_settings
 from app.graphs.states.global_state import GlobalState
-from app.graphs.states.planning import ExecutionPlan, TaskDetail
+from app.graphs.states.planning import TaskDetail
 from app.graphs.states.profiles import SemanticProfile
 from app.graphs.states.output_validation import ValidationResultItem
 from app.graphs.states.workers import WorkerStateDetail, WorkerStates
-from app.graphs.utils import _load_latest_dataframe_with_source
+from app.graphs.utils import _load_latest_dataframe_with_source, _resolve_active_task
 
 logger = logging.getLogger(__name__)
 
@@ -55,8 +55,14 @@ class TypeCastingAgent(BaseAgent):
         """Skip LLM initialization; this worker is deterministic."""
 
     async def run(self, state: GlobalState) -> dict[str, Any]:
-        task = self._extract_planner_task(state.get("execution_plan"))
-        if task is not None and task.skip:
+        task = _resolve_active_task(state)
+        if task is None or task.task_id != "type_casting":
+            return self._failure_update(
+                state,
+                "TypeCastingAgent: active task is not type_casting.",
+                failed_rules=["active_task_mismatch"],
+            )
+        if task.skip:
             return self._skipped_update(state)
 
         plan = self._build_casting_plan(task, state.get("semantic_profile"))
@@ -197,17 +203,6 @@ class TypeCastingAgent(BaseAgent):
             "completed_steps": "type_casting",
             "original_datetime_formats": original_datetime_formats,
         }
-
-    @staticmethod
-    def _extract_planner_task(execution_plan: Any) -> TaskDetail | None:
-        if not execution_plan:
-            return None
-        plan = ExecutionPlan.model_validate(execution_plan)
-        for wrapper in plan.task_list:
-            task = wrapper.work_order
-            if task.task_id == "type_casting" or task.agent == AgentRole.TYPECAST_AGENT:
-                return task
-        return None
 
     def _build_casting_plan(
         self,

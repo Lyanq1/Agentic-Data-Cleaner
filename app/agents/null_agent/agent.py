@@ -22,7 +22,6 @@ from app.agents.registry import AgentRegistry
 from app.agents.roles import AgentRole
 from app.config.config import get_settings
 from app.graphs.states.global_state import (
-    ExecutionPlan,
     GlobalState,
     ValidationResultItem,
     WorkerStates,
@@ -30,7 +29,7 @@ from app.graphs.states.global_state import (
 from app.graphs.states.planning import TaskDetail
 from app.graphs.states.workers import WorkerStateDetail
 from app.graphs.states.profiles import SemanticProfile
-from app.graphs.utils import _load_latest_dataframe_with_source
+from app.graphs.utils import _load_latest_dataframe_with_source, _resolve_active_task
 
 logger = logging.getLogger(__name__)
 
@@ -131,7 +130,13 @@ class NullAgent(BaseAgent):
     # ------------------------------------------------------------------
 
     async def run(self, state: GlobalState) -> dict[str, Any]:
-        planner_task = self._extract_planner_task(state.get("execution_plan"))
+        planner_task = _resolve_active_task(state)
+        if planner_task is None or planner_task.task_id != "null_handling":
+            return self._failure_update(
+                state,
+                "NullAgent: active task is not null_handling.",
+                failed_rules=["active_task_mismatch"],
+            )
         df, source_path = _load_latest_dataframe_with_source(state, planner_task)
         if df is None or not source_path:
             return self._failure_update(
@@ -257,18 +262,6 @@ class NullAgent(BaseAgent):
             planner_task=planner_task,
             retry_count=state.get("retry_count") or 0,
         )
-
-    @staticmethod
-    def _extract_planner_task(execution_plan: Any) -> TaskDetail | None:
-        """Find the null_handling task inside the ExecutionPlan."""
-        if not execution_plan:
-            return None
-        plan = ExecutionPlan.model_validate(execution_plan)
-        for wrapper in plan.task_list:
-            task = wrapper.work_order
-            if task.task_id == "null_handling" or task.agent == AgentRole.NULL_AGENT:
-                return task
-        return None
 
     @staticmethod
     def _apply_null_strategies(

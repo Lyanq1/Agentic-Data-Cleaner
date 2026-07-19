@@ -1,0 +1,26 @@
+# Python virtual environments
+.venv
+venv
+env
+
+# Cache directories
+.mypy_cache
+.pytest_cache
+.ruff_cache
+__pycache__
+*.pyc
+
+# Local environment variables
+.env
+.env.local
+
+# Non-runtime project folders
+tests
+docs
+scratch
+.agents
+frontend/node_modules
+frontend/dist
+
+# Temporary files
+.tmp_report_extract.txt

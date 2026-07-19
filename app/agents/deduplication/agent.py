@@ -50,14 +50,14 @@ from app.config.config import get_settings
 from app.core.llm_factory import create_llm
 from app.graphs.states.global_state import GlobalState
 from app.graphs.states.output_validation import ValidationResultItem
-from app.graphs.states.planning import ExecutionPlan, TaskDetail
+from app.graphs.states.planning import TaskDetail
 from app.graphs.states.profiler_state import StatisticalProfile
 from app.graphs.states.workers import (
     DeduplicationResult,
     WorkerStateDetail,
     WorkerStates,
 )
-from app.graphs.utils import _load_latest_dataframe_with_source
+from app.graphs.utils import _load_latest_dataframe_with_source, _resolve_active_task
 from app.tools.data.dedup import inspect_duplicate_candidates, profile_fuzzy_columns
 
 logger = logging.getLogger(__name__)
@@ -80,7 +80,13 @@ class DeduplicationAgent(BaseAgent):
         self._tool_map = {tool.name: tool for tool in self.tools}
 
     async def run(self, state: GlobalState) -> dict[str, Any]:
-        planner_task = self._extract_planner_task(state.get("execution_plan"))
+        planner_task = _resolve_active_task(state)
+        if planner_task is None or planner_task.task_id != "deduplication":
+            return self._failure_update(
+                state,
+                "DeduplicationAgent: active task is not deduplication.",
+                failed_rules=["active_task_mismatch"],
+            )
         df, source_path = _load_latest_dataframe_with_source(state, planner_task)
         if df is None or not source_path:
             return self._failure_update(
@@ -186,7 +192,6 @@ class DeduplicationAgent(BaseAgent):
         )
 
         return {
-            "deduplication_result": result,
             "worker_outputs": worker_outputs,
             "physical_dataframe_path": output_path,
             "worker_states": worker_states,
@@ -223,26 +228,14 @@ class DeduplicationAgent(BaseAgent):
             semantic_profile=state.get("semantic_profile"),
             planner_task=planner_task,
             retry_count=state.get("retry_count") or 0,
-            fuzzy_enabled=self._should_run_fuzzy(state),
+            fuzzy_enabled=self._should_run_fuzzy(state, planner_task),
         )
 
-    @staticmethod
-    def _extract_planner_task(execution_plan: Any) -> TaskDetail | None:
-        if not execution_plan:
-            return None
-        plan = ExecutionPlan.model_validate(execution_plan)
-        for wrapper in plan.task_list:
-            task = wrapper.work_order
-            if task.task_id == "deduplication" or task.agent == AgentRole.DEDUP_AGENT:
-                return task
-        return None
-
-    def _should_run_fuzzy(self, state: GlobalState) -> bool:
+    def _should_run_fuzzy(self, state: GlobalState, planner_task: TaskDetail | None) -> bool:
         active_tasks = state.get("task_list") or []
         if "deduplication" not in active_tasks:
             return False
 
-        planner_task = self._extract_planner_task(state.get("execution_plan"))
         if planner_task is None or planner_task.strategy is None:
             return False
 
@@ -763,9 +756,9 @@ class DeduplicationAgent(BaseAgent):
             "notes": notes,
         }
 
-    @staticmethod
-    def _coerce_existing_result(state: GlobalState) -> DeduplicationResult | None:
-        existing = state.get("deduplication_result")
+    def _coerce_existing_result(self, state: GlobalState) -> DeduplicationResult | None:
+        worker_outputs = state.get("worker_outputs") or {}
+        existing = worker_outputs.get(self.name) if isinstance(worker_outputs, dict) else None
         if not existing:
             return None
         return DeduplicationResult.model_validate(existing)
@@ -775,18 +768,17 @@ class DeduplicationAgent(BaseAgent):
         state: GlobalState,
         context_hash: str,
     ) -> ValidatedDedupDecision | None:
-        existing_result = state.get("deduplication_result")
+        existing_result = self._coerce_existing_result(state)
         if not existing_result:
             return None
-        result = DeduplicationResult.model_validate(existing_result)
-        trace = result.decision_trace
+        trace = existing_result.decision_trace
         if trace is None or trace.context_hash != context_hash:
             return None
 
-        mode = "exact_key" if result.key_columns else "exact_full_row"
+        mode = "exact_key" if existing_result.key_columns else "exact_full_row"
         return ValidatedDedupDecision(
             mode=mode,
-            key_columns=list(result.key_columns),
+            key_columns=list(existing_result.key_columns),
             column_semantics={
                 column: ColumnSemanticDescriptor.model_validate(descriptor)
                 for column, descriptor in trace.column_semantics.items()
@@ -796,7 +788,7 @@ class DeduplicationAgent(BaseAgent):
             decision_source=trace.decision_source,
             confidence=trace.confidence,
             reasoning_summary=trace.reasoning_summary,
-            keep_rule=result.keep_strategy if result.keep_strategy in {"keep_most_complete", "keep_first", "keep_last"} else "keep_most_complete",
+            keep_rule=existing_result.keep_strategy if existing_result.keep_strategy in {"keep_most_complete", "keep_first", "keep_last"} else "keep_most_complete",
             validation_notes=list(trace.validation_notes),
             unresolved_collisions=[],
         )
