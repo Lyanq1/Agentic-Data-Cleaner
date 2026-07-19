@@ -720,7 +720,7 @@ async def report_agent_node(state: GlobalState) -> dict[str, Any]:
         "completed_steps": "reporting",
         "agent_logs": {
             "report_agent": {
-                "logs": [logs],
+                "logs": logs,
                 "thinking": ""
             }
         },

@@ -239,6 +239,11 @@ export const pipelineApi = {
       input_validation_result: valResult,
       execution_plan: data.execution_plan,
       f1_metrics: data.f1_metrics,
+      token_metrics: data.token_metrics ?? {
+        total_tokens: 0,
+        prompt_tokens: 0,
+        completion_tokens: 0,
+      },
       pipeline_mode: data.pipeline_mode,
     };
   },
@@ -337,7 +342,7 @@ export const pipelineApi = {
       completed_at: new Date().toISOString(),
       summary: {
         input_rows: state.data_profile?.total_rows || 0,
-        total_tokens_used: 1540,
+        total_tokens_used: state.token_metrics?.total_tokens ?? 0,
         retry_cycles: 0,
       },
       transformations: [
