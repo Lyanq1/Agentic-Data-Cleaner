@@ -1,13 +1,14 @@
 """Pipeline API — upload dataset, run pipeline, check state."""
 import copy
 import io
+import re
 import uuid
 import logging
 from typing import Any
 
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from langchain_core.messages import HumanMessage
 
 from app.exceptions.ingestion_exceptions import IngestionError
@@ -227,9 +228,21 @@ class ApproveDedupReview(BaseModel):
     keep_rule: str | None = None
 
 
+class ApproveNullStrategySelection(BaseModel):
+    strategy: str
+    fill_value: Any | None = None
+    allow_pattern_mismatch: bool = False
+    allow_dmv_sentinel: bool = False
+
+
+class ApproveNullReview(BaseModel):
+    strategies: dict[str, str | ApproveNullStrategySelection] = Field(default_factory=dict)
+
+
 class ApprovePlanRequest(BaseModel):
     note: str | None = None
     dedup_review: ApproveDedupReview | None = None
+    null_review: ApproveNullReview | None = None
 
 
 def _dedupe_columns(columns: list[str] | None) -> list[str]:
@@ -351,19 +364,139 @@ def _apply_dedup_review_override(
     if "Deduplication is skipped" in plan.plan_summary or "Deduplication is skipped as no duplicate rows or key-level duplicates are detected." in plan.plan_summary:
         plan.plan_summary = (
             "The cleaning plan includes planner-approved deduplication, followed by "
-            "null handling and type casting."
+            "type casting and null handling."
         )
     return plan
 
 
 def _active_task_list_from_plan(plan: ExecutionPlan) -> list[str]:
-    ordered_task_ids = ["deduplication", "null_handling", "type_casting"]
+    ordered_task_ids = ["deduplication", "type_casting", "null_handling"]
     active = {
         wrapper.work_order.task_id
         for wrapper in plan.task_list
         if not wrapper.work_order.skip
     }
     return [task_id for task_id in ordered_task_ids if task_id in active]
+
+
+def _apply_null_review_override(
+    execution_plan: Any, null_review: ApproveNullReview
+) -> ExecutionPlan:
+    plan = ExecutionPlan.model_validate(execution_plan)
+    offered: dict[str, set[str]] = {}
+    review_metadata: dict[str, dict[str, Any]] = {}
+    if plan.review is not None:
+        for section in plan.review.sections:
+            if section.task_id != "null_handling":
+                continue
+            for field in section.fields:
+                if field.field_key.startswith("strategy."):
+                    column = field.field_key[len("strategy."):]
+                    offered[column] = set(field.options)
+                    review_metadata[column] = dict(field.metadata or {})
+
+    task = next(
+        (
+            wrapper.work_order
+            for wrapper in plan.task_list
+            if wrapper.work_order.task_id == "null_handling"
+        ),
+        None,
+    )
+    if task is None:
+        raise HTTPException(status_code=400, detail="No null handling task exists in the plan.")
+    strategy = task.strategy.model_dump() if hasattr(task.strategy, "model_dump") else copy.deepcopy(task.strategy or {})
+    per_column = strategy.get("per_column") or {}
+
+    missing_decisions = set(offered) - set(null_review.strategies)
+    if missing_decisions:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Missing null strategy review decisions for columns: {sorted(missing_decisions)}",
+        )
+
+    for column, raw_selection in null_review.strategies.items():
+        if isinstance(raw_selection, str):
+            selected = raw_selection
+            selected_fill_value = per_column.get(column, {}).get("fill_value")
+            allow_pattern_mismatch = False
+            allow_dmv_sentinel = False
+        else:
+            selected = raw_selection.strategy
+            selected_fill_value = raw_selection.fill_value
+            allow_pattern_mismatch = raw_selection.allow_pattern_mismatch
+            allow_dmv_sentinel = raw_selection.allow_dmv_sentinel
+        if column not in offered or selected not in offered[column]:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid null strategy review selection for column '{column}'.",
+            )
+        if column not in per_column:
+            raise HTTPException(status_code=400, detail=f"Unknown null strategy column '{column}'.")
+        if selected == "fill_value" and selected_fill_value is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"fill_value requires a constant for column '{column}'.",
+            )
+        validation_overrides: dict[str, Any] = {}
+        if selected == "fill_value":
+            metadata = review_metadata.get(column, {})
+            pattern = metadata.get("expected_str_pattern")
+            pattern_mismatch = False
+            if pattern:
+                try:
+                    pattern_mismatch = re.match(
+                        str(pattern), str(selected_fill_value).strip()
+                    ) is None
+                except re.error as exc:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Invalid expected string pattern for column '{column}': {exc}",
+                    ) from exc
+            potential_dmv = metadata.get("potential_dmv") or []
+            dmv_mismatch = selected_fill_value in potential_dmv
+            if pattern_mismatch and not allow_pattern_mismatch:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"fill_value for column '{column}' does not match the expected string "
+                        "pattern; explicit acknowledgement is required."
+                    ),
+                )
+            if dmv_mismatch and not allow_dmv_sentinel:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"fill_value for column '{column}' is a potential disguised missing "
+                        "value; explicit acknowledgement is required."
+                    ),
+                )
+            if pattern_mismatch:
+                validation_overrides["expected_str_pattern"] = {
+                    "allow_fill_value_mismatch": True,
+                    "acknowledged_value": selected_fill_value,
+                    "acknowledged_by_user": True,
+                }
+            if dmv_mismatch:
+                validation_overrides["potential_dmv"] = {
+                    "allow_fill_value_as_sentinel": True,
+                    "acknowledged_value": selected_fill_value,
+                    "acknowledged_by_user": True,
+                }
+        per_column[column]["strategy"] = selected
+        per_column[column]["fill_value"] = (
+            selected_fill_value if selected == "fill_value" else None
+        )
+        per_column[column]["validation_overrides"] = validation_overrides
+        if plan.review is not None:
+            for section in plan.review.sections:
+                for field in section.fields:
+                    if field.field_key == f"strategy.{column}":
+                        field.value = selected
+
+    strategy["per_column"] = per_column
+    task.strategy = strategy
+    return plan
 
 
 @router.post("/pipeline/{run_id}/resolve", summary="Submit clarification answers and resume pipeline")
@@ -561,12 +694,28 @@ async def api_approve_plan(
 
         updated_plan = execution_plan
         updated_task_list = state.get("task_list", [])
+        null_review_required = False
+        if review is not None:
+            sections = review.sections if hasattr(review, "sections") else review.get("sections", [])
+            null_review_required = any(
+                (section.task_id if hasattr(section, "task_id") else section.get("task_id"))
+                == "null_handling"
+                for section in sections
+            )
+        if null_review_required and (payload is None or payload.null_review is None):
+            raise HTTPException(
+                status_code=400,
+                detail="Null strategy compatibility decisions are required before execution.",
+            )
         if payload and payload.dedup_review is not None:
             updated_plan = _apply_dedup_review_override(
                 execution_plan=execution_plan,
                 dedup_review=payload.dedup_review,
                 dataset_schema=state.get("dataset_schema"),
             )
+            updated_task_list = _active_task_list_from_plan(updated_plan)
+        if payload and payload.null_review is not None:
+            updated_plan = _apply_null_review_override(updated_plan, payload.null_review)
             updated_task_list = _active_task_list_from_plan(updated_plan)
 
         approval_updates = {

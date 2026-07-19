@@ -308,8 +308,23 @@ export const pipelineApi = {
     return { message: 'Decision submitted successfully' };
   },
 
-  approvePlan: async (runId: string): Promise<{ message: string }> => {
-    const response = await apiClient.post<{ message: string }>(`/pipeline/${runId}/approve_plan`);
+  approvePlan: async (
+    runId: string,
+    payload?: {
+      null_review?: {
+        strategies: Record<string, {
+          strategy: string;
+          fill_value: unknown;
+          allow_pattern_mismatch: boolean;
+          allow_dmv_sentinel: boolean;
+        }>;
+      };
+    },
+  ): Promise<{ message: string }> => {
+    const response = await apiClient.post<{ message: string }>(
+      `/pipeline/${runId}/approve_plan`,
+      payload,
+    );
     return response.data;
   },
 

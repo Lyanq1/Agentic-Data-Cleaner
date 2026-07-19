@@ -1,6 +1,7 @@
 """Planner Agent — copy and customize to create a new agent."""
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Any
 from langchain_core.messages import AIMessage, SystemMessage, HumanMessage
@@ -32,7 +33,7 @@ class PlannerAgent(BaseAgent):
     description = "Generates a structured execution plan for deduplication, null handling, and type casting."
     tools = []  # pure LLM reasoning
 
-    _EXECUTION_ORDER = ["deduplication", "null_handling", "type_casting"]
+    _EXECUTION_ORDER = ["deduplication", "type_casting", "null_handling"]
 
     async def run(self, state: GlobalState) -> dict[str, Any]:
         """Invoke the LLM to generate the ExecutionPlan.
@@ -210,11 +211,19 @@ class PlannerAgent(BaseAgent):
                 plan_summary=f"Fallback execution plan created because LLM plan parsing failed: {e}."
             )
 
-        response = response.model_copy(update={"review": self._build_plan_review(response)})
+        response = response.model_copy(
+            update={
+                "review": self._build_plan_review(
+                    response,
+                    state.get("semantic_profile"),
+                    validation_result,
+                )
+            }
+        )
 
         logger.info("PlannerAgent successfully parsed execution plan.")
 
-        # Enforce execution sequence: deduplication -> null_handling -> type_casting
+        # Enforce execution sequence: deduplication -> type_casting -> null_handling
         active_tasks_set = {
             task.work_order.task_id
             for task in response.task_list
@@ -243,7 +252,12 @@ class PlannerAgent(BaseAgent):
 
         return updates
 
-    def _build_plan_review(self, plan: ExecutionPlan) -> PlanReview:
+    def _build_plan_review(
+        self,
+        plan: ExecutionPlan,
+        semantic_profile: Any | None = None,
+        validation_result: Any | None = None,
+    ) -> PlanReview:
         sections: list[ReviewSection] = []
         warnings: list[str] = []
 
@@ -257,10 +271,227 @@ class PlannerAgent(BaseAgent):
                     warnings.append(f"{task.task_id}: {task.skip_reason}")
                 break
 
+        null_section, null_warnings = self._build_null_strategy_review_section(
+            plan, semantic_profile, validation_result
+        )
+        if null_section is not None:
+            sections.append(null_section)
+            warnings.extend(null_warnings)
+
         if not sections:
             warnings.append("No deduplication task is active in the current execution plan.")
 
         return PlanReview(sections=sections, warnings=warnings[:8])
+
+    def _build_null_strategy_review_section(
+        self,
+        plan: ExecutionPlan,
+        semantic_profile: Any | None,
+        validation_result: Any | None,
+    ) -> tuple[ReviewSection | None, list[str]]:
+        task = next(
+            (
+                wrapper.work_order
+                for wrapper in plan.task_list
+                if wrapper.work_order.task_id == "null_handling" and not wrapper.work_order.skip
+            ),
+            None,
+        )
+        if task is None:
+            return None, []
+
+        strategy = self._strategy_dict(task)
+        per_column = strategy.get("per_column") or {}
+        semantic_columns = self._semantic_columns_dict(semantic_profile)
+        validator_options = self._input_validator_null_options(validation_result)
+        fields: list[ReviewField] = []
+        warnings: list[str] = []
+
+        for column, config in per_column.items():
+            if not isinstance(config, dict):
+                continue
+            current = str(config.get("strategy") or "leave_as_is")
+            detail = semantic_columns.get(column)
+            if detail is None:
+                continue
+            semantic_type = str(self._detail_value(detail, "semantic_data_type", "Nominal"))
+            raw_options = validator_options.get(column)
+            option_source = "Input Validator"
+            if not raw_options:
+                raw_options = self._detail_value(detail, "fill_strategies", []) or []
+                option_source = "semantic profile"
+            compatible = [self._normalize_null_strategy(str(item)) for item in raw_options]
+            supported = {
+                "fill_mean", "fill_median", "fill_mode", "fill_value",
+                "drop_row", "leave_as_is",
+            }
+            compatible = list(
+                dict.fromkeys(option for option in compatible if option in supported)
+            )
+            final_dtype = self._planned_final_dtype(plan, task, column)
+            compatible = [
+                option
+                for option in compatible
+                if self._strategy_supported_by_final_dtype(option, final_dtype)
+            ]
+            fill_value = config.get("fill_value")
+            expected_pattern = self._detail_value(detail, "expected_str_pattern", None)
+            potential_dmv = list(self._detail_value(detail, "potential_dmv", []) or [])
+            pattern_mismatch = False
+            if current == "fill_value" and fill_value is not None and expected_pattern:
+                try:
+                    pattern_mismatch = re.match(str(expected_pattern), str(fill_value).strip()) is None
+                except re.error:
+                    pattern_mismatch = False
+            dmv_mismatch = current == "fill_value" and fill_value in potential_dmv
+            strategy_conflict = current not in compatible
+            if not strategy_conflict and not pattern_mismatch and not dmv_mismatch:
+                continue
+
+            # Only a custom constant can be explicitly retained despite semantic
+            # incompatibility. Other invalid strategies must be replaced by one of
+            # the options already validated upstream.
+            can_keep_current = current == "fill_value"
+            options = (
+                [current, *[option for option in compatible if option != current]]
+                if can_keep_current
+                else compatible
+            )
+            if not options:
+                # Never let an unsupported planner strategy bypass HITL merely
+                # because upstream did not provide alternatives.
+                options = ["leave_as_is"]
+            warning_parts: list[str] = []
+            if strategy_conflict:
+                warning_parts.append(
+                    f"planner strategy '{current}' is not listed as compatible with semantic "
+                    f"type '{semantic_type}' and planned final dtype '{final_dtype}'"
+                )
+            if pattern_mismatch:
+                warning_parts.append(
+                    f"fill_value '{fill_value}' does not match expected pattern "
+                    f"'{expected_pattern}'"
+                )
+            if dmv_mismatch:
+                warning_parts.append(
+                    f"fill_value '{fill_value}' is classified as a disguised missing value"
+                )
+            warning = f"{column}: " + "; ".join(warning_parts) + "."
+            warnings.append(warning)
+            fields.append(
+                ReviewField(
+                    field_key=f"strategy.{column}",
+                    label=f"Null strategy for {column}",
+                    value=current if can_keep_current else options[0],
+                    editable=True,
+                    input_type="select",
+                    options=options,
+                    help_text=(
+                        f"{warning} Options come from the {option_source}. "
+                        + (
+                            f"You may keep the explicit default value strategy '{current}' "
+                            "or select a recommended alternative."
+                            if can_keep_current
+                            else "The incompatible strategy cannot be retained; select one "
+                            "of the validated alternatives."
+                        )
+                    ),
+                    metadata={
+                        "expected_str_pattern": expected_pattern,
+                        "potential_dmv": potential_dmv,
+                        "pattern_mismatch": pattern_mismatch,
+                        "dmv_mismatch": dmv_mismatch,
+                    },
+                )
+            )
+
+        if not fields:
+            return None, []
+        return ReviewSection(
+            task_id="null_handling",
+            title="Null strategy semantic conflicts",
+            fields=fields,
+        ), warnings
+
+    @staticmethod
+    def _normalize_null_strategy(strategy: str) -> str:
+        strategy = strategy.removeprefix("(Recommended)").strip()
+        return {
+            "keep_null": "leave_as_is",
+            "fill_constant": "fill_value",
+        }.get(strategy, strategy)
+
+    @classmethod
+    def _input_validator_null_options(
+        cls, validation_result: Any | None
+    ) -> dict[str, list[str]]:
+        if validation_result is None:
+            return {}
+        result = (
+            validation_result
+            if isinstance(validation_result, dict)
+            else validation_result.model_dump()
+        )
+        clarifications = result.get("clarifications") or {}
+        null_questions = clarifications.get("null") or {}
+        options_by_column: dict[str, list[str]] = {}
+        prefix = "Q2_strategy_column_"
+        for key, question in null_questions.items():
+            if not key.startswith(prefix) or not question:
+                continue
+            question_dict = question if isinstance(question, dict) else question.model_dump()
+            options_by_column[key[len(prefix):]] = list(question_dict.get("options") or [])
+        return options_by_column
+
+    @classmethod
+    def _planned_final_dtype(
+        cls, plan: ExecutionPlan, null_task: TaskDetail, column: str
+    ) -> str:
+        type_task = next(
+            (
+                wrapper.work_order
+                for wrapper in plan.task_list
+                if wrapper.work_order.task_id == "type_casting"
+                and not wrapper.work_order.skip
+            ),
+            None,
+        )
+        if type_task is not None:
+            type_strategy = cls._strategy_dict(type_task)
+            type_config = (type_strategy.get("per_column") or {}).get(column) or {}
+            expected_type = type_config.get("expected_type")
+            if expected_type:
+                return str(expected_type).lower()
+
+        if null_task.inputs and column in null_task.inputs.column_context:
+            statistical = null_task.inputs.column_context[column].statistical
+            dtype = statistical.get("dtype")
+            if dtype:
+                return str(dtype).lower()
+        return "unknown"
+
+    @staticmethod
+    def _strategy_supported_by_final_dtype(strategy: str, final_dtype: str) -> bool:
+        if strategy not in {"fill_mean", "fill_median"}:
+            return True
+        numeric_or_temporal_markers = (
+            "int", "float", "double", "number", "decimal", "date", "datetime",
+        )
+        return any(marker in final_dtype for marker in numeric_or_temporal_markers)
+
+    @staticmethod
+    def _semantic_columns_dict(semantic_profile: Any | None) -> dict[str, Any]:
+        if semantic_profile is None:
+            return {}
+        if isinstance(semantic_profile, dict):
+            return semantic_profile.get("columns") or {}
+        return getattr(semantic_profile, "columns", {}) or {}
+
+    @staticmethod
+    def _detail_value(detail: Any, key: str, default: Any) -> Any:
+        if isinstance(detail, dict):
+            return detail.get(key, default)
+        return getattr(detail, key, default)
 
     def _build_dedup_review_section(self, task: TaskDetail) -> ReviewSection:
         strategy = self._strategy_dict(task)

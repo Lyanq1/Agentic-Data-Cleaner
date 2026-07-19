@@ -205,7 +205,14 @@ export const ExecutionPlanPanel: React.FC<{
   executionPlan: any;
   pipelineState?: any;
   runId: string;
-  onApprove: () => void;
+  onApprove: (
+    nullStrategies?: Record<string, {
+      strategy: string;
+      fill_value: unknown;
+      allow_pattern_mismatch: boolean;
+      allow_dmv_sentinel: boolean;
+    }>,
+  ) => void;
   isApproving: boolean;
   readOnly?: boolean;
 }> = ({ executionPlan, pipelineState, runId, onApprove, isApproving, readOnly }) => {
@@ -213,6 +220,71 @@ export const ExecutionPlanPanel: React.FC<{
   const assumptions = executionPlan.assumptions || [];
   const globalConstraints = executionPlan.global_constraints || {};
   const taskList = executionPlan.task_list || [];
+  const nullConflictSection = executionPlan.review?.sections?.find(
+    (section: any) => section.task_id === "null_handling",
+  );
+  const nullTask = taskList
+    .map((item: any) => item.work_order || {})
+    .find((task: any) => task.task_id === "null_handling");
+  const [nullStrategies, setNullStrategies] = React.useState<
+    Record<string, {
+      strategy: string;
+      fill_value: unknown;
+      allow_pattern_mismatch: boolean;
+      allow_dmv_sentinel: boolean;
+    }>
+  >({});
+
+  React.useEffect(() => {
+    const initial = Object.fromEntries((nullConflictSection?.fields || []).map((field: any) => {
+      const column = String(field.field_key).replace(/^strategy\./, "");
+      const config = nullTask?.strategy?.per_column?.[column] || {};
+      const overrides = config.validation_overrides || {};
+      return [column, {
+        strategy: String(field.value),
+        fill_value: config.fill_value ?? "",
+        allow_pattern_mismatch:
+          overrides.expected_str_pattern?.acknowledged_by_user === true,
+        allow_dmv_sentinel: overrides.potential_dmv?.acknowledged_by_user === true,
+      }];
+    }));
+    setNullStrategies(initial);
+  }, [executionPlan.metadata?.plan_id]);
+
+  const hasMissingFillValue = Object.values(nullStrategies).some(
+    (selection) =>
+      selection.strategy === "fill_value" &&
+      (selection.fill_value === null || String(selection.fill_value).trim() === ""),
+  );
+  const fillValueConflicts = (field: any, column: string) => {
+    const selection = nullStrategies[column];
+    if (!selection || selection.strategy !== "fill_value") {
+      return { patternMismatch: false, dmvMismatch: false };
+    }
+    const value = String(selection.fill_value ?? "").trim();
+    const pattern = field.metadata?.expected_str_pattern;
+    let patternMismatch = false;
+    if (pattern && value) {
+      try {
+        patternMismatch = !new RegExp(pattern).test(value);
+      } catch {
+        patternMismatch = true;
+      }
+    }
+    const dmvMismatch = (field.metadata?.potential_dmv || []).some(
+      (candidate: unknown) => String(candidate) === String(selection.fill_value),
+    );
+    return { patternMismatch, dmvMismatch };
+  };
+  const hasUnacknowledgedConflict = (nullConflictSection?.fields || []).some((field: any) => {
+    const column = String(field.field_key).replace(/^strategy\./, "");
+    const conflicts = fillValueConflicts(field, column);
+    const selection = nullStrategies[column];
+    return (
+      (conflicts.patternMismatch && !selection?.allow_pattern_mismatch) ||
+      (conflicts.dmvMismatch && !selection?.allow_dmv_sentinel)
+    );
+  });
 
   return (
     <div className="mb-8 rounded-2xl border-2 border-indigo-400/40 bg-indigo-50 shadow-lg overflow-hidden text-left animate-fadeIn">
@@ -311,6 +383,122 @@ export const ExecutionPlanPanel: React.FC<{
         </div>
 
         <WorkerValidatorFlow executionPlan={executionPlan} pipelineState={pipelineState} />
+
+        {!readOnly && nullConflictSection?.fields?.length > 0 && (
+          <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 shadow-sm">
+            <h4 className="text-sm font-semibold text-amber-900">
+              Null strategy compatibility review
+            </h4>
+            <p className="mt-1 text-xs text-amber-800">
+              The planner found strategies that do not match the column semantic type. Keep the
+              current strategy or choose a compatible alternative before execution.
+            </p>
+            <div className="mt-3 space-y-3">
+              {nullConflictSection.fields.map((field: any) => {
+                const column = String(field.field_key).replace(/^strategy\./, "");
+                const conflicts = fillValueConflicts(field, column);
+                return (
+                  <label key={field.field_key} className="block rounded-lg border bg-white p-3">
+                    <span className="block text-xs font-semibold text-slate-800">{field.label}</span>
+                    <span className="mt-1 block text-[11px] leading-relaxed text-amber-800">
+                      {field.help_text}
+                    </span>
+                    <select
+                      value={nullStrategies[column]?.strategy ?? String(field.value)}
+                      onChange={(event) =>
+                        setNullStrategies((current) => ({
+                          ...current,
+                          [column]: {
+                            strategy: event.target.value,
+                            fill_value: current[column]?.fill_value ?? "",
+                            allow_pattern_mismatch: false,
+                            allow_dmv_sentinel: false,
+                          },
+                        }))
+                      }
+                      className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-xs"
+                    >
+                      {(field.options || []).map((option: string) => (
+                        <option key={option} value={option}>{option}</option>
+                      ))}
+                    </select>
+                    {(nullStrategies[column]?.strategy ?? String(field.value)) === "fill_value" && (
+                      <input
+                        type="text"
+                        value={String(nullStrategies[column]?.fill_value ?? "")}
+                        onChange={(event) =>
+                          setNullStrategies((current) => ({
+                            ...current,
+                            [column]: {
+                              strategy: "fill_value",
+                              fill_value: event.target.value,
+                              allow_pattern_mismatch: false,
+                              allow_dmv_sentinel: false,
+                            },
+                          }))
+                        }
+                        placeholder="Enter the constant value"
+                        className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-xs"
+                      />
+                    )}
+                    {conflicts.patternMismatch && (
+                      <label className="mt-2 flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-2 text-[11px] text-amber-900">
+                        <input
+                          type="checkbox"
+                          checked={nullStrategies[column]?.allow_pattern_mismatch ?? false}
+                          onChange={(event) =>
+                            setNullStrategies((current) => {
+                              const selection = current[column];
+                              if (!selection) return current;
+                              return {
+                                ...current,
+                                [column]: {
+                                  ...selection,
+                                  allow_pattern_mismatch: event.target.checked,
+                                },
+                              };
+                            })
+                          }
+                        />
+                        <span>
+                          This value does not match the detected pattern
+                          {field.metadata?.expected_str_pattern
+                            ? ` (${field.metadata.expected_str_pattern})`
+                            : ""}. Keep it and skip the pattern check for this exact default value.
+                        </span>
+                      </label>
+                    )}
+                    {conflicts.dmvMismatch && (
+                      <label className="mt-2 flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-2 text-[11px] text-amber-900">
+                        <input
+                          type="checkbox"
+                          checked={nullStrategies[column]?.allow_dmv_sentinel ?? false}
+                          onChange={(event) =>
+                            setNullStrategies((current) => {
+                              const selection = current[column];
+                              if (!selection) return current;
+                              return {
+                                ...current,
+                                [column]: {
+                                  ...selection,
+                                  allow_dmv_sentinel: event.target.checked,
+                                },
+                              };
+                            })
+                          }
+                        />
+                        <span>
+                          This value is classified as a disguised missing value. Keep it as an
+                          explicitly approved sentinel.
+                        </span>
+                      </label>
+                    )}
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         <div className="space-y-4">
           <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
@@ -541,8 +729,12 @@ export const ExecutionPlanPanel: React.FC<{
           ) : (
             <button
               type="button"
-              onClick={onApprove}
-              disabled={isApproving}
+              onClick={() =>
+                onApprove(
+                  nullConflictSection?.fields?.length > 0 ? nullStrategies : undefined,
+                )
+              }
+              disabled={isApproving || hasMissingFillValue || hasUnacknowledgedConflict}
               aria-busy={isApproving}
               className="inline-flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-semibold transition-all shadow-md hover:shadow-lg disabled:cursor-wait disabled:opacity-70 cursor-pointer"
             >

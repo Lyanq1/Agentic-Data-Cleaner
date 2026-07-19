@@ -486,9 +486,21 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
   });
 
   const approvePlanMutation = useMutation({
-    mutationFn: () => {
+    mutationFn: (
+      nullStrategies?: Record<string, {
+        strategy: string;
+        fill_value: unknown;
+        allow_pattern_mismatch: boolean;
+        allow_dmv_sentinel: boolean;
+      }>,
+    ) => {
       setIsApprovingPlan(true);
-      return pipelineApi.approvePlan(runId);
+      return pipelineApi.approvePlan(
+        runId,
+        nullStrategies
+          ? { null_review: { strategies: nullStrategies } }
+          : undefined,
+      );
     },
     onSuccess: async () => {
       await queryClient.refetchQueries({ queryKey: ["pipeline-state", runId] });
@@ -731,7 +743,9 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
                   executionPlan={state.execution_plan}
                   pipelineState={state}
                   runId={runId}
-                  onApprove={() => approvePlanMutation.mutate()}
+                  onApprove={(nullStrategies) =>
+                    approvePlanMutation.mutate(nullStrategies)
+                  }
                   isApproving={isApprovingPlan || approvePlanMutation.isPending}
                 />
               ) : (

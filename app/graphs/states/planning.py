@@ -25,6 +25,7 @@ class ReviewField(BaseModel):
     input_type: Literal["multiselect", "select", "text", "boolean", "readonly"] = "readonly"
     options: list[str] = Field(default_factory=list)
     help_text: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class ReviewSection(BaseModel):

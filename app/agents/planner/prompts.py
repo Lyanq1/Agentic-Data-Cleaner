@@ -29,11 +29,10 @@ The `Input Validation Decision` JSON contains decisions, rules, and answered cla
        - `"fill_mode"` -> `"fill_mode"`
        - `"fill_llm"` -> `"fill_llm"`
        - `"drop_row"` -> `"drop_row"`
-       - `"drop_column"` -> `"drop_column"`
        - `"keep_null"` -> `"leave_as_is"`
        - `"fill_constant"` -> `"fill_value"` (also set `fill_value` accordingly)
        - If the user provided a custom prompt / free-text instructions, use your engineering judgment to map it to the most appropriate strategy (e.g., if they request to fill with `0`, use `"fill_value"` with `fill_value = 0`).
-     * **CRITICAL dtype guard:** If a column's `dtype` in the Statistical Profile is `string`, `object`, `mixed`, or any non-numeric type, you MUST NOT assign `fill_mean` or `fill_median` to it. Use `fill_mode`, `fill_value`, `fill_llm`, `drop_row`, or `drop_column` instead. Assigning a numeric strategy to a text column will always fail at runtime.
+     * **CRITICAL strategy authority rule:** Preserve the strategy explicitly selected by the user/input validator in the provisional `strategy.per_column`; do not silently replace it. The deterministic planner review layer validates it before execution. An incompatible standard strategy must be replaced through HITL using the options previously validated by Input Validator. Only an explicit `fill_value` decision may be retained as a user-authorized semantic exception.
    - **Allow-Missing Confirmations:**
      * Read the individual yes/no question answers (like `null.Q1_allow_missing_column_<col>.answer` where "Yes" means allow_missing=true, "No" means allow_missing=false).
      * Incorporate these user choices as the source of truth for which columns are allowed to have missing values.
@@ -117,7 +116,7 @@ Your output must provide task-specific, structured cleaning configurations in th
      ```json
      {
        "<col_name>": {
-         "strategy": "fill_mean" | "fill_median" | "fill_mode" | "fill_value" | "fill_llm" | "drop_row" | "drop_column" | "leave_as_is",
+         "strategy": "fill_mean" | "fill_median" | "fill_mode" | "fill_value" | "fill_llm" | "drop_row" | "leave_as_is",
          "fill_value": null | <value>
        }
      }
@@ -129,7 +128,6 @@ Your output must provide task-specific, structured cleaning configurations in th
    - `fill_value`: Impute with a fixed constant; set `fill_value` to the target value.
    - `fill_llm`: Request LLM-assisted imputation (worker falls back to mode if LLM is unavailable).
    - `drop_row`: Drop every row that contains a null in this column.
-   - `drop_column`: Remove the entire column from the dataset (use when null_rate is very high, e.g. > 70%, or the column has no analytical value).
    - `leave_as_is`: Intentionally retain nulls (use when `allow_missing = true`).
 
 3. **Type Casting Strategy (`TypeStrategy`) Schema:**

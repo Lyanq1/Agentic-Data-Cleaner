@@ -320,22 +320,6 @@ class NullAgent(BaseAgent):
 
         per_column: dict[str, Any] = strategy_dict.get("per_column", {})
 
-        def get_allow_missing(col: str) -> bool:
-            if semantic_profile and col in semantic_profile.columns:
-                return semantic_profile.columns[col].allow_missing
-            if task and task.inputs and task.inputs.column_context and col in task.inputs.column_context:
-                ctx = task.inputs.column_context[col]
-                semantic_dict = {}
-                if hasattr(ctx, "semantic"):
-                    semantic_dict = ctx.semantic
-                elif isinstance(ctx, dict):
-                    semantic_dict = ctx.get("semantic") or {}
-                if isinstance(semantic_dict, dict):
-                    return semantic_dict.get("allow_missing", True)
-                elif hasattr(semantic_dict, "allow_missing"):
-                    return semantic_dict.allow_missing
-            return True
-
         def get_semantic_data_type(col: str) -> str:
             if semantic_profile and col in semantic_profile.columns:
                 val = semantic_profile.columns[col].semantic_data_type
@@ -392,7 +376,6 @@ class NullAgent(BaseAgent):
                 continue
 
             strategy = cfg.get("strategy", "leave_as_is")
-            allow_missing = get_allow_missing(col)
             semantic_type = get_semantic_data_type(col)
 
             # System constraint: drop_column is never allowed
@@ -418,9 +401,6 @@ class NullAgent(BaseAgent):
             # Calculate actual null statistics for this column
             null_mask = cleaned_df[col].isna()
             count = int(null_mask.sum())
-            total = len(cleaned_df)
-            null_ratio = count / total if total > 0 else 0.0
-
             # If no nulls found at all, skip processing
             if count == 0:
                 if strategy == "drop_row":
@@ -432,115 +412,15 @@ class NullAgent(BaseAgent):
                 notes.append(f"Column '{col}': no nulls found; nothing modified.")
                 continue
 
-            # Case: null_ratio = 100%
-            if null_ratio == 1.0:
-                fill_val = cfg.get("fill_value")
-                if fill_val is not None:
-                    # Coerce fill_val to temporal object to avoid PyArrow mixed type serialization errors
-                    if semantic_type == "Temporal" and isinstance(fill_val, str):
-                        try:
-                            import datetime
-                            non_nulls = cleaned_df[col].dropna()
-                            if pd.api.types.is_datetime64_any_dtype(cleaned_df[col]):
-                                fill_val = pd.to_datetime(fill_val)
-                            elif not non_nulls.empty and non_nulls.apply(lambda x: isinstance(x, datetime.time)).all():
-                                fill_val = pd.to_datetime(fill_val).time()
-                        except Exception as e:
-                            logger.warning("NullAgent: could not parse fill_value '%s' to temporal for column '%s': %s", fill_val, col, e)
-
-                    # fill_constant
-                    cleaned_df[col] = cleaned_df[col].fillna(fill_val)
-                    filled_per_column[col] = count
-                    notes.append(
-                        f"Column '{col}' has 100% nulls; filled with user-defined default '{fill_val}'."
-                    )
-                    logger.info("NullAgent: filled 100%% null column '%s' with default '%s'.", col, fill_val)
-                else:
-                    if allow_missing:
-                        # keep_null
-                        skipped_columns.append(col)
-                        notes.append(
-                            f"Column '{col}' has 100% nulls and allow_missing=True; "
-                            "nulls retained (keep_null)."
-                        )
-                        logger.info("NullAgent: keeping 100%% null column '%s' as null.", col)
-                    else:
-                        # HITL - raise NullHandlingError
-                        message = (
-                            f"Column '{col}' has 100% nulls and allow_missing=False, "
-                            "but no default value (fill_value) was defined. Human-in-the-loop (HITL) required."
-                        )
-                        notes.append(message)
-                        raise NullHandlingError(message, ["null_ratio_100_percent_no_default"], notes)
-                continue
-
-            # Coerce strategy based on semantic_type rules
-            coerced_strategy = strategy
-
-            if semantic_type == "Identifier":
-                # Identifier: drop_row or keep_null (never fill)
-                if strategy not in ("drop_row", "leave_as_is", "keep_null", "skip"):
-                    if allow_missing:
-                        coerced_strategy = "leave_as_is"
-                        notes.append(
-                            f"Column '{col}' (Identifier): strategy '{strategy}' coerced to 'leave_as_is' "
-                            "(Identifier columns must never be filled)."
-                        )
-                    else:
-                        coerced_strategy = "drop_row"
-                        notes.append(
-                            f"Column '{col}' (Identifier): strategy '{strategy}' coerced to 'drop_row' "
-                            "(Identifier columns must never be filled)."
-                        )
-            
-            elif semantic_type == "Structured text":
-                # Structured text: drop_row (allow_missing=False) or keep_null (allow_missing=True)
-                target_strat = "leave_as_is" if allow_missing else "drop_row"
-                if strategy != target_strat and (strategy not in ("leave_as_is", "keep_null", "skip") or target_strat != "leave_as_is"):
-                    coerced_strategy = target_strat
-                    notes.append(
-                        f"Column '{col}' (Structured text): strategy '{strategy}' coerced to '{coerced_strategy}' "
-                        f"based on allow_missing={allow_missing}."
-                    )
-            
-            elif semantic_type in ("Free text", "Geospatial", "Free text + Geospatial"):
-                # Free text + Geospatial: keep_null (or fill_value/fill_constant if defined)
-                if strategy == "fill_value":
-                    pass # keep fill_value
-                else:
-                    coerced_strategy = "leave_as_is"
-                    if strategy not in ("leave_as_is", "keep_null", "skip"):
-                        notes.append(
-                            f"Column '{col}' ({semantic_type}): strategy '{strategy}' coerced to 'leave_as_is' "
-                            "unless user-defined fill_value is provided."
-                        )
-
-            elif semantic_type == "Ordinal":
-                # Ordinal: fill_mode only. No mean/median.
-                if strategy in ("fill_mean", "fill_median"):
-                    coerced_strategy = "fill_mode"
-                    notes.append(
-                        f"Column '{col}' (Ordinal): strategy '{strategy}' coerced to 'fill_mode' "
-                        "(mean/median calculations require encoding and are not allowed)."
-                    )
-            
-            elif semantic_type == "Boolean":
-                # Boolean: fill_mode or fill_constant.
-                if strategy in ("fill_mean", "fill_median"):
-                    coerced_strategy = "fill_mode"
-                    notes.append(
-                        f"Column '{col}' (Boolean): strategy '{strategy}' coerced to 'fill_mode' "
-                        "(mean/median calculations are not applicable for Booleans)."
-                    )
-
-            # Process the coerced strategy
-            if coerced_strategy == "drop_row":
+            # The planner's strategy is authoritative. Compatibility checks belong
+            # to input validation/planning; workers must not silently replace it.
+            if strategy == "drop_row":
                 cleaned_df = cleaned_df[~null_mask].reset_index(drop=True)
                 dropped_per_column[col] = count
                 notes.append(f"Dropped {count} row(s) with null in column '{col}'.")
                 logger.info("NullAgent: dropped %d row(s) for column '%s'.", count, col)
 
-            elif coerced_strategy == "fill_value":
+            elif strategy == "fill_value":
                 fill_val = cfg.get("fill_value", "Unknown")
 
                 # Coerce fill_val to temporal object to avoid PyArrow mixed type serialization errors
@@ -565,7 +445,7 @@ class NullAgent(BaseAgent):
                     count, col, fill_val,
                 )
 
-            elif coerced_strategy == "fill_mode":
+            elif strategy == "fill_mode":
                 mode_series = cleaned_df[col].mode()
                 if mode_series.empty:
                     skipped_columns.append(col)
@@ -582,7 +462,7 @@ class NullAgent(BaseAgent):
                         count, col, mode_val,
                     )
 
-            elif coerced_strategy == "fill_mean":
+            elif strategy == "fill_mean":
                 if semantic_type == "Temporal":
                     try:
                         # Convert to datetime and calculate mean timestamp
@@ -636,7 +516,7 @@ class NullAgent(BaseAgent):
                         notes.append(message)
                         logger.warning(message)
 
-            elif coerced_strategy == "fill_median":
+            elif strategy == "fill_median":
                 if semantic_type == "Temporal":
                     try:
                         # Convert to datetime and calculate median timestamp
@@ -690,14 +570,14 @@ class NullAgent(BaseAgent):
                         notes.append(message)
                         logger.warning(message)
 
-            elif coerced_strategy in ("leave_as_is", "skip", "keep_null"):
+            elif strategy in ("leave_as_is", "skip", "keep_null"):
                 skipped_columns.append(col)
-                notes.append(f"Column '{col}': strategy='{coerced_strategy}'; nulls retained intentionally.")
+                notes.append(f"Column '{col}': strategy='{strategy}'; nulls retained intentionally.")
                 logger.info("NullAgent: column '%s' intentionally left with nulls.", col)
 
             else:
                 skipped_columns.append(col)
-                notes.append(f"NullAgent: strategy '{coerced_strategy}' not handled; leaving as-is.")
+                notes.append(f"NullAgent: strategy '{strategy}' not handled; leaving as-is.")
 
         return cleaned_df, dropped_per_column, filled_per_column, dropped_columns, skipped_columns, notes
 

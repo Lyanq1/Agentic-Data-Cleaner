@@ -47,6 +47,20 @@ def _extract_null_strategy_per_column(task: TaskDetail) -> dict[str, str]:
     }
 
 
+def _null_column_config(task: TaskDetail, column: str) -> dict[str, Any]:
+    if task.task_id != "null_handling" or not task.strategy:
+        return {}
+    strategy_raw = task.strategy
+    if hasattr(strategy_raw, "model_dump"):
+        strategy_dict = strategy_raw.model_dump()
+    elif isinstance(strategy_raw, dict):
+        strategy_dict = strategy_raw
+    else:
+        return {}
+    config = (strategy_dict.get("per_column") or {}).get(column) or {}
+    return config if isinstance(config, dict) else {}
+
+
 def validate_dataframe(
     dataframe: pd.DataFrame,
     task: TaskDetail,
@@ -142,6 +156,17 @@ def validate_dataframe(
             if semantic.potential_dmv:
                 # Check for values in potential_dmv
                 mask = dataframe[column_name].isin(semantic.potential_dmv)
+                col_cfg = _null_column_config(task, column_name)
+                dmv_override = (col_cfg.get("validation_overrides") or {}).get(
+                    "potential_dmv", {}
+                )
+                acknowledged_value = dmv_override.get("acknowledged_value")
+                if (
+                    dmv_override.get("allow_fill_value_as_sentinel") is True
+                    and dmv_override.get("acknowledged_by_user") is True
+                    and acknowledged_value == col_cfg.get("fill_value")
+                ):
+                    mask &= dataframe[column_name] != acknowledged_value
                 if mask.any():
                     errors.append(
                         PandasValidationError(
@@ -191,12 +216,21 @@ def validate_dataframe(
                                 fill_str = str(fill_val).strip()
                                 # Check if the intended fill value matches the pattern
                                 if not re.match(pattern, fill_str):
-                                    errors.append(
-                                        PandasValidationError(
-                                            "expected_str_pattern",
-                                            f"Column '{column_name}': the provided fill_value '{fill_str}' does not match expected pattern {pattern}.",
-                                        )
+                                    pattern_override = (
+                                        col_cfg.get("validation_overrides") or {}
+                                    ).get("expected_str_pattern", {})
+                                    mismatch_is_approved = (
+                                        pattern_override.get("allow_fill_value_mismatch") is True
+                                        and pattern_override.get("acknowledged_by_user") is True
+                                        and pattern_override.get("acknowledged_value") == fill_val
                                     )
+                                    if not mismatch_is_approved:
+                                        errors.append(
+                                            PandasValidationError(
+                                                "expected_str_pattern",
+                                                f"Column '{column_name}': the provided fill_value '{fill_str}' does not match expected pattern {pattern}.",
+                                            )
+                                        )
                         
     if errors:
         raise PandasValidationErrors(errors)
