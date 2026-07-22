@@ -218,43 +218,47 @@ export const StatisticalProfilePanel: React.FC<StatisticalProfilePanelProps> = (
 
       {/* Dataset Profile Overview */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-card rounded-xl border border-slate-200 p-5 shadow-sm text-left flex items-center space-x-4">
-          <div className="p-3 rounded-lg bg-blue-50 text-blue-600">
-            <Hash className="h-6 w-6" />
+        <div className="bg-card rounded-lg border border-border p-5 text-left flex items-center space-x-4">
+          <div className="p-3 rounded bg-muted text-muted-foreground">
+            <Hash className="h-5 w-5" />
           </div>
           <div>
-            <div className="text-2xl font-bold text-slate-800">
+            <div className="text-xl font-bold text-foreground">
               {profileData.total_rows?.toLocaleString() ?? 0}
             </div>
-            <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+            <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
               Total Rows
             </div>
           </div>
         </div>
 
-        <div className="bg-card rounded-xl border border-slate-200 p-5 shadow-sm text-left flex items-center space-x-4">
-          <div className="p-3 rounded-lg bg-indigo-50 text-indigo-600">
-            <Columns className="h-6 w-6" />
+        <div className="bg-card rounded-lg border border-border p-5 text-left flex items-center space-x-4">
+          <div className="p-3 rounded bg-muted text-muted-foreground">
+            <Columns className="h-5 w-5" />
           </div>
           <div>
-            <div className="text-2xl font-bold text-slate-800">
+            <div className="text-xl font-bold text-foreground">
               {profileData.total_columns ?? 0}
             </div>
-            <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+            <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
               Total Columns
             </div>
           </div>
         </div>
 
-        <div className="bg-card rounded-xl border border-slate-200 p-5 shadow-sm text-left flex items-center space-x-4">
-          <div className={`p-3 rounded-lg ${(profileData.duplicate_rows ?? 0) > 0 ? 'bg-amber-50 text-amber-600' : 'bg-slate-50 text-slate-500'}`}>
-            <Copy className="h-6 w-6" />
+        <div className="bg-card rounded-lg border border-border p-5 text-left flex items-center space-x-4">
+          <div className={`p-3 rounded ${
+            (profileData.duplicate_rows ?? 0) > 0 
+              ? 'bg-warning/5 text-warning border border-warning/20' 
+              : 'bg-muted text-muted-foreground border border-transparent'
+          }`}>
+            <Copy className="h-5 w-5" />
           </div>
           <div>
-            <div className="text-2xl font-bold text-slate-800">
+            <div className="text-xl font-bold text-foreground">
               {profileData.duplicate_rows?.toLocaleString() ?? 0}
             </div>
-            <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+            <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
               Duplicate Rows
             </div>
           </div>
@@ -266,20 +270,20 @@ export const StatisticalProfilePanel: React.FC<StatisticalProfilePanelProps> = (
         (profileData.near_unique_columns && profileData.near_unique_columns.length > 0) ||
         (profileData.categorical_columns && profileData.categorical_columns.length > 0) ||
         (profileData.high_null_columns && profileData.high_null_columns.length > 0)) && (
-        <div className="bg-card rounded-xl border border-slate-200 p-6 text-left shadow-sm space-y-4">
-          <h2 className="text-base font-bold text-slate-800 tracking-tight border-b border-slate-100 pb-2">
+        <div className="bg-card rounded-lg border border-border p-6 text-left space-y-4">
+          <h2 className="text-xs font-bold uppercase tracking-wider text-muted-foreground border-b pb-2">
             Dataset Structural Highlights
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
             {profileData.pk_candidates && profileData.pk_candidates.length > 0 && (
-              <div className="space-y-1.5 p-3 rounded-lg bg-slate-50/50 border border-slate-100">
-                <div className="flex items-center space-x-1.5 text-slate-700 font-semibold">
-                  <Key className="h-4 w-4 text-amber-500" />
+              <div className="space-y-1.5 p-3 rounded border bg-muted/5">
+                <div className="flex items-center space-x-1.5 text-foreground font-semibold">
+                  <Key className="h-3.5 w-3.5 text-muted-foreground" />
                   <span>Primary Key Candidates</span>
                 </div>
                 <div className="flex flex-wrap gap-1">
                   {profileData.pk_candidates.map((col: string, idx: number) => (
-                    <span key={idx} className="font-mono text-[10px] bg-amber-50 text-amber-800 border border-amber-200/50 px-1.5 py-0.5 rounded">
+                    <span key={idx} className="font-mono text-[10px] bg-muted text-muted-foreground border px-1.5 py-0.5 rounded">
                       {col}
                     </span>
                   ))}
@@ -288,14 +292,14 @@ export const StatisticalProfilePanel: React.FC<StatisticalProfilePanelProps> = (
             )}
 
             {profileData.near_unique_columns && profileData.near_unique_columns.length > 0 && (
-              <div className="space-y-1.5 p-3 rounded-lg bg-slate-50/50 border border-slate-100">
-                <div className="flex items-center space-x-1.5 text-slate-700 font-semibold">
-                  <AlertTriangle className="h-4 w-4 text-amber-600" />
+              <div className="space-y-1.5 p-3 rounded border bg-muted/5">
+                <div className="flex items-center space-x-1.5 text-foreground font-semibold">
+                  <AlertTriangle className="h-3.5 w-3.5 text-muted-foreground" />
                   <span>Near-Unique Columns (with duplicates)</span>
                 </div>
                 <div className="flex flex-wrap gap-1">
                   {profileData.near_unique_columns.map((col: string, idx: number) => (
-                    <span key={idx} className="font-mono text-[10px] bg-slate-100 text-slate-700 border border-slate-200/50 px-1.5 py-0.5 rounded">
+                    <span key={idx} className="font-mono text-[10px] bg-muted text-muted-foreground border px-1.5 py-0.5 rounded">
                       {col}
                     </span>
                   ))}
@@ -304,14 +308,14 @@ export const StatisticalProfilePanel: React.FC<StatisticalProfilePanelProps> = (
             )}
 
             {profileData.categorical_columns && profileData.categorical_columns.length > 0 && (
-              <div className="space-y-1.5 p-3 rounded-lg bg-slate-50/50 border border-slate-100">
-                <div className="flex items-center space-x-1.5 text-slate-700 font-semibold">
-                  <ListFilter className="h-4 w-4 text-blue-500" />
+              <div className="space-y-1.5 p-3 rounded border bg-muted/5">
+                <div className="flex items-center space-x-1.5 text-foreground font-semibold">
+                  <ListFilter className="h-3.5 w-3.5 text-muted-foreground" />
                   <span>Categorical Columns</span>
                 </div>
                 <div className="flex flex-wrap gap-1">
                   {profileData.categorical_columns.map((col: string, idx: number) => (
-                    <span key={idx} className="font-mono text-[10px] bg-blue-50 text-blue-800 border border-blue-200/50 px-1.5 py-0.5 rounded">
+                    <span key={idx} className="font-mono text-[10px] bg-muted text-muted-foreground border px-1.5 py-0.5 rounded">
                       {col}
                     </span>
                   ))}
@@ -320,14 +324,14 @@ export const StatisticalProfilePanel: React.FC<StatisticalProfilePanelProps> = (
             )}
 
             {profileData.high_null_columns && profileData.high_null_columns.length > 0 && (
-              <div className="space-y-1.5 p-3 rounded-lg bg-slate-50/50 border border-slate-100">
-                <div className="flex items-center space-x-1.5 text-slate-700 font-semibold">
-                  <AlertTriangle className="h-4 w-4 text-red-500" />
+              <div className="space-y-1.5 p-3 rounded border bg-muted/5">
+                <div className="flex items-center space-x-1.5 text-foreground font-semibold">
+                  <AlertTriangle className="h-3.5 w-3.5 text-destructive" />
                   <span>High Null Columns (&gt; 50% missing)</span>
                 </div>
                 <div className="flex flex-wrap gap-1">
                   {profileData.high_null_columns.map((col: string, idx: number) => (
-                    <span key={idx} className="font-mono text-[10px] bg-red-50 text-red-800 border border-red-200/50 px-1.5 py-0.5 rounded">
+                    <span key={idx} className="font-mono text-[10px] bg-muted text-muted-foreground border px-1.5 py-0.5 rounded">
                       {col}
                     </span>
                   ))}
@@ -340,18 +344,18 @@ export const StatisticalProfilePanel: React.FC<StatisticalProfilePanelProps> = (
 
       {/* Dataset Semantic Context */}
       {semanticProfile && (
-        <div className="bg-card rounded-xl border border-slate-200 overflow-hidden shadow-sm p-6 text-left space-y-4">
-          <h2 className="text-base font-bold text-slate-800 tracking-tight border-b border-slate-100 pb-2">
+        <div className="bg-card rounded-lg border border-border p-6 text-left space-y-4">
+          <h2 className="text-xs font-bold uppercase tracking-wider text-muted-foreground border-b pb-2">
             Dataset Semantic Context
           </h2>
           
           {/* Table Summary */}
           {semanticProfile.table_summary && (
             <div className="space-y-1">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+              <h3 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
                 Table Summary
               </h3>
-              <p className="text-sm text-slate-600 leading-relaxed font-sans">
+              <p className="text-xs text-foreground leading-relaxed font-sans">
                 {formatDisplayValue(semanticProfile.table_summary)}
               </p>
             </div>
@@ -360,25 +364,25 @@ export const StatisticalProfilePanel: React.FC<StatisticalProfilePanelProps> = (
           {/* Detected Logical Groups */}
           {Object.keys(logicalGroups).length > 0 && (
             <div className="space-y-2">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+              <h3 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
                 Detected Logical Groups
               </h3>
-              <div className="border rounded-lg overflow-hidden bg-white">
+              <div className="border border-border rounded-lg overflow-hidden bg-card">
                 <table className="w-full text-xs border-collapse">
                   <thead>
-                    <tr className="bg-slate-50/75 border-b border-slate-200">
-                      <th className="text-left p-2.5 font-semibold text-slate-500 w-[220px]">Logical Group</th>
-                      <th className="text-left p-2.5 font-semibold text-slate-500">Associated Columns</th>
+                    <tr className="bg-muted/50 border-b border-border">
+                      <th className="text-left p-2.5 font-semibold text-muted-foreground w-[220px]">Logical Group</th>
+                      <th className="text-left p-2.5 font-semibold text-muted-foreground">Associated Columns</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100">
+                  <tbody className="divide-y divide-border">
                     {Object.entries(logicalGroups).map(([groupName, cols], i) => (
-                      <tr key={i} className="hover:bg-slate-50/30">
-                        <td className="p-2.5 align-top font-medium text-slate-600">{formatDisplayValue(groupName)}</td>
+                      <tr key={i} className="hover:bg-muted/30">
+                        <td className="p-2.5 align-top font-medium text-foreground">{formatDisplayValue(groupName)}</td>
                         <td className="p-2.5 align-top">
                           <div className="flex flex-wrap gap-1.5">
                             {cols.map((colName, idx) => (
-                              <span key={idx} className="font-mono text-[10px] bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded">
+                              <span key={idx} className="font-mono text-[10px] bg-muted text-muted-foreground border border-border px-1.5 py-0.5 rounded">
                                 {formatDisplayValue(colName)}
                               </span>
                             ))}
@@ -398,12 +402,12 @@ export const StatisticalProfilePanel: React.FC<StatisticalProfilePanelProps> = (
               <button
                 type="button"
                 onClick={() => setShowThinking(!showThinking)}
-                className="text-xs font-medium text-blue-600 hover:text-blue-500 cursor-pointer"
+                className="text-xs font-medium text-primary hover:underline cursor-pointer"
               >
                 {showThinking ? 'Hide LLM Chain of Thought' : 'Show LLM Chain of Thought'}
               </button>
               {showThinking && (
-                <div className="bg-slate-950 text-white rounded-lg p-4 font-mono text-md leading-relaxed max-h-64 overflow-y-auto custom-scrollbar">
+                <div className="bg-slate-950 text-slate-300 rounded-lg p-4 font-mono text-xs leading-relaxed max-h-64 overflow-y-auto border border-slate-800 custom-scrollbar">
                   {semanticProfile.thinking.split('\n').map((line: string, i: number) => (
                     <div key={i} className="min-h-[1.2rem]">
                       {line}
@@ -423,23 +427,23 @@ export const StatisticalProfilePanel: React.FC<StatisticalProfilePanelProps> = (
         return (
           <div 
             key={index} 
-            className="bg-card rounded-xl border border-slate-200 overflow-hidden shadow-sm hover:shadow-md transition-shadow"
+            className="bg-card rounded-lg border border-border overflow-hidden transition-colors"
           >
             {/* Styled tab-like header matching the Car ID layout */}
-            <div className="bg-slate-50/50 border-b border-slate-200/80 px-5 py-2.5 flex items-center justify-between">
+            <div className="bg-muted/30 border-b border-border px-5 py-2.5 flex items-center justify-between">
               <div className="flex items-center space-x-2.5">
-                <div className="bg-blue-50 text-blue-600 p-1.5 rounded">
+                <div className="bg-muted text-muted-foreground p-1.5 rounded">
                   {isNumeric ? (
-                    <Binary className="h-4 w-4" />
+                    <Binary className="h-3.5 w-3.5" />
                   ) : (
-                    <Database className="h-4 w-4" />
+                    <Database className="h-3.5 w-3.5" />
                   )}
                 </div>
-                <h3 className="font-bold text-slate-800 text-sm tracking-tight">
+                <h3 className="font-bold text-foreground text-sm tracking-tight">
                   {formatDisplayValue(col.column_name)}
                 </h3>
               </div>
-              <span className="text-[10px] font-bold text-slate-500 uppercase bg-slate-100/70 border border-slate-200/50 px-2 py-0.5 rounded-full select-none">
+              <span className="text-[10px] font-mono text-muted-foreground bg-muted border border-border px-2 py-0.5 rounded select-none">
                 {formatDisplayValue(col.dtype)}
               </span>
             </div>
@@ -447,31 +451,31 @@ export const StatisticalProfilePanel: React.FC<StatisticalProfilePanelProps> = (
             {/* Content Section */}
             <div className="grid grid-cols-1 md:grid-cols-12 gap-4 p-5 min-h-[140px]">
               {/* 1. Left Panel: General stats */}
-              <div className="md:col-span-3 space-y-2.5 pr-2 border-r border-slate-100 flex flex-col justify-center text-left">
+              <div className="md:col-span-3 space-y-2.5 pr-2 border-r border-border flex flex-col justify-center text-left">
                 <div className="flex justify-between items-baseline text-xs">
-                  <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Values:</span>
-                  <span className="text-blue-600 font-bold">
+                  <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Values:</span>
+                  <span className="text-foreground font-bold">
                     {stats.values_count.toLocaleString()} ({Math.round(stats.values_pct * 100)}%)
                   </span>
                 </div>
                 <div className="flex justify-between items-baseline text-xs">
-                  <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Missing:</span>
-                  <span className="text-slate-600 font-bold">
+                  <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Missing:</span>
+                  <span className="text-foreground font-bold">
                     {stats.missing_count > 0 
-                      ? `${stats.missing_count.toLocaleString()} (${Math.round(stats.missing_pct * 100)}%)` 
+                      ? `${stats.missing_count.toLocaleString()} ({Math.round(stats.missing_pct * 100)}%)` 
                       : '---'}
                   </span>
                 </div>
                 <div className="flex justify-between items-baseline text-xs">
-                  <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Distinct:</span>
-                  <span className="text-blue-600 font-bold">
+                  <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Distinct:</span>
+                  <span className="text-foreground font-bold">
                     {stats.distinct_count.toLocaleString()} ({stats.distinct_pct < 0.01 ? '<1%' : `${Math.round(stats.distinct_pct * 100)}%`})
                   </span>
                 </div>
                 {isNumeric && (
                   <div className="flex justify-between items-baseline text-xs">
-                    <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Zeroes:</span>
-                    <span className="text-slate-500 font-bold">
+                    <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Zeroes:</span>
+                    <span className="text-muted-foreground font-bold">
                       {stats.zeroes_count > 0 
                         ? `${stats.zeroes_count.toLocaleString()} (${Math.round(stats.zeroes_pct * 100)}%)` 
                         : '--'}
@@ -482,74 +486,74 @@ export const StatisticalProfilePanel: React.FC<StatisticalProfilePanelProps> = (
 
               {/* 2. Center Panel: Numeric quantiles & spread */}
               {isNumeric ? (
-                <div className="md:col-span-5 grid grid-cols-2 gap-4 px-2 border-r border-slate-100 text-[11px]">
+                <div className="md:col-span-5 grid grid-cols-2 gap-4 px-2 border-r border-border text-[11px]">
                   {/* Quantiles column */}
                   <div className="space-y-1">
-                    <div className="flex justify-between border-b border-slate-50 pb-0.5">
-                      <span className="text-slate-400 font-medium">MAX</span>
-                      <span className="text-slate-700 font-semibold">{stats.max.toLocaleString(undefined, {maximumFractionDigits: 2})}</span>
+                    <div className="flex justify-between border-b border-border/30 pb-0.5">
+                      <span className="text-muted-foreground font-medium">MAX</span>
+                      <span className="text-foreground font-semibold">{stats.max.toLocaleString(undefined, {maximumFractionDigits: 2})}</span>
                     </div>
-                    <div className="flex justify-between border-b border-slate-50 pb-0.5">
-                      <span className="text-slate-400 font-medium">95%</span>
-                      <span className="text-slate-700 font-semibold">{stats.p95.toLocaleString(undefined, {maximumFractionDigits: 2})}</span>
+                    <div className="flex justify-between border-b border-border/30 pb-0.5">
+                      <span className="text-muted-foreground font-medium">95%</span>
+                      <span className="text-foreground font-semibold">{stats.p95.toLocaleString(undefined, {maximumFractionDigits: 2})}</span>
                     </div>
-                    <div className="flex justify-between border-b border-slate-50 pb-0.5">
-                      <span className="text-slate-400 font-medium">Q3</span>
-                      <span className="text-slate-700 font-semibold">{stats.q3.toLocaleString(undefined, {maximumFractionDigits: 2})}</span>
+                    <div className="flex justify-between border-b border-border/30 pb-0.5">
+                      <span className="text-muted-foreground font-medium">Q3</span>
+                      <span className="text-foreground font-semibold">{stats.q3.toLocaleString(undefined, {maximumFractionDigits: 2})}</span>
                     </div>
-                    <div className="flex justify-between border-b border-slate-50 pb-0.5">
-                      <span className="text-slate-400 font-medium">MEDIAN</span>
-                      <span className="text-blue-600 font-bold">{stats.median.toLocaleString(undefined, {maximumFractionDigits: 2})}</span>
+                    <div className="flex justify-between border-b border-border/30 pb-0.5">
+                      <span className="text-muted-foreground font-medium">MEDIAN</span>
+                      <span className="text-primary font-bold">{stats.median.toLocaleString(undefined, {maximumFractionDigits: 2})}</span>
                     </div>
-                    <div className="flex justify-between border-b border-slate-50 pb-0.5">
-                      <span className="text-slate-400 font-medium">AVG</span>
-                      <span className="text-slate-700 font-semibold">{stats.avg.toLocaleString(undefined, {maximumFractionDigits: 2})}</span>
+                    <div className="flex justify-between border-b border-border/30 pb-0.5">
+                      <span className="text-muted-foreground font-medium">AVG</span>
+                      <span className="text-foreground font-semibold">{stats.avg.toLocaleString(undefined, {maximumFractionDigits: 2})}</span>
                     </div>
-                    <div className="flex justify-between border-b border-slate-50 pb-0.5">
-                      <span className="text-slate-400 font-medium">Q1</span>
-                      <span className="text-slate-700 font-semibold">{stats.q1.toLocaleString(undefined, {maximumFractionDigits: 2})}</span>
+                    <div className="flex justify-between border-b border-border/30 pb-0.5">
+                      <span className="text-muted-foreground font-medium">Q1</span>
+                      <span className="text-foreground font-semibold">{stats.q1.toLocaleString(undefined, {maximumFractionDigits: 2})}</span>
                     </div>
-                    <div className="flex justify-between border-b border-slate-50 pb-0.5">
-                      <span className="text-slate-400 font-medium">5%</span>
-                      <span className="text-slate-700 font-semibold">{stats.p5.toLocaleString(undefined, {maximumFractionDigits: 2})}</span>
+                    <div className="flex justify-between border-b border-border/30 pb-0.5">
+                      <span className="text-muted-foreground font-medium">5%</span>
+                      <span className="text-foreground font-semibold">{stats.p5.toLocaleString(undefined, {maximumFractionDigits: 2})}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-slate-400 font-medium">MIN</span>
-                      <span className="text-slate-700 font-semibold">{stats.min.toLocaleString(undefined, {maximumFractionDigits: 2})}</span>
+                      <span className="text-muted-foreground font-medium">MIN</span>
+                      <span className="text-foreground font-semibold">{stats.min.toLocaleString(undefined, {maximumFractionDigits: 2})}</span>
                     </div>
                   </div>
 
                   {/* Spread column */}
                   <div className="space-y-1">
-                    <div className="flex justify-between border-b border-slate-50 pb-0.5">
-                      <span className="text-slate-400 font-medium">RANGE</span>
-                      <span className="text-slate-700 font-semibold">{stats.range.toLocaleString(undefined, {maximumFractionDigits: 2})}</span>
+                    <div className="flex justify-between border-b border-border/30 pb-0.5">
+                      <span className="text-muted-foreground font-medium">RANGE</span>
+                      <span className="text-foreground font-semibold">{stats.range.toLocaleString(undefined, {maximumFractionDigits: 2})}</span>
                     </div>
-                    <div className="flex justify-between border-b border-slate-50 pb-0.5">
-                      <span className="text-slate-400 font-medium">IQR</span>
-                      <span className="text-slate-700 font-semibold">{stats.iqr.toLocaleString(undefined, {maximumFractionDigits: 2})}</span>
+                    <div className="flex justify-between border-b border-border/30 pb-0.5">
+                      <span className="text-muted-foreground font-medium">IQR</span>
+                      <span className="text-foreground font-semibold">{stats.iqr.toLocaleString(undefined, {maximumFractionDigits: 2})}</span>
                     </div>
-                    <div className="flex justify-between border-b border-slate-50 pb-0.5">
-                      <span className="text-slate-400 font-medium">STD</span>
-                      <span className="text-slate-700 font-semibold">{stats.std.toLocaleString(undefined, {maximumFractionDigits: 2})}</span>
+                    <div className="flex justify-between border-b border-border/30 pb-0.5">
+                      <span className="text-muted-foreground font-medium">STD</span>
+                      <span className="text-foreground font-semibold">{stats.std.toLocaleString(undefined, {maximumFractionDigits: 2})}</span>
                     </div>
-                    <div className="flex justify-between border-b border-slate-50 pb-0.5">
-                      <span className="text-slate-400 font-medium">VAR</span>
-                      <span className="text-slate-700 font-semibold">
+                    <div className="flex justify-between border-b border-border/30 pb-0.5">
+                      <span className="text-muted-foreground font-medium">VAR</span>
+                      <span className="text-foreground font-semibold">
                         {stats.var > 1000 ? `${(stats.var / 1000).toFixed(0)}k` : stats.var.toLocaleString(undefined, {maximumFractionDigits: 2})}
                       </span>
                     </div>
-                    <div className="flex justify-between border-b border-slate-50 pb-0.5">
-                      <span className="text-slate-400 font-medium">KURT.</span>
-                      <span className="text-slate-700 font-semibold">{stats.kurt.toFixed(2)}</span>
+                    <div className="flex justify-between border-b border-border/30 pb-0.5">
+                      <span className="text-muted-foreground font-medium">KURT.</span>
+                      <span className="text-foreground font-semibold">{stats.kurt.toFixed(2)}</span>
                     </div>
-                    <div className="flex justify-between border-b border-slate-50 pb-0.5">
-                      <span className="text-slate-400 font-medium">SKEW</span>
-                      <span className="text-blue-600 font-bold">{stats.skew.toFixed(2)}</span>
+                    <div className="flex justify-between border-b border-border/30 pb-0.5">
+                      <span className="text-muted-foreground font-medium">SKEW</span>
+                      <span className="text-primary font-bold">{stats.skew.toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-slate-400 font-medium">SUM</span>
-                      <span className="text-slate-700 font-semibold">
+                      <span className="text-muted-foreground font-medium">SUM</span>
+                      <span className="text-foreground font-semibold">
                         {stats.sum > 1000000 ? `${(stats.sum / 1000000).toFixed(1)}M` : stats.sum.toLocaleString(undefined, {maximumFractionDigits: 0})}
                       </span>
                     </div>
@@ -569,15 +573,15 @@ export const StatisticalProfilePanel: React.FC<StatisticalProfilePanelProps> = (
 
             {/* Sample Values & Detected Patterns */}
             {((col.sample_values && col.sample_values.length > 0) || (col.detected_patterns && col.detected_patterns.length > 0)) && (
-              <div className="border-t border-slate-100 px-5 py-4 bg-slate-50/10 text-left space-y-3">
+              <div className="border-t border-border px-5 py-4 bg-muted/5 text-left space-y-3">
                 {col.detected_patterns && col.detected_patterns.length > 0 && (
                   <div>
-                    <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
+                    <h4 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1.5">
                       Detected Patterns
                     </h4>
                     <div className="flex flex-wrap gap-1.5">
                       {col.detected_patterns.map((pat: string, idx: number) => (
-                        <span key={idx} className="font-mono text-[11px] bg-indigo-50 text-indigo-700 border border-indigo-100 px-2 py-0.5 rounded">
+                        <span key={idx} className="font-mono text-[10px] bg-muted text-muted-foreground border border-border px-2 py-0.5 rounded">
                           {pat}
                         </span>
                       ))}
@@ -586,13 +590,13 @@ export const StatisticalProfilePanel: React.FC<StatisticalProfilePanelProps> = (
                 )}
                 {col.sample_values && col.sample_values.length > 0 && (
                   <div>
-                    <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
+                    <h4 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1.5">
                       Representative Samples
                     </h4>
                     <div className="flex flex-wrap gap-1.5">
                       {col.sample_values.map((val: any, idx: number) => (
-                        <span key={idx} className="font-mono text-[11px] bg-slate-100/65 text-slate-600 border border-slate-200 px-2 py-0.5 rounded max-w-xs truncate" title={val === null || val === undefined ? 'null' : String(val)}>
-                          {val === null || val === undefined ? <em className="text-slate-400 font-sans">null</em> : String(val)}
+                        <span key={idx} className="font-mono text-[10px] bg-muted text-muted-foreground border border-border px-2 py-0.5 rounded max-w-xs truncate" title={val === null || val === undefined ? 'null' : String(val)}>
+                          {val === null || val === undefined ? <em className="text-muted-foreground font-sans">null</em> : String(val)}
                         </span>
                       ))}
                     </div>
@@ -607,116 +611,116 @@ export const StatisticalProfilePanel: React.FC<StatisticalProfilePanelProps> = (
               if (!semanticDetail) return null;
               
               return (
-                <div className="border-t border-slate-100 px-5 py-4 bg-slate-50/20 text-left">
-                  <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-3">
+                <div className="border-t border-border px-5 py-4 bg-muted/10 text-left">
+                  <h4 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-3">
                     Semantic Analysis
                   </h4>
-                  <div className="border rounded-lg overflow-hidden bg-white">
+                  <div className="border border-border rounded-lg overflow-hidden bg-card">
                     <table className="w-full text-xs border-collapse">
                       <thead>
-                        <tr className="bg-slate-50/75 border-b border-slate-200">
-                          <th className="text-left p-2.5 font-semibold text-slate-500 w-[220px]">Property & Expected Value</th>
-                          <th className="text-left p-2.5 font-semibold text-slate-500">Business Context / Reason</th>
+                        <tr className="bg-muted/50 border-b border-border">
+                          <th className="text-left p-2.5 font-semibold text-muted-foreground w-[220px]">Property & Expected Value</th>
+                          <th className="text-left p-2.5 font-semibold text-muted-foreground">Business Context / Reason</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-slate-100">
+                      <tbody className="divide-y divide-border">
                         {semanticDetail.description && (
-                          <tr className="hover:bg-slate-50/30">
-                            <td className="p-2.5 align-top font-medium text-slate-600">Description</td>
-                            <td className="p-2.5 align-top text-slate-600">{semanticDetail.description}</td>
+                          <tr className="hover:bg-muted/30">
+                            <td className="p-2.5 align-top font-medium text-muted-foreground">Description</td>
+                            <td className="p-2.5 align-top text-foreground">{semanticDetail.description}</td>
                           </tr>
                         )}
 
                         {semanticDetail.allow_missing !== undefined && (
-                          <tr className="hover:bg-slate-50/30">
-                            <td className="p-2.5 align-top font-medium text-slate-600 flex items-center gap-2">
+                          <tr className="hover:bg-muted/30">
+                            <td className="p-2.5 align-top font-medium text-foreground flex items-center gap-2">
                               <span>Allow Missing</span>
-                              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${
                                 semanticDetail.allow_missing 
-                                  ? 'bg-slate-100 text-slate-700' 
-                                  : 'bg-slate-200 text-slate-800'
+                                  ? 'bg-success/5 text-success border-success/30' 
+                                  : 'bg-muted text-muted-foreground border-border'
                               }`}>
                                 {semanticDetail.allow_missing ? 'True' : 'False'}
                               </span>
                             </td>
-                            <td className="p-2.5 align-top text-slate-600">
+                            <td className="p-2.5 align-top text-muted-foreground">
                               {semanticDetail.allow_missing_reason || '—'}
                             </td>
                           </tr>
                         )}
                         {semanticDetail.expected_type && (
-                          <tr className="hover:bg-slate-50/30">
-                            <td className="p-2.5 align-top font-medium text-slate-600 flex items-center gap-2">
+                          <tr className="hover:bg-muted/30">
+                            <td className="p-2.5 align-top font-medium text-foreground flex items-center gap-2">
                               <span>Expected Type</span>
-                              <span className="font-mono text-[10px] bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded">
+                              <span className="font-mono text-[10px] bg-muted text-muted-foreground border border-border px-1.5 py-0.5 rounded">
                                 {semanticDetail.expected_type}
                               </span>
                             </td>
-                            <td className="p-2.5 align-top text-slate-600">
+                            <td className="p-2.5 align-top text-muted-foreground">
                               {semanticDetail.expected_type_reason || '—'}
                             </td>
                           </tr>
                         )}
                         {semanticDetail.potential_dmv && semanticDetail.potential_dmv.length > 0 && (
-                          <tr className="hover:bg-slate-50/30">
-                            <td className="p-2.5 align-top font-medium text-slate-600 flex flex-col gap-1.5">
+                          <tr className="hover:bg-muted/30">
+                            <td className="p-2.5 align-top font-medium text-foreground flex flex-col gap-1.5">
                               <span>Potential DMVs</span>
                               <div className="flex flex-wrap gap-1">
                                 {semanticDetail.potential_dmv.map((dmv: string, i: number) => (
-                                  <span key={i} className="font-mono text-[10px] bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded">
+                                  <span key={i} className="font-mono text-[10px] bg-muted text-muted-foreground border border-border px-1.5 py-0.5 rounded">
                                     {dmv}
                                   </span>
                                 ))}
                               </div>
                             </td>
-                            <td className="p-2.5 align-top text-slate-600">
+                            <td className="p-2.5 align-top text-muted-foreground">
                               {semanticDetail.potential_dmv_reason || '—'}
                             </td>
                           </tr>
                         )}
                         {semanticDetail.expected_str_pattern && (
-                          <tr className="hover:bg-slate-50/30">
-                            <td className="p-2.5 align-top font-medium text-slate-600 flex items-center gap-2">
+                          <tr className="hover:bg-muted/30">
+                            <td className="p-2.5 align-top font-medium text-foreground flex items-center gap-2">
                               <span>Expected Pattern</span>
-                              <span className="font-mono text-[10px] bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded">
+                              <span className="font-mono text-[10px] bg-muted text-muted-foreground border border-border px-1.5 py-0.5 rounded">
                                 {semanticDetail.expected_str_pattern}
                               </span>
                             </td>
-                            <td className="p-2.5 align-top text-slate-600">
+                            <td className="p-2.5 align-top text-muted-foreground">
                               {semanticDetail.expected_str_pattern_reason || '—'}
                             </td>
                           </tr>
                         )}
                         {semanticDetail.relationships && semanticDetail.relationships.length > 0 && (
-                          <tr className="hover:bg-slate-50/30">
-                            <td className="p-2.5 align-top font-medium text-slate-600 flex flex-col gap-1.5">
+                          <tr className="hover:bg-muted/30">
+                            <td className="p-2.5 align-top font-medium text-foreground flex flex-col gap-1.5">
                               <span>Relationships</span>
                               <div className="flex flex-col gap-1">
                                 {semanticDetail.relationships.map((rel: string, i: number) => (
-                                  <span key={i} className="font-mono text-[10px] bg-slate-50 text-slate-700 px-1.5 py-0.5 rounded inline-block max-w-max">
+                                  <span key={i} className="font-mono text-[10px] bg-muted text-muted-foreground border border-border px-1.5 py-0.5 rounded inline-block max-w-max">
                                     {rel}
                                   </span>
                                 ))}
                               </div>
                             </td>
-                            <td className="p-2.5 align-top text-slate-600">
+                            <td className="p-2.5 align-top text-muted-foreground">
                               Functional dependencies detected for this column.
                             </td>
                           </tr>
                         )}
                         {semanticDetail.is_error && (
-                          <tr>
-                            <td className="p-2.5 align-top font-medium text-red-600 flex flex-col gap-1.5">
+                          <tr className="bg-destructive/5 hover:bg-destructive/10">
+                            <td className="p-2.5 align-top font-medium text-destructive flex flex-col gap-1.5">
                               <span>Quality Error</span>
                               <div className="flex flex-wrap gap-1">
                                 {(semanticDetail.error_types || []).map((err: string, i: number) => (
-                                  <span key={i} className="text-[10px] font-bold uppercase text-red-600">
+                                  <span key={i} className="text-[10px] font-bold uppercase text-destructive">
                                     {err}
                                   </span>
                                 ))}
                               </div>
                             </td>
-                            <td className="p-2.5 align-top text-red-600">
+                            <td className="p-2.5 align-top text-destructive">
                               Reason: {semanticDetail.error_reason || 'Anomalies detected in column data.'}
                             </td>
                           </tr>
@@ -730,10 +734,10 @@ export const StatisticalProfilePanel: React.FC<StatisticalProfilePanelProps> = (
 
             {/* Interpretation advice notes bar */}
             {col.interpretation && col.interpretation.length > 0 && (
-              <div className="bg-slate-50/30 border-t border-slate-100 px-5 py-2 text-[11px] text-muted-foreground flex flex-col space-y-1 text-left">
+              <div className="bg-muted/10 border-t border-border px-5 py-2 text-[11px] text-muted-foreground flex flex-col space-y-1 text-left">
                 {col.interpretation.map((msg: string, idx: number) => (
-                  <div key={idx} className="flex items-center space-x-2 text-slate-500">
-                    <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0" />
+                  <div key={idx} className="flex items-center space-x-2 text-muted-foreground">
+                    <span className="w-1 h-1 rounded-full bg-primary shrink-0" />
                     <span>{msg}</span>
                   </div>
                 ))}

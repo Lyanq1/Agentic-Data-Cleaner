@@ -14,6 +14,8 @@ import { SemanticProfilePanel } from './SemanticProfilePanel';
 import { TablePreviewPanel } from './TablePreviewPanel';
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
+import { Panel } from '../ui/Panel';
+import { Button } from '../ui/Button';
 
 interface UploadViewProps {
   onUploadSuccess: (runId: string) => void;
@@ -249,12 +251,12 @@ export const UploadView: React.FC<UploadViewProps> = ({
   };
 
   return (
-    <div className="w-full max-w-6xl mx-auto flex flex-col pt-4 text-left pb-16 px-2 h-full min-h-0 overflow-y-auto hidden-scrollbar">
+    <div className="w-full max-w-6xl flex flex-col pt-4 text-left pb-16 px-2 h-full min-h-0 overflow-y-auto hidden-scrollbar">
       {/* Header section */}
       {!profileData && (
-        <div className="mb-8 text-center animate-fade-in">
-          <h1 className="text-3xl font-bold tracking-tight mb-2">Upload Dataset</h1>
-          <p className="text-muted-foreground">
+        <div className="mb-6 text-left animate-fade-in">
+          <h1 className="text-xl font-bold text-foreground">Upload dataset</h1>
+          <p className="text-xs text-muted-foreground mt-0.5">
             Provide your data file and specific requirements for the AI agent to process.
           </p>
         </div>
@@ -263,15 +265,15 @@ export const UploadView: React.FC<UploadViewProps> = ({
       <div className="space-y-6">
         {/* Upload form Panel */}
         {!profileData && (
-          <div className="rounded-xl border bg-card text-card-foreground shadow-sm max-w-2xl mx-auto w-full">
+          <Panel className="max-w-2xl w-full">
             <form onSubmit={handleUpload} className="p-6 space-y-6">
               <div className="space-y-2">
-                <label className="text-sm font-semibold text-slate-800">
+                <label className="text-xs font-semibold text-foreground">
                   Data File
                 </label>
                 {!file ? (
                   <div 
-                    className="border-2 border-dashed border-slate-200 rounded-xl p-8 flex flex-col items-center justify-center text-center cursor-pointer hover:bg-slate-50/50 hover:border-primary/45 transition-all duration-300 group" 
+                    className="border border-dashed border-border rounded-lg p-6 flex flex-col items-center justify-center text-center cursor-pointer bg-muted/5 hover:bg-muted/10 transition-colors group" 
                     onClick={() => document.getElementById('file-upload')?.click()}
                     onDragOver={(e) => {
                       e.preventDefault();
@@ -287,13 +289,13 @@ export const UploadView: React.FC<UploadViewProps> = ({
                       }
                     }}
                   >
-                    <div className="bg-slate-50 p-3 rounded-full mb-3 group-hover:scale-110 transition-transform">
-                      <UploadCloud className="h-8 w-8 text-slate-400 group-hover:text-primary" />
+                    <div className="mb-2">
+                      <UploadCloud className="h-5 w-5 text-muted-foreground" />
                     </div>
-                    <div className="text-sm font-medium mb-1 text-slate-700">
+                    <div className="text-xs font-medium mb-0.5 text-foreground">
                       Click to select or drag and drop
                     </div>
-                    <div className="text-xs text-muted-foreground">
+                    <div className="text-[10px] text-muted-foreground">
                       CSV, JSON, XLSX, SQL, TSV, Parquet (Max 50MB)
                     </div>
                     <input
@@ -305,32 +307,32 @@ export const UploadView: React.FC<UploadViewProps> = ({
                     />
                   </div>
                 ) : (
-                  <div className="relative p-4 rounded-xl border bg-slate-50/45 flex items-center space-x-3 border-slate-100">
-                    <div className="bg-primary/10 p-2.5 rounded-lg">
-                      <FileText className="h-5 w-5 text-primary" />
+                  <div className="relative p-3 rounded-lg border bg-muted/20 flex items-center space-x-3 border-border">
+                    <div className="bg-primary/10 p-2 rounded">
+                      <FileText className="h-4 w-4 text-primary" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold truncate text-slate-800">{file.name}</p>
-                      <p className="text-xs text-muted-foreground">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
+                      <p className="text-xs font-semibold truncate text-foreground">{file.name}</p>
+                      <p className="text-[10px] text-muted-foreground">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
                     </div>
                     <button 
                       type="button"
                       onClick={handleRemoveFile}
-                      className="p-1 hover:bg-slate-200/50 rounded-full transition-colors"
+                      className="p-1 hover:bg-muted rounded-full transition-colors cursor-pointer"
                     >
-                      <X className="h-4 w-4 text-slate-500" />
+                      <X className="h-3.5 w-3.5 text-muted-foreground" />
                     </button>
                   </div>
                 )}
               </div>
 
               <div className="space-y-2">
-                <label className="text-sm font-semibold text-slate-800">
+                <label className="text-xs font-semibold text-foreground">
                   Clean File / Ground Truth (Optional, for testing)
                 </label>
                 {!cleanFile ? (
                   <div 
-                    className="border-2 border-dashed border-slate-200 rounded-xl p-6 flex flex-col items-center justify-center text-center cursor-pointer hover:bg-slate-50/50 hover:border-primary/45 transition-all duration-300 group" 
+                    className="border border-dashed border-border rounded-lg p-6 flex flex-col items-center justify-center text-center cursor-pointer bg-muted/5 hover:bg-muted/10 transition-colors group" 
                     onClick={() => document.getElementById('clean-file-upload')?.click()}
                     onDragOver={(e) => {
                       e.preventDefault();
@@ -345,13 +347,13 @@ export const UploadView: React.FC<UploadViewProps> = ({
                       }
                     }}
                   >
-                    <div className="bg-slate-50 p-2.5 rounded-full mb-2 group-hover:scale-110 transition-transform">
-                      <UploadCloud className="h-6 w-6 text-slate-400 group-hover:text-primary" />
+                    <div className="mb-2">
+                      <UploadCloud className="h-5 w-5 text-muted-foreground" />
                     </div>
-                    <div className="text-sm font-medium mb-1 text-slate-700">
+                    <div className="text-xs font-medium mb-0.5 text-foreground">
                       Click to select or drag and drop
                     </div>
-                    <div className="text-xs text-muted-foreground">
+                    <div className="text-[10px] text-muted-foreground">
                       CSV, JSON, XLSX, SQL, TSV, Parquet
                     </div>
                     <input
@@ -367,13 +369,13 @@ export const UploadView: React.FC<UploadViewProps> = ({
                     />
                   </div>
                 ) : (
-                  <div className="relative p-3 rounded-xl border bg-slate-50/45 flex items-center space-x-3 border-slate-100">
-                    <div className="bg-emerald-100/50 p-2.5 rounded-lg">
-                      <FileText className="h-5 w-5 text-emerald-600" />
+                  <div className="relative p-3 rounded-lg border bg-muted/20 flex items-center space-x-3 border-border">
+                    <div className="bg-success/15 p-2 rounded">
+                      <FileText className="h-4 w-4 text-success" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold truncate text-slate-800">{cleanFile.name}</p>
-                      <p className="text-xs text-muted-foreground">{(cleanFile.size / 1024 / 1024).toFixed(2)} MB</p>
+                      <p className="text-xs font-semibold truncate text-foreground">{cleanFile.name}</p>
+                      <p className="text-[10px] text-muted-foreground">{(cleanFile.size / 1024 / 1024).toFixed(2)} MB</p>
                     </div>
                     <button 
                       type="button"
@@ -382,25 +384,25 @@ export const UploadView: React.FC<UploadViewProps> = ({
                         const cleanInput = document.getElementById('clean-file-upload') as HTMLInputElement;
                         if (cleanInput) cleanInput.value = '';
                       }}
-                      className="p-1 hover:bg-slate-200/50 rounded-full transition-colors"
+                      className="p-1 hover:bg-muted rounded-full transition-colors cursor-pointer"
                     >
-                      <X className="h-4 w-4 text-slate-500" />
+                      <X className="h-3.5 w-3.5 text-muted-foreground" />
                     </button>
                   </div>
                 )}
               </div>
 
               {cleanFile && (
-                <div className="flex items-center gap-3 p-3 border rounded-xl bg-slate-50/45 border-slate-100 hover:bg-slate-50 transition-all duration-300">
+                <div className="flex items-center gap-3 p-3 border rounded-lg bg-muted/20 border-border hover:bg-muted/30 transition-all duration-300">
                   <input
                     type="checkbox"
                     id="benchmark-mode"
                     checked={isBenchmarkMode}
                     onChange={(e) => setIsBenchmarkMode(e.target.checked)}
-                    className="h-4.5 w-4.5 rounded border-slate-200 text-primary focus:ring-primary/25 cursor-pointer"
+                    className="h-4 w-4 rounded border-border text-primary focus:ring-primary/25 cursor-pointer"
                   />
                   <div className="flex flex-col cursor-pointer select-none" onClick={() => setIsBenchmarkMode(!isBenchmarkMode)}>
-                    <label className="text-xs font-semibold text-slate-800 cursor-pointer">
+                    <label className="text-xs font-semibold text-foreground cursor-pointer">
                       Benchmark Mode
                     </label>
                     <span className="text-[10px] text-muted-foreground">
@@ -412,11 +414,11 @@ export const UploadView: React.FC<UploadViewProps> = ({
 
               {!isBenchmarkMode && (
                 <div className="space-y-2">
-                  <label className="text-sm font-semibold text-slate-800">
+                  <label className="text-xs font-semibold text-foreground">
                     Business Cleaning Requirements (Optional)
                   </label>
                   <textarea
-                    className="flex w-full rounded-lg border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 min-h-[100px] transition-all"
+                    className="flex w-full rounded-lg border border-input bg-background px-3 py-2 text-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-h-[100px] transition-all text-foreground"
                     placeholder="e.g. Clean the email column, drop rows with missing values, extract domain names..."
                     value={requirements}
                     onChange={(e) => setRequirements(e.target.value)}
@@ -425,44 +427,44 @@ export const UploadView: React.FC<UploadViewProps> = ({
               )}
 
               {error && (
-                <div className="p-3 border border-destructive/20 bg-destructive/5 text-destructive text-sm rounded-lg flex items-start space-x-2">
-                  <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+                <div className="p-3 border border-destructive/20 bg-destructive/5 text-destructive text-xs rounded-lg flex items-start space-x-2">
+                  <AlertCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
                   <span>{error}</span>
                 </div>
               )}
 
-              <button
+              <Button
                 type="submit"
                 disabled={!file || isUploading}
-                className="inline-flex items-center justify-center rounded-lg text-sm font-semibold transition-all bg-primary text-primary-foreground hover:bg-primary/95 h-11 px-4 py-2 w-full shadow-md active:scale-[0.98] disabled:opacity-50"
+                className="w-full cursor-pointer"
               >
                 {isUploading ? (
                   <div className="flex items-center space-x-2">
-                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                    <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
                     <span>Uploading & Profiling...</span>
                   </div>
                 ) : (
                   'Upload File'
                 )}
-              </button>
+              </Button>
             </form>
-          </div>
+          </Panel>
         )}
 
         {/* Post-Upload Statistics View */}
         {profileData && (
           <div className="space-y-6 animate-fade-in">
             {/* Navigation and Actions */}
-            <div className="flex flex-col md:flex-row items-start md:items-center justify-between bg-card p-4 rounded-xl border shadow-sm gap-4">
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between bg-card p-4 rounded-lg border gap-4">
               <div className="flex items-center space-x-4">
                 {/* Active Tab triggers */}
-                <div className="inline-flex rounded-lg border bg-muted p-1">
+                <div className="inline-flex rounded-md border bg-muted p-0.5">
                   <button
                     onClick={() => setActiveTab('profile')}
-                    className={`inline-flex items-center space-x-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition-all ${
+                    className={`inline-flex items-center space-x-1.5 rounded px-3 py-1.5 text-xs font-semibold transition-all cursor-pointer ${
                       activeTab === 'profile' 
-                        ? 'bg-background text-foreground shadow-sm' 
-                        : 'text-muted-foreground hover:text-foreground'
+                        ? 'bg-background text-foreground border border-border shadow-xs' 
+                        : 'text-muted-foreground hover:text-foreground border border-transparent'
                     }`}
                   >
                     <BarChart3 className="h-3.5 w-3.5" />
@@ -470,22 +472,21 @@ export const UploadView: React.FC<UploadViewProps> = ({
                   </button>
                   <button
                     onClick={() => setActiveTab('semantic')}
-                    className={`inline-flex items-center space-x-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition-all ${
+                    className={`inline-flex items-center space-x-1.5 rounded px-3 py-1.5 text-xs font-semibold transition-all cursor-pointer ${
                       activeTab === 'semantic' 
-                        ? 'bg-background text-foreground shadow-sm' 
-                        : 'text-muted-foreground hover:text-foreground'
+                        ? 'bg-background text-foreground border border-border shadow-xs' 
+                        : 'text-muted-foreground hover:text-foreground border border-transparent'
                     }`}
                   >
-                    <span className="text-xs">🧠</span>
                     <span>Semantic Profile</span>
                   </button>
                   {previewData && (
                     <button
                       onClick={() => setActiveTab('preview')}
-                      className={`inline-flex items-center space-x-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition-all ${
+                      className={`inline-flex items-center space-x-1.5 rounded px-3 py-1.5 text-xs font-semibold transition-all cursor-pointer ${
                         activeTab === 'preview' 
-                          ? 'bg-background text-foreground shadow-sm' 
-                          : 'text-muted-foreground hover:text-foreground'
+                          ? 'bg-background text-foreground border border-border shadow-xs' 
+                          : 'text-muted-foreground hover:text-foreground border border-transparent'
                       }`}
                     >
                       <TableIcon className="h-3.5 w-3.5" />
@@ -495,30 +496,31 @@ export const UploadView: React.FC<UploadViewProps> = ({
                 </div>
                 
                 <div className="hidden sm:flex items-center space-x-2 text-xs text-muted-foreground">
-                  <span className="font-semibold text-slate-700 bg-slate-100 px-2.5 py-0.5 rounded-full">
+                  <span className="font-mono text-xs text-muted-foreground bg-muted border px-2 py-0.5 rounded">
                     {profileData.total_rows.toLocaleString()} rows
                   </span>
                   <span>/</span>
-                  <span className="font-semibold text-slate-700 bg-slate-100 px-2.5 py-0.5 rounded-full">
+                  <span className="font-mono text-xs text-muted-foreground bg-muted border px-2 py-0.5 rounded">
                     {profileData.total_columns} columns
                   </span>
                 </div>
               </div>
 
               <div className="flex items-center space-x-3 w-full md:w-auto">
-                <button
+                <Button
                   onClick={handleRemoveFile}
-                  className="inline-flex items-center justify-center rounded-lg text-xs font-semibold border hover:bg-slate-50 transition-colors h-10 px-4"
+                  variant="outline"
+                  className="cursor-pointer"
                 >
                   Upload New File
-                </button>
-                <button
+                </Button>
+                <Button
                   onClick={() => onUploadSuccess(uploadedRunId!)}
-                  className="flex-1 md:flex-initial inline-flex items-center justify-center space-x-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-md px-5 h-10 hover:scale-[1.02] active:scale-[0.98]"
+                  className="flex-1 md:flex-initial cursor-pointer"
                 >
                   <span>Start ETL Pipeline</span>
-                  <ArrowRight className="h-3.5 w-3.5" />
-                </button>
+                  <ArrowRight className="h-3.5 w-3.5 ml-1.5" />
+                </Button>
               </div>
             </div>
 

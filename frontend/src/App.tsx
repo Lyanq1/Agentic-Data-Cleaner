@@ -116,22 +116,22 @@ function App() {
   if (isMassUpload) {
     return (
       <div className="h-dvh overflow-hidden bg-background font-sans antialiased flex flex-col items-center">
-        <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 text-left flex-none">
+        <header className="sticky top-0 z-50 w-full border-b bg-background text-left flex-none">
           <div className="max-w-[1400px] flex h-14 items-center mx-auto px-4 w-full gap-4 justify-between">
             <a
               href="/"
               className="flex items-center space-x-2 rounded-md px-1 py-1 text-left hover:bg-muted/60 transition-colors font-bold text-foreground"
             >
-              <Database className="h-6 w-6 shrink-0 text-violet-600" />
+              <Database className="h-6 w-6 shrink-0" />
               <span>Agentic Data Cleaner</span>
             </a>
             <div className="flex items-center gap-3">
-              <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-violet-100 text-violet-800 border border-violet-200">
+              <span className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-md bg-muted text-muted-foreground border">
               Mass Ingestion Console
               </span>
               <a
                 href="/"
-                className="text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted px-3 py-1.5 rounded-lg border transition-colors"
+                className="text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted px-3 py-1.5 rounded-md border border-input transition-colors"
               >
                 Back to Single Ingestion
               </a>

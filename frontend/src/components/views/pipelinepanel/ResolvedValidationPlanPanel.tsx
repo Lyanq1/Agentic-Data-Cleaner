@@ -2,6 +2,8 @@ import React, { useMemo } from "react";
 import { StepFooter } from "./StepFooter";
 import { SpinnerIcon } from "./SpinnerIcon";
 import { formatDisplayValue } from "./utils";
+import { Panel } from "../../ui/Panel";
+import { Button } from "../../ui/Button";
 
 export const ResolvedValidationPlanPanel: React.FC<{
   validationResult: any;
@@ -33,25 +35,20 @@ export const ResolvedValidationPlanPanel: React.FC<{
   }, [validationResult.clarifications]);
 
   return (
-    <div className="mb-8 rounded-2xl border-2 border-emerald-400/40 bg-emerald-50 shadow-lg overflow-hidden text-left animate-fadeIn">
-      <div className="bg-emerald-600 px-6 py-4">
-        <div className="flex items-center">
-          <div>
-            <h3 className="text-lg font-bold text-white">
-              Validation Resolution Plan
-            </h3>
-            <p className="text-white/80 text-sm">
-              The AI Agent has integrated your answers and compiled the cleaning
-              rules
-            </p>
-          </div>
-        </div>
+    <Panel className="mb-8 text-left animate-fadeIn overflow-hidden">
+      <div className="border-b px-6 py-4">
+        <h3 className="text-sm font-semibold text-foreground">
+          Validation Resolution Plan
+        </h3>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          The AI Agent has integrated your answers and compiled the cleaning rules
+        </p>
       </div>
 
       <div className="p-6 space-y-6">
         {reasoning && (
-          <div className="rounded-xl border bg-muted/40 p-4 text-sm leading-relaxed text-muted-foreground">
-            <strong className="text-foreground block mb-1.5">
+          <div className="rounded-lg border bg-muted/30 p-4 text-xs leading-relaxed text-muted-foreground">
+            <strong className="text-foreground block mb-1">
               Decision Reasoning:
             </strong>
             {formatDisplayValue(reasoning)}
@@ -59,11 +56,11 @@ export const ResolvedValidationPlanPanel: React.FC<{
         )}
 
         <div className="space-y-4">
-          <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+          <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
             Generated Cleaning Instructions
           </h4>
 
-          <div className="grid grid-cols-1 gap-4">
+          <div className="grid grid-cols-1 gap-3">
             {["typecast", "null", "duplicate"].map((issue) => {
               const planText = actionPlan[issue];
               if (!planText) return null;
@@ -78,16 +75,14 @@ export const ResolvedValidationPlanPanel: React.FC<{
               return (
                 <div
                   key={issue}
-                  className="flex gap-4 p-4 rounded-xl border bg-card/60 backdrop-blur-md shadow-sm"
+                  className="p-4 rounded-lg border bg-muted/10"
                 >
-                  <div>
-                    <h5 className="text-sm font-bold text-foreground mb-1">
-                      {title}
-                    </h5>
-                    <p className="text-xs text-muted-foreground leading-relaxed whitespace-pre-line">
-                      {formatDisplayValue(planText)}
-                    </p>
-                  </div>
+                  <h5 className="text-xs font-bold text-foreground mb-1">
+                    {title}
+                  </h5>
+                  <p className="text-xs text-muted-foreground leading-relaxed whitespace-pre-line">
+                    {formatDisplayValue(planText)}
+                  </p>
                 </div>
               );
             })}
@@ -95,15 +90,15 @@ export const ResolvedValidationPlanPanel: React.FC<{
         </div>
 
         {resolvedByUser.length > 0 && (
-          <div className="rounded-xl border p-4 bg-white shadow-sm">
-            <h4 className="text-sm font-semibold text-muted-foreground mb-3">
+          <div className="rounded-lg border p-4 bg-muted/5">
+            <h4 className="text-xs font-semibold text-muted-foreground mb-2.5">
               Resolved Column Issues
             </h4>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-1.5">
               {resolvedByUser.map((item: string, i: number) => (
                 <span
                   key={i}
-                  className="inline-block px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200"
+                  className="inline-block px-2.5 py-0.5 rounded-md text-xs font-medium bg-muted text-muted-foreground border"
                 >
                   {item}
                 </span>
@@ -115,20 +110,20 @@ export const ResolvedValidationPlanPanel: React.FC<{
         {submittedAnswers.length > 0 && (
           pipelineMode === "benchmark" ? (
             <div className="mt-4">
-              <h4 className="text-xs font-semibold text-violet-700 uppercase tracking-wider mb-2.5">
-                🤖 Auto-Resolved Decisions
+              <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+                Auto-resolved decisions
               </h4>
-              <div className="rounded-xl border bg-violet-50/20 border-violet-100/50 p-4 space-y-2.5 divide-y divide-border/90">
+              <div className="rounded-lg border bg-muted/10 p-4 space-y-3 divide-y divide-border">
                 {submittedAnswers.map((item) => (
-                  <div key={item.key} className="pt-2 first:pt-0">
-                    <span className="text-[9px] font-bold uppercase tracking-wider text-violet-600 block mb-0.5">
+                  <div key={item.key} className="pt-3 first:pt-0">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block mb-0.5">
                       {formatDisplayValue(item.label)}
                     </span>
                     <p className="text-xs text-foreground font-semibold leading-relaxed mb-1">
                       {formatDisplayValue(item.question)}
                     </p>
-                    <p className="text-xs text-foreground font-medium bg-white/70 rounded px-2.5 py-1 border border-slate-100 mt-1 inline-block">
-                      Selected Strategy: <strong className="text-violet-700">{formatDisplayValue(item.answer)}</strong>
+                    <p className="text-xs text-muted-foreground bg-background rounded-md px-2 py-1 border mt-1 inline-block">
+                      Selected Strategy: <strong className="text-foreground">{formatDisplayValue(item.answer)}</strong>
                     </p>
                   </div>
                 ))}
@@ -139,16 +134,16 @@ export const ResolvedValidationPlanPanel: React.FC<{
               <summary className="cursor-pointer text-muted-foreground hover:text-foreground font-medium select-none transition-colors">
                 View your submitted answers
               </summary>
-              <div className="mt-2.5 rounded-xl border bg-muted/15 p-4 space-y-2.5 divide-y divide-border/90">
+              <div className="mt-2.5 rounded-lg border bg-muted/10 p-4 space-y-3 divide-y divide-border">
                 {submittedAnswers.map((item) => (
-                  <div key={item.key} className="pt-2 first:pt-0">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/90 block mb-0.5">
+                  <div key={item.key} className="pt-3 first:pt-0">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block mb-0.5">
                       {formatDisplayValue(item.label)}
                     </span>
                     <p className="text-xs text-foreground font-semibold leading-relaxed mb-1">
                       {formatDisplayValue(item.question)}
                     </p>
-                    <p className="text-xs text-foreground font-medium">
+                    <p className="text-xs text-muted-foreground font-medium">
                       {formatDisplayValue(item.answer)}
                     </p>
                   </div>
@@ -160,12 +155,11 @@ export const ResolvedValidationPlanPanel: React.FC<{
 
         {!hasExecutionPlan && (
           <StepFooter currentStep={2} statusText="">
-            <button
+            <Button
               type="button"
               onClick={onGeneratePlan}
               disabled={isGenerating}
-              aria-busy={isGenerating}
-              className="inline-flex h-11 items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-emerald-600 px-5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-emerald-700 hover:shadow-md disabled:cursor-wait disabled:opacity-70 cursor-pointer"
+              className="cursor-pointer"
             >
               {isGenerating ? (
                 <>
@@ -175,10 +169,10 @@ export const ResolvedValidationPlanPanel: React.FC<{
               ) : (
                 <>View Execution Plan</>
               )}
-            </button>
+            </Button>
           </StepFooter>
         )}
       </div>
-    </div>
+    </Panel>
   );
 };

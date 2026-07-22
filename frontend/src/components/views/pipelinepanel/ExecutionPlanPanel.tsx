@@ -1,43 +1,44 @@
 import React from "react";
 import { SpinnerIcon } from "./SpinnerIcon";
 import { formatDisplayValue } from "./utils";
-
+import { Panel } from "../../ui/Panel";
+import { Button } from "../../ui/Button";
 
 const WORKER_FLOW = [
   {
     taskId: "deduplication",
     label: "Dedup",
     description: "Remove exact/fuzzy duplicates before downstream statistics are computed.",
-    cardClass: "bg-violet-50 border-violet-200",
-    kindClass: "text-violet-700",
+    cardClass: "bg-muted/10 border-border",
+    kindClass: "text-muted-foreground",
   },
   {
     taskId: "type_casting",
     label: "Type Cast",
     description: "Cast columns to expected semantic types before resolving nulls.",
-    cardClass: "bg-amber-50 border-amber-200",
-    kindClass: "text-amber-700",
+    cardClass: "bg-muted/10 border-border",
+    kindClass: "text-muted-foreground",
   },
   {
     taskId: "null_handling",
     label: "Null",
     description: "Resolve missing and disguised missing values on the type-casted version.",
-    cardClass: "bg-sky-50 border-sky-200",
-    kindClass: "text-sky-700",
+    cardClass: "bg-muted/10 border-border",
+    kindClass: "text-muted-foreground",
   },
 ] as const;
 
 const VALIDATOR_META = {
-  cardClass: "bg-emerald-50 border-emerald-200",
-  kindClass: "text-emerald-700",
+  cardClass: "bg-muted/10 border-border",
+  kindClass: "text-muted-foreground",
 };
 
 const statusStyles: Record<string, string> = {
-  completed: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  running: "bg-blue-50 text-blue-700 border-blue-200",
-  pending: "bg-slate-50 text-slate-500 border-slate-200",
-  skipped: "bg-slate-100 text-slate-500 border-slate-200",
-  failed: "bg-rose-50 text-rose-700 border-rose-200",
+  completed: "bg-success/5 text-success border-success/30",
+  running: "bg-info/5 text-info border-info/30",
+  pending: "bg-muted text-muted-foreground border-border",
+  skipped: "bg-muted/50 text-muted-foreground border-border",
+  failed: "bg-destructive/5 text-destructive border-destructive/30",
 };
 
 type FlowStep = {
@@ -115,15 +116,15 @@ const buildExecutionFlow = (
   steps.push({
     id: "report_agent",
     kind: "Output",
-    kindClass: "text-slate-700",
+    kindClass: "text-muted-foreground",
     label: "Report",
     description: "Summarize final lineage version and validation outcomes.",
     statusLabel: reportReady ? "ready" : "pending",
     statusClass:
       reportReady
-        ? "bg-indigo-50 text-indigo-700 border-indigo-200"
+        ? "bg-success/5 text-success border-success/30"
         : statusStyles.pending,
-    cardClass: "bg-slate-50 border-slate-200",
+    cardClass: "bg-muted/10 border-border",
   });
 
   return steps;
@@ -153,17 +154,17 @@ export const WorkerValidatorFlow: React.FC<{
   );
 
   return (
-    <div className="rounded-xl bg-white border p-5 shadow-sm">
+    <div className="rounded-lg bg-card border p-5">
       <div className="flex items-start justify-between gap-3 mb-4">
         <div>
-          <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+          <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
             Worker / Validator Flow
           </h4>
-          <p className="text-xs text-slate-500 mt-1">
+          <p className="text-xs text-muted-foreground mt-1">
             Mirrors the backend graph: each worker writes a new data version, then Pandera validates before the next worker runs.
           </p>
         </div>
-        <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+        <span className="rounded-md border bg-muted px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
           Sequential
         </span>
       </div>
@@ -172,25 +173,25 @@ export const WorkerValidatorFlow: React.FC<{
         {flowSteps.map((step, idx) => (
           <React.Fragment key={`${step.id}-${idx}`}>
             <div
-              className={`min-w-[150px] flex-1 rounded-xl border p-3 ${step.cardClass}`}
+              className={`min-w-[150px] flex-1 rounded-lg border p-3 bg-muted/5 ${step.cardClass}`}
             >
               <div className="flex items-center justify-between gap-2">
                 <span className={`text-[10px] font-bold uppercase tracking-wider ${step.kindClass}`}>
                   {step.kind}
                 </span>
-                <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase ${step.statusClass}`}>
+                <span className={`rounded-md border px-2 py-0.5 text-[10px] font-semibold uppercase ${step.statusClass}`}>
                   {step.statusLabel}
                 </span>
               </div>
-              <div className="mt-2 text-sm font-bold text-slate-800">
+              <div className="mt-2 text-sm font-bold text-foreground">
                 {step.label}
               </div>
-              <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
+              <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
                 {step.description}
               </p>
             </div>
             {idx < flowSteps.length - 1 && (
-              <div className="hidden md:flex items-center justify-center text-slate-300 font-mono text-lg px-1">
+              <div className="hidden md:flex items-center justify-center text-muted-foreground font-mono text-lg px-1">
                 -&gt;
               </div>
             )}
@@ -287,28 +288,24 @@ export const ExecutionPlanPanel: React.FC<{
   });
 
   return (
-    <div className="mb-8 rounded-2xl border-2 border-indigo-400/40 bg-indigo-50 shadow-lg overflow-hidden text-left animate-fadeIn">
-      <div className="bg-indigo-600 px-6 py-4">
-        <div className="flex items-center gap-3">
-          <div>
-            <h3 className="text-lg font-bold text-white">Execution Plan</h3>
-            <p className="text-white/80 text-sm">
-              {readOnly ? "Completed execution details for review" : "Generated strategies"}
-            </p>
-          </div>
-        </div>
+    <Panel className="mb-8 text-left animate-fadeIn overflow-hidden">
+      <div className="border-b px-6 py-4">
+        <h3 className="text-sm font-semibold text-foreground">Execution Plan</h3>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          {readOnly ? "Completed execution details for review" : "Generated strategies"}
+        </p>
       </div>
 
       <div className="p-6 space-y-6">
         {readOnly && (
-          <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 shadow-sm">
+          <div className="rounded-md border border-success/30 bg-success/5 px-4 py-3 text-xs text-success-foreground">
             <strong className="font-semibold">Final report is ready.</strong>{" "}
             This execution plan is now read-only so you can safely review what happened without re-running the pipeline.
           </div>
         )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="rounded-xl border bg-white p-4 shadow-sm text-xs space-y-2">
+          <div className="rounded-lg border bg-muted/5 p-4 text-xs space-y-2">
             <h4 className="font-bold text-foreground uppercase tracking-wider mb-2">
               Plan Details
             </h4>
@@ -328,9 +325,8 @@ export const ExecutionPlanPanel: React.FC<{
               <span className="text-muted-foreground">Version:</span>{" "}
               {metadata.plan_version}
             </div>
-            
           </div>
-          <div className="rounded-xl border bg-white p-4 shadow-sm text-xs space-y-2">
+          <div className="rounded-lg border bg-muted/5 p-4 text-xs space-y-2">
             <h4 className="font-bold text-foreground uppercase tracking-wider mb-2">
               Global Constraints
             </h4>
@@ -347,13 +343,13 @@ export const ExecutionPlanPanel: React.FC<{
                   globalConstraints.preserve_columns.map((col: string) => (
                     <span
                       key={col}
-                      className="px-1.5 py-0.5 bg-slate-100 rounded text-[10px] font-mono text-slate-700"
+                      className="px-1.5 py-0.5 bg-muted rounded text-[10px] font-mono text-muted-foreground border"
                     >
                       {col}
                     </span>
                   ))
                 ) : (
-                  <span className="text-slate-400 italic">None</span>
+                  <span className="text-muted-foreground italic">None</span>
                 )}
               </div>
             </div>
@@ -361,8 +357,8 @@ export const ExecutionPlanPanel: React.FC<{
         </div>
 
         {assumptions.length > 0 && (
-          <div className="rounded-xl border bg-muted/20 p-4">
-            <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+          <div className="rounded-lg border bg-muted/20 p-4">
+            <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
               Plan Assumptions
             </h4>
             <ul className="list-disc pl-5 space-y-1 text-xs text-foreground">
@@ -373,11 +369,11 @@ export const ExecutionPlanPanel: React.FC<{
           </div>
         )}
 
-        <div className="rounded-xl bg-white border p-5 shadow-sm">
-          <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+        <div className="rounded-lg bg-muted/5 border p-5">
+          <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
             Plan Summary
           </h4>
-          <p className="text-xs text-foreground leading-relaxed leading-5">
+          <p className="text-xs text-foreground leading-relaxed">
             {formatDisplayValue(executionPlan.plan_summary)}
           </p>
         </div>
@@ -385,11 +381,11 @@ export const ExecutionPlanPanel: React.FC<{
         <WorkerValidatorFlow executionPlan={executionPlan} pipelineState={pipelineState} />
 
         {!readOnly && nullConflictSection?.fields?.length > 0 && (
-          <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 shadow-sm">
-            <h4 className="text-sm font-semibold text-amber-900">
+          <div className="rounded-lg border border-warning/30 bg-warning/5 p-4">
+            <h4 className="text-xs font-semibold text-warning-foreground">
               Null strategy compatibility review
             </h4>
-            <p className="mt-1 text-xs text-amber-800">
+            <p className="mt-1 text-xs text-muted-foreground">
               The planner found strategies that do not match the column semantic type. Keep the
               current strategy or choose a compatible alternative before execution.
             </p>
@@ -398,9 +394,9 @@ export const ExecutionPlanPanel: React.FC<{
                 const column = String(field.field_key).replace(/^strategy\./, "");
                 const conflicts = fillValueConflicts(field, column);
                 return (
-                  <label key={field.field_key} className="block rounded-lg border bg-white p-3">
-                    <span className="block text-xs font-semibold text-slate-800">{field.label}</span>
-                    <span className="mt-1 block text-[11px] leading-relaxed text-amber-800">
+                  <div key={field.field_key} className="block rounded-lg border bg-card p-3">
+                    <span className="block text-xs font-semibold text-foreground">{field.label}</span>
+                    <span className="mt-1 block text-[11px] leading-relaxed text-muted-foreground">
                       {field.help_text}
                     </span>
                     <select
@@ -416,7 +412,7 @@ export const ExecutionPlanPanel: React.FC<{
                           },
                         }))
                       }
-                      className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-xs"
+                      className="mt-2 w-full rounded-md border border-input bg-background px-3 py-2 text-xs text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                     >
                       {(field.options || []).map((option: string) => (
                         <option key={option} value={option}>{option}</option>
@@ -438,11 +434,11 @@ export const ExecutionPlanPanel: React.FC<{
                           }))
                         }
                         placeholder="Enter the constant value"
-                        className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-xs"
+                        className="mt-2 w-full rounded-md border border-input bg-background px-3 py-2 text-xs text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                       />
                     )}
                     {conflicts.patternMismatch && (
-                      <label className="mt-2 flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-2 text-[11px] text-amber-900">
+                      <label className="mt-2 flex items-start gap-2 rounded-md border border-warning/30 bg-warning/5 p-2 text-[11px] text-warning-foreground">
                         <input
                           type="checkbox"
                           checked={nullStrategies[column]?.allow_pattern_mismatch ?? false}
@@ -469,7 +465,7 @@ export const ExecutionPlanPanel: React.FC<{
                       </label>
                     )}
                     {conflicts.dmvMismatch && (
-                      <label className="mt-2 flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-2 text-[11px] text-amber-900">
+                      <label className="mt-2 flex items-start gap-2 rounded-md border border-warning/30 bg-warning/5 p-2 text-[11px] text-warning-foreground">
                         <input
                           type="checkbox"
                           checked={nullStrategies[column]?.allow_dmv_sentinel ?? false}
@@ -493,7 +489,7 @@ export const ExecutionPlanPanel: React.FC<{
                         </span>
                       </label>
                     )}
-                  </label>
+                  </div>
                 );
               })}
             </div>
@@ -501,7 +497,7 @@ export const ExecutionPlanPanel: React.FC<{
         )}
 
         <div className="space-y-4">
-          <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+          <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
             Work Orders ({taskList.length})
           </h4>
 
@@ -520,20 +516,12 @@ export const ExecutionPlanPanel: React.FC<{
               return (
                 <div
                   key={i}
-                  className={`rounded-xl border bg-card p-4 shadow-sm transition-all duration-200 ${isSkipped ? "opacity-60 bg-muted/10" : "hover:shadow-md"}`}
+                  className={`rounded-lg border bg-card p-4 transition-all duration-200 ${isSkipped ? "opacity-60 bg-muted/10" : ""}`}
                 >
                   <div className="flex items-start justify-between mb-3 flex-wrap gap-2">
                     <div className="flex items-center gap-2">
                       <span
-                        className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold ${
-                          isSkipped
-                            ? "bg-slate-100 text-slate-500 border-slate-200"
-                            : task.task_id === "deduplication"
-                              ? "bg-violet-500/10 text-violet-600 border-violet-200"
-                              : task.task_id === "null_handling"
-                                ? "bg-sky-500/10 text-sky-600 border-sky-200"
-                                : "bg-amber-500/10 text-amber-600 border-amber-200"
-                        }`}
+                        className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-0.5 text-xs font-semibold bg-muted text-muted-foreground border-border`}
                       >
                         {title}
                       </span>
@@ -542,20 +530,20 @@ export const ExecutionPlanPanel: React.FC<{
                       </span>
                     </div>
                     {isSkipped && (
-                      <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 bg-gray-100 text-gray-500 rounded border border-gray-200">
+                      <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 bg-muted text-muted-foreground rounded border">
                         Skipped
                       </span>
                     )}
                   </div>
 
                   {isSkipped ? (
-                    <p className="text-xs text-slate-500 italic">
+                    <p className="text-xs text-muted-foreground italic">
                       Reason: {formatDisplayValue(task.skip_reason)}
                     </p>
                   ) : (
                     <div className="space-y-3 mt-2 text-xs">
                       {task.rationale && (
-                        <p className="text-slate-600 leading-relaxed">
+                        <p className="text-muted-foreground leading-relaxed">
                           <strong className="text-foreground">
                             Rationale:
                           </strong>{" "}
@@ -568,11 +556,11 @@ export const ExecutionPlanPanel: React.FC<{
                           <span className="font-semibold text-foreground mr-2">
                             Target columns:
                           </span>
-                          <div className="inline-flex flex-wrap gap-1">
+                          <div className="inline-flex flex-wrap gap-1.5">
                             {task.columns.map((col: any) => (
                               <span
                                 key={formatDisplayValue(col)}
-                                className="px-1.5 py-0.5 bg-indigo-50 border border-indigo-100 rounded text-[10px] font-mono text-indigo-600"
+                                className="px-1.5 py-0.5 bg-muted text-muted-foreground border rounded text-[10px] font-mono"
                               >
                                 {formatDisplayValue(col)}
                               </span>
@@ -582,8 +570,8 @@ export const ExecutionPlanPanel: React.FC<{
                       )}
 
                       {task.strategy && (
-                        <div className="bg-muted/30 border rounded-lg p-3">
-                          <span className="font-bold text-foreground block mb-2 text-[11px] uppercase tracking-wider text-muted-foreground/80">
+                        <div className="bg-muted/10 border rounded-lg p-3">
+                          <span className="font-bold text-foreground block mb-2 text-[10px] uppercase tracking-wider text-muted-foreground">
                             Strategy Configuration
                           </span>
                           {task.task_id === "deduplication" && (
@@ -609,8 +597,8 @@ export const ExecutionPlanPanel: React.FC<{
                                 </div>
                               )}
                               {task.strategy?.fuzzy_matching?.enabled && (
-                                <div className="mt-2 p-2.5 rounded-lg border bg-white shadow-sm space-y-1">
-                                  <span className="font-bold text-slate-700 block text-[11px] uppercase tracking-wider">
+                                <div className="mt-2 p-2.5 rounded-lg border bg-card space-y-1">
+                                  <span className="font-bold text-foreground block text-[11px] uppercase tracking-wider">
                                     Fuzzy Matching Strategy
                                   </span>
                                   <div>
@@ -638,13 +626,13 @@ export const ExecutionPlanPanel: React.FC<{
                             </div>
                           )}
                           {task.task_id === "null_handling" &&
-                            task.strategy.per_column && (
+                             task.strategy.per_column && (
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                 {Object.entries(task.strategy.per_column).map(
                                   ([col, cfg]: [string, any]) => (
                                     <div
                                       key={col}
-                                      className="bg-white border rounded p-2 text-[11px]"
+                                      className="bg-card border rounded p-2 text-[11px]"
                                     >
                                       <span className="font-mono font-bold text-foreground block">
                                         {col}
@@ -667,7 +655,7 @@ export const ExecutionPlanPanel: React.FC<{
                                   ([col, cfg]: [string, any]) => (
                                     <div
                                       key={col}
-                                      className="bg-white border rounded p-2 text-[11px]"
+                                      className="bg-card border rounded p-2 text-[11px]"
                                     >
                                       <span className="font-mono font-bold text-foreground block">
                                         {col}
@@ -702,7 +690,7 @@ export const ExecutionPlanPanel: React.FC<{
                                 return (
                                   <span
                                     key={ri}
-                                    className="px-2 py-0.5 bg-emerald-50 border border-emerald-100 rounded-md text-[10px] font-mono text-emerald-700"
+                                    className="px-2 py-0.5 bg-muted border rounded-md text-[10px] font-mono text-muted-foreground"
                                   >
                                     {label}
                                   </span>
@@ -720,14 +708,14 @@ export const ExecutionPlanPanel: React.FC<{
           </div>
         </div>
 
-        <div className="pt-4 border-t border-slate-100 flex justify-end">
+        <div className="pt-4 border-t border-border flex justify-end">
           {readOnly ? (
-            <div className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-3 text-sm font-semibold text-emerald-700">
-              <span className="inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+            <div className="inline-flex items-center gap-2 rounded-lg border border-success/30 bg-success/5 px-5 py-3 text-sm font-semibold text-success">
+              <span className="inline-flex h-2 w-2 rounded-full bg-success" />
               Report ready - review only
             </div>
           ) : (
-            <button
+            <Button
               type="button"
               onClick={() =>
                 onApprove(
@@ -735,8 +723,7 @@ export const ExecutionPlanPanel: React.FC<{
                 )
               }
               disabled={isApproving || hasMissingFillValue || hasUnacknowledgedConflict}
-              aria-busy={isApproving}
-              className="inline-flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-semibold transition-all shadow-md hover:shadow-lg disabled:cursor-wait disabled:opacity-70 cursor-pointer"
+              className="cursor-pointer"
             >
               {isApproving ? (
                 <>
@@ -748,10 +735,11 @@ export const ExecutionPlanPanel: React.FC<{
                   Approve & Execute Cleaning
                 </>
               )}
-            </button>
+            </Button>
           )}
         </div>
       </div>
-    </div>
+    </Panel>
   );
 };
+

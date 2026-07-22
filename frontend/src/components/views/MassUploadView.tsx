@@ -15,6 +15,8 @@ import {
   Loader2
 } from "lucide-react";
 import { formatDisplayValue, getOptionConsequence, tryFormatToISO } from "./pipelinepanel/utils";
+import { StatusBadge } from "../ui/StatusBadge";
+import { Button } from "../ui/Button";
 
 interface QueueItem {
   id: string;
@@ -628,33 +630,33 @@ export const MassUploadView: React.FC = () => {
   return (
     <div className="flex-1 w-full flex flex-col min-h-0 text-left">
       {/* Top Banner Dashboard summary */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-        <div className="rounded-xl border bg-card p-4 shadow-sm relative overflow-hidden">
-          <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Queue Progress</div>
-          <div className="text-2xl font-bold mt-2 text-foreground">
-            {executiveStats.completedCount} / {executiveStats.totalCount} Done
+      <div className="bg-card border border-border rounded-lg p-3 mb-6 grid grid-cols-2 md:grid-cols-4 gap-4 divide-y md:divide-y-0 md:divide-x divide-border">
+        <div className="flex flex-col justify-center px-4 py-1">
+          <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Queue Progress</div>
+          <div className="text-lg font-bold text-foreground mt-1 flex items-center justify-between">
+            <span>{executiveStats.completedCount} / {executiveStats.totalCount} Done</span>
+            {executiveStats.failedCount > 0 && (
+              <span className="bg-destructive/10 text-destructive text-[9px] font-bold px-2 py-0.5 rounded border border-destructive/20 select-none">
+                {executiveStats.failedCount} Failed
+              </span>
+            )}
           </div>
-          {executiveStats.failedCount > 0 && (
-            <span className="absolute top-4 right-4 bg-red-100 text-red-700 text-[10px] font-bold px-2 py-0.5 rounded-full">
-              {executiveStats.failedCount} Failed
-            </span>
-          )}
         </div>
-        <div className="rounded-xl border bg-card p-4 shadow-sm">
-          <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Total Rows Cleaned</div>
-          <div className="text-2xl font-bold mt-2 text-foreground">
+        <div className="flex flex-col justify-center px-4 py-1">
+          <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Total Rows Cleaned</div>
+          <div className="text-lg font-bold text-foreground mt-1">
             {executiveStats.totalRows.toLocaleString()}
           </div>
         </div>
-        <div className="rounded-xl border bg-card p-4 shadow-sm">
-          <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Total Tokens Used</div>
-          <div className="text-2xl font-bold mt-2 text-foreground">
+        <div className="flex flex-col justify-center px-4 py-1">
+          <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Total Tokens Used</div>
+          <div className="text-lg font-bold text-foreground mt-1">
             {executiveStats.totalTokens.toLocaleString()}
           </div>
         </div>
-        <div className="rounded-xl border bg-card p-4 shadow-sm">
-          <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Average F1 Accuracy</div>
-          <div className="text-2xl font-bold mt-2 text-primary">
+        <div className="flex flex-col justify-center px-4 py-1">
+          <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Average F1 Accuracy</div>
+          <div className="text-lg font-bold text-primary mt-1">
             {executiveStats.avgF1 !== null ? (executiveStats.avgF1 / 100).toFixed(2) : "N/A"}
           </div>
         </div>
@@ -663,33 +665,33 @@ export const MassUploadView: React.FC = () => {
       {/* Main Console Layout */}
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-6 min-h-0 overflow-y-auto lg:overflow-hidden pr-1 pb-4">
         {/* Left 2 Columns: Ingestion Queue list */}
-        <div className="lg:col-span-2 flex flex-col min-h-0 bg-card border rounded-xl shadow-sm overflow-hidden">
+        <div className="lg:col-span-2 flex flex-col min-h-0 bg-card border rounded-lg overflow-hidden">
           {/* Action and Control Bar */}
-          <div className="flex flex-wrap items-center justify-between gap-4 p-4 border-b bg-muted/10">
+          <div className="flex flex-wrap items-center justify-between gap-4 p-4 border-b border-border bg-muted/10">
             <div className="flex items-center gap-3">
               <h3 className="font-bold text-foreground flex items-center gap-2">
-                <Layers className="w-5 h-5 text-violet-500" />
+                <Layers className="w-4.5 h-4.5 text-muted-foreground" />
                 Mass Ingestion Queue
               </h3>
               <div className="h-4 w-px bg-border"></div>
-              <label className="flex items-center gap-2 text-xs font-medium cursor-pointer select-none">
+              <label className="flex items-center gap-2 text-xs font-medium cursor-pointer select-none text-foreground">
                 <input
                   type="checkbox"
                   checked={autoApprove}
                   onChange={(e) => setAutoApprove(e.target.checked)}
                   disabled={isProcessing}
-                  className="rounded text-primary focus:ring-primary h-4 w-4"
+                  className="rounded border-border text-primary focus:ring-primary h-4 w-4 cursor-pointer"
                 />
-                Auto-Approve Plans & Reviews
+                Auto-Approve Plans
               </label>
               <div className="h-4 w-px bg-border"></div>
-              <label className="flex items-center gap-1.5 text-xs font-medium cursor-pointer select-none">
+              <label className="flex items-center gap-1.5 text-xs font-medium cursor-pointer select-none text-foreground">
                 <span>Concurrency:</span>
                 <select
                   value={maxConcurrency}
                   onChange={(e) => setMaxConcurrency(Number(e.target.value))}
                   disabled={isProcessing}
-                  className="rounded border border-input bg-background px-1.5 py-0.5 text-xs focus:ring-1 focus:ring-primary focus:outline-none"
+                  className="rounded border border-border bg-background px-1.5 py-0.5 text-xs focus:ring-1 focus:ring-primary focus:outline-none cursor-pointer"
                 >
                   <option value={1}>1 (Sequential)</option>
                   <option value={2}>2 (Standard)</option>
@@ -700,40 +702,44 @@ export const MassUploadView: React.FC = () => {
             </div>
             
             <div className="flex items-center gap-2">
-              <button
-                type="button"
+              <Button
                 onClick={addRow}
                 disabled={isProcessing}
-                className="inline-flex items-center justify-center rounded-lg border bg-background px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-muted transition-colors disabled:opacity-50"
+                variant="outline"
+                size="sm"
+                className="cursor-pointer text-xs"
               >
                 <Plus className="w-3.5 h-3.5 mr-1" /> Add File Row
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
                 onClick={clearQueue}
                 disabled={isProcessing || queue.length === 0}
-                className="inline-flex items-center justify-center rounded-lg border border-destructive/20 bg-background text-destructive hover:bg-destructive/5 px-3 py-1.5 text-xs font-semibold transition-colors disabled:opacity-50"
+                variant="outline"
+                size="sm"
+                className="text-destructive hover:bg-destructive/5 hover:text-destructive border-border cursor-pointer text-xs"
               >
                 <Trash2 className="w-3.5 h-3.5 mr-1" /> Clear Queue
-              </button>
+              </Button>
               <div className="h-6 w-px bg-border mx-1"></div>
               {!isProcessing ? (
-                <button
-                  type="button"
+                <Button
                   onClick={startProcessing}
                   disabled={queue.length === 0}
-                  className="inline-flex items-center justify-center rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-1.5 text-xs font-semibold shadow-sm hover:shadow transition-colors disabled:opacity-50"
+                  variant="default"
+                  size="sm"
+                  className="cursor-pointer text-xs"
                 >
                   <Play className="w-3.5 h-3.5 mr-1 fill-current" /> Start Queue
-                </button>
+                </Button>
               ) : (
-                <button
-                  type="button"
+                <Button
                   onClick={stopProcessing}
-                  className="inline-flex items-center justify-center rounded-lg bg-red-600 hover:bg-red-700 text-white px-4 py-1.5 text-xs font-semibold shadow-sm hover:shadow transition-colors"
+                  variant="destructive"
+                  size="sm"
+                  className="cursor-pointer text-xs"
                 >
                   <Square className="w-3.5 h-3.5 mr-1 fill-current" /> Stop Ingestion
-                </button>
+                </Button>
               )}
             </div>
           </div>
@@ -761,48 +767,31 @@ export const MassUploadView: React.FC = () => {
                   <tbody>
                     {queue.map((item, idx) => {
                       let statusBadge = (
-                        <span className="inline-flex items-center rounded-full bg-slate-50 border border-slate-200 text-slate-600 px-2 py-0.5 font-medium font-sans">
-                          Draft
-                        </span>
+                        <StatusBadge status="queued" />
                       );
                       if (item.status === "uploading") {
                         statusBadge = (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 border border-blue-200 text-blue-700 px-2 py-0.5 font-medium animate-pulse font-sans">
-                            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-ping" />
-                            Uploading
-                          </span>
+                          <StatusBadge status="running" />
                         );
                       } else if (item.status === "running") {
                         statusBadge = (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700 px-2 py-0.5 font-medium animate-pulse font-sans">
-                            <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-ping" />
-                            Running
-                          </span>
+                          <StatusBadge status="running" />
                         );
                       } else if (item.status === "needs_clarification") {
                         statusBadge = (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 border border-amber-300 text-amber-800 px-2 py-0.5 font-bold animate-pulse font-sans">
-                            Action Required
-                          </span>
+                          <StatusBadge status="awaiting_hitl" />
                         );
                       } else if (item.status === "resuming") {
                         statusBadge = (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-purple-50 border border-purple-200 text-purple-700 px-2 py-0.5 font-medium animate-pulse font-sans">
-                            Resuming
-                          </span>
+                          <StatusBadge status="running" />
                         );
                       } else if (item.status === "completed") {
                         statusBadge = (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 px-2 py-0.5 font-medium font-sans">
-                            <Check className="w-3.5 h-3.5 text-emerald-600" />
-                            Done
-                          </span>
+                          <StatusBadge status="completed" />
                         );
                       } else if (item.status === "failed") {
                         statusBadge = (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 border border-rose-200 text-rose-700 px-2 py-0.5 font-medium font-sans" title={item.error || ""}>
-                            Failed
-                          </span>
+                          <StatusBadge status="failed" title={item.error || ""} />
                         );
                       }
 
@@ -813,12 +802,12 @@ export const MassUploadView: React.FC = () => {
                         <tr
                           key={item.id}
                           onClick={() => setSelectedInspectId(item.id)}
-                          className={`group hover:bg-muted/10 transition-colors cursor-pointer ${
+                          className={`group hover:bg-muted/10 transition-colors cursor-pointer relative ${
                             isSelected 
-                              ? "bg-indigo-50/40 border-l-2 border-l-primary" 
+                              ? "bg-muted ring-1 ring-inset ring-primary z-10" 
                               : item.status === "needs_clarification"
-                              ? "bg-amber-50/50 border-l-2 border-l-amber-500"
-                              : isCurrentlyActive ? "bg-indigo-50/10 border-l-2 border-l-primary/40" : ""
+                              ? "bg-warning/5"
+                              : isCurrentlyActive ? "bg-muted/30" : ""
                           }`}
                         >
                           {/* Row Index */}
@@ -946,14 +935,14 @@ export const MassUploadView: React.FC = () => {
         </div>
 
         {/* Right 1 Column: Active Item Inspector & HITL Panel */}
-        <div className="flex flex-col min-h-0 bg-card border rounded-xl shadow-sm overflow-hidden">
-          <div className="px-4 py-3 border-b bg-muted/10 flex items-center justify-between">
-            <h3 className="font-bold text-foreground flex items-center gap-1.5">
-              <Settings2 className="w-4.5 h-4.5 text-indigo-500" />
+        <div className="flex flex-col min-h-0 bg-card border rounded-lg overflow-hidden">
+          <div className="px-4 py-3 border-b border-border bg-muted/10 flex items-center justify-between">
+            <h3 className="font-bold text-foreground flex items-center gap-1.5 text-xs uppercase tracking-wider">
+              <Settings2 className="w-4 h-4 text-muted-foreground" />
               Active Job Inspector
             </h3>
             {isProcessing && (
-              <span className="flex items-center gap-1.5 text-xs text-indigo-600 font-semibold font-sans">
+              <span className="flex items-center gap-1.5 text-xs text-primary font-semibold font-sans">
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
                 Processing...
               </span>
@@ -985,18 +974,18 @@ export const MassUploadView: React.FC = () => {
 
                 {/* HITL clarification form */}
                 {isAwaitingHitl ? (
-                  <div className="border border-amber-300 bg-amber-50/30 rounded-xl p-4 space-y-5 text-left animate-fadeIn">
-                    <div className="flex items-start gap-2 border-b border-amber-200/80 pb-3">
-                      <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                  <div className="border border-warning/30 bg-warning/5 rounded-lg p-4 space-y-5 text-left animate-fadeIn">
+                    <div className="flex items-start gap-2 border-b border-warning/10 pb-3">
+                      <AlertCircle className="w-5 h-5 text-warning shrink-0 mt-0.5" />
                       <div>
-                        <h4 className="text-sm font-bold text-amber-900">
+                        <h4 className="text-sm font-bold text-foreground">
                           {activeItem.checkpoint.checkpoint_type === "input_validation_clarification"
                             ? "Clarification Request"
                             : activeItem.checkpoint.checkpoint_type === "plan_approval"
                             ? "Execution Plan Approval"
                             : "Validation Review"}
                         </h4>
-                        <p className="text-xs text-amber-800/80 mt-0.5">
+                        <p className="text-xs text-muted-foreground mt-0.5">
                           {activeItem.checkpoint.checkpoint_type === "input_validation_clarification"
                             ? "The pipeline requires clarification on data issues. Please answer the questions below to resume."
                             : activeItem.checkpoint.checkpoint_type === "plan_approval"
@@ -1194,17 +1183,17 @@ export const MassUploadView: React.FC = () => {
                                   return (
                                     <div
                                       key={task.task_id || tIdx}
-                                      className={`p-3 rounded-lg border text-xs leading-relaxed transition-all shadow-xs ${
+                                      className={`p-3 rounded border text-xs leading-relaxed transition-all shadow-xs ${
                                         isSkipped
                                           ? "bg-slate-50/50 border-slate-200 text-slate-500"
-                                          : "bg-card border-emerald-100 hover:border-emerald-200"
+                                          : "bg-card border-border hover:border-primary/20"
                                       }`}
                                     >
                                       <div className="flex items-center justify-between gap-2 border-b pb-1.5 mb-1.5 border-dashed border-border">
                                         <div className="flex items-center gap-1.5 font-bold">
                                           <span
                                             className={`w-2 h-2 rounded-full ${
-                                              isSkipped ? "bg-slate-300" : "bg-emerald-500 animate-pulse"
+                                              isSkipped ? "bg-slate-300" : "bg-success animate-pulse"
                                             }`}
                                           />
                                           <span className={isSkipped ? "text-slate-500 line-through" : "text-foreground"}>
@@ -1216,7 +1205,7 @@ export const MassUploadView: React.FC = () => {
                                           className={`px-1.5 py-0.5 rounded text-[9px] font-bold border uppercase tracking-wider ${
                                             isSkipped
                                               ? "bg-slate-100 border-slate-200 text-slate-500"
-                                              : "bg-emerald-50 border-emerald-200 text-emerald-700"
+                                              : "bg-success/5 border-success/20 text-success"
                                           }`}
                                         >
                                           {isSkipped ? "Skipped" : "Active"}
@@ -1232,7 +1221,7 @@ export const MassUploadView: React.FC = () => {
                                               className={`px-1 py-0.2 rounded font-mono text-[9px] border ${
                                                 isSkipped
                                                   ? "bg-slate-50 border-slate-100 text-slate-400"
-                                                  : "bg-slate-100 border-slate-200 text-foreground"
+                                                  : "bg-muted border border-border text-muted-foreground"
                                               }`}
                                             >
                                               {col}
@@ -1268,20 +1257,20 @@ export const MassUploadView: React.FC = () => {
                     </div>
 
                     {/* Submit Actions */}
-                    <button
+                    <Button
                       type="button"
                       onClick={handleResolveClarification}
                       disabled={submittingAnswers}
-                      className="w-full inline-flex items-center justify-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-4 rounded-lg text-xs transition-colors shadow-sm disabled:opacity-50"
+                      className="w-full cursor-pointer"
                     >
                       {submittingAnswers ? (
                         <>
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" />
                           Submitting...
                         </>
                       ) : (
                         <>
-                          <Check className="w-4 h-4" />
+                          <Check className="w-4 h-4 mr-1.5" />
                           {activeItem.checkpoint.checkpoint_type === "input_validation_clarification"
                             ? "Submit Decisions & Resume"
                             : activeItem.checkpoint.checkpoint_type === "plan_approval"
@@ -1289,7 +1278,7 @@ export const MassUploadView: React.FC = () => {
                             : "Accept Results & Finalize"}
                         </>
                       )}
-                    </button>
+                    </Button>
                   </div>
                 ) : (
                   <div className="h-40 flex flex-col items-center justify-center text-center text-muted-foreground bg-muted/10 border rounded-lg border-dashed">
@@ -1308,17 +1297,17 @@ export const MassUploadView: React.FC = () => {
 
       {/* Bottom Consolidated Executive Report Section */}
       {queue.some((item) => item.status === "completed" && item.report) && (
-        <div className="mt-6 flex flex-col bg-card border rounded-xl shadow-sm overflow-hidden text-left">
-          <div className="px-4 py-3 border-b bg-muted/10">
-            <h3 className="font-bold text-foreground flex items-center gap-1.5">
-              <Layers className="w-5 h-5 text-indigo-500" />
+        <div className="mt-6 flex flex-col bg-card border border-border rounded-lg overflow-hidden text-left">
+          <div className="px-4 py-3 border-b border-border bg-muted/10">
+            <h3 className="font-bold text-foreground flex items-center gap-1.5 text-xs uppercase tracking-wider">
+              <Layers className="w-4.5 h-4.5 text-muted-foreground" />
               Consolidated Output Report
             </h3>
           </div>
           <div className="p-4 overflow-auto custom-scrollbar max-h-64">
             <table className="w-full text-xs">
               <thead>
-                <tr className="border-b text-muted-foreground">
+                <tr className="border-b border-border text-muted-foreground">
                   <th className="py-2 font-semibold">Filename</th>
                   <th className="py-2 font-semibold text-center">Input Rows</th>
                   <th className="py-2 font-semibold text-center">Tracked Cols</th>
@@ -1330,7 +1319,7 @@ export const MassUploadView: React.FC = () => {
                   <th className="py-2 font-semibold text-right">Download Output</th>
                 </tr>
               </thead>
-              <tbody className="divide-y">
+              <tbody className="divide-y divide-border">
                 {queue
                   .filter((item) => item.status === "completed" && item.report)
                   .map((item) => {
@@ -1361,7 +1350,7 @@ export const MassUploadView: React.FC = () => {
                         <td className="py-2.5 text-center font-mono">
                           {typeof f1.cell_accuracy === "number" ? f1.cell_accuracy.toFixed(2) : "—"}
                         </td>
-                        <td className="py-2.5 text-slate-600 max-w-[200px] truncate" title={
+                        <td className="py-2.5 text-muted-foreground max-w-[200px] truncate" title={
                           rep.transformations?.join(", ") || 
                           (rowsRemoved > 0 ? `Deduplication: removed ${rowsRemoved} duplicate rows` : "Normalization applied")
                         }>
@@ -1373,19 +1362,19 @@ export const MassUploadView: React.FC = () => {
                             <div className="inline-flex gap-2">
                               <button
                                 onClick={() => handleDownload(item.runId!, "csv")}
-                                className="text-emerald-700 font-semibold hover:underline"
+                                className="text-primary font-semibold hover:underline cursor-pointer"
                               >
                                 CSV
                               </button>
                               <button
                                 onClick={() => handleDownload(item.runId!, "xlsx")}
-                                className="text-sky-700 font-semibold hover:underline"
+                                className="text-primary font-semibold hover:underline cursor-pointer"
                               >
                                 Excel
                               </button>
                               <button
                                 onClick={() => handleDownload(item.runId!, "parquet")}
-                                className="text-violet-700 font-semibold hover:underline"
+                                className="text-primary font-semibold hover:underline cursor-pointer"
                               >
                                 Parquet
                               </button>

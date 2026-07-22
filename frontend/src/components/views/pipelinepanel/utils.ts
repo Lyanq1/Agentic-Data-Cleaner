@@ -7,37 +7,37 @@ export const ROLE_META: Record<
 > = {
   dedup_agent: {
     label: "Deduplication",
-    color: "bg-violet-500/10 text-violet-600 border-violet-200",
+    color: "bg-muted text-muted-foreground border-border border",
     icon: React.createElement(TextIcon, null, "[]"),
   },
   null_agent: {
     label: "Null Handling",
-    color: "bg-sky-500/10 text-sky-600 border-sky-200",
+    color: "bg-muted text-muted-foreground border-border border",
     icon: React.createElement(TextIcon, null, "*"),
   },
   typecast_agent: {
     label: "Type Casting",
-    color: "bg-amber-500/10 text-amber-600 border-amber-200",
+    color: "bg-muted text-muted-foreground border-border border",
     icon: React.createElement(TextIcon, null, "T"),
   },
   duplicate_handler: {
     label: "Deduplication",
-    color: "bg-violet-500/10 text-violet-600 border-violet-200",
+    color: "bg-muted text-muted-foreground border-border border",
     icon: React.createElement(TextIcon, null, "[]"),
   },
   null_type_handler: {
     label: "Null & Type Fix",
-    color: "bg-sky-500/10 text-sky-600 border-sky-200",
+    color: "bg-muted text-muted-foreground border-border border",
     icon: React.createElement(TextIcon, null, "*"),
   },
   validator: {
     label: "Validation",
-    color: "bg-emerald-500/10 text-emerald-600 border-emerald-200",
+    color: "bg-muted text-muted-foreground border-border border",
     icon: React.createElement(TextIcon, null, "#"),
   },
   planner: {
     label: "Planner",
-    color: "bg-amber-500/10 text-amber-600 border-amber-200",
+    color: "bg-muted text-muted-foreground border-border border",
     icon: React.createElement(TextIcon, null, "|||"),
   },
 };
@@ -46,7 +46,7 @@ export function roleMeta(role: string) {
   return (
     ROLE_META[role] ?? {
       label: role,
-      color: "bg-gray-100 text-gray-600 border-gray-200",
+      color: "bg-muted text-muted-foreground border-border border",
       icon: React.createElement(TextIcon, null, "*"),
     }
   );

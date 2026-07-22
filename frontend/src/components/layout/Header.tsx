@@ -39,7 +39,7 @@ export const Header: React.FC<HeaderProps> = ({
     ].join(' ');
 
   return (
-    <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 text-left">
+    <header className="sticky top-0 z-50 w-full border-b bg-background text-left">
       <div className="max-w-[1400px] flex h-14 items-center mx-auto px-4 w-full gap-4 flex-wrap">
         <button
           type="button"
@@ -113,7 +113,7 @@ export const Header: React.FC<HeaderProps> = ({
         )}
         <a
           href="/massupload/"
-          className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-violet-200 bg-violet-50/50 text-violet-700 hover:bg-violet-100 hover:text-violet-800 transition-colors shrink-0 ml-2 font-sans"
+          className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-md border border-input bg-transparent hover:bg-accent hover:text-accent-foreground transition-colors shrink-0 ml-2 font-sans"
         >
         Mass Ingestion
         </a>

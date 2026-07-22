@@ -75,19 +75,19 @@ export const SemanticProfilePanel: React.FC<SemanticProfilePanelProps> = ({ prof
   return (
     <div className="space-y-6">
       {/* Overview Card */}
-      <div className="bg-gradient-to-br from-indigo-50/50 via-white to-sky-50/30 rounded-xl border border-slate-200 p-6 shadow-sm text-left space-y-4">
-        <div className="flex items-center space-x-3 text-indigo-700">
+      <div className="bg-card rounded-lg border border-border p-6 text-left space-y-4">
+        <div className="flex items-center space-x-3 text-foreground">
           <BookOpen className="h-5 w-5" />
           <h2 className="text-lg font-bold tracking-tight">Dataset Semantic Context</h2>
         </div>
         
         {/* Table Summary */}
         {semanticProfile.table_summary && (
-          <div className="space-y-1 bg-white/60 backdrop-blur-sm rounded-lg p-4 border border-slate-100/50">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+          <div className="space-y-1 bg-muted/10 rounded-lg p-4 border border-border">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
               Business Purpose & Summary
             </h3>
-            <p className="text-sm text-slate-700 leading-relaxed font-sans">
+            <p className="text-sm text-foreground leading-relaxed font-sans">
               {formatDisplayValue(semanticProfile.table_summary)}
             </p>
           </div>
@@ -96,26 +96,26 @@ export const SemanticProfilePanel: React.FC<SemanticProfilePanelProps> = ({ prof
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
           {/* Logical Groups Summary */}
           <div className="space-y-2">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-              <Layers className="h-3.5 w-3.5 text-slate-400" />
+            <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+              <Layers className="h-3.5 w-3.5 text-muted-foreground" />
               <span>Logical Groups ({Object.keys(logicalGroups).length})</span>
             </h3>
-            <div className="border border-slate-100 rounded-lg overflow-hidden bg-white/70">
+            <div className="border border-border rounded-lg overflow-hidden bg-card">
               <table className="w-full text-xs border-collapse">
                 <thead>
-                  <tr className="bg-slate-50/60 border-b border-slate-100">
-                    <th className="text-left p-2 font-bold text-slate-500 w-[150px]">Group</th>
-                    <th className="text-left p-2 font-bold text-slate-500">Columns</th>
+                  <tr className="bg-muted/50 border-b border-border">
+                    <th className="text-left p-2 font-bold text-muted-foreground w-[150px]">Group</th>
+                    <th className="text-left p-2 font-bold text-muted-foreground">Columns</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
+                <tbody className="divide-y divide-border">
                   {Object.entries(logicalGroups).map(([groupName, cols], i) => (
-                    <tr key={i} className="hover:bg-slate-50/30">
-                      <td className="p-2 align-top font-semibold text-slate-700">{formatDisplayValue(groupName)}</td>
+                    <tr key={i} className="hover:bg-muted/30">
+                      <td className="p-2 align-top font-semibold text-foreground">{formatDisplayValue(groupName)}</td>
                       <td className="p-2 align-top">
                         <div className="flex flex-wrap gap-1">
                           {cols.map((colName, idx) => (
-                            <span key={idx} className="font-mono text-[9px] bg-slate-100 text-slate-600 px-1 py-0.5 rounded border border-slate-200/40">
+                            <span key={idx} className="font-mono text-[9px] bg-muted text-muted-foreground px-1 py-0.5 rounded border border-border">
                               {colName}
                             </span>
                           ))}
@@ -131,20 +131,20 @@ export const SemanticProfilePanel: React.FC<SemanticProfilePanelProps> = ({ prof
           {/* Thinking Process / Chain of Thought */}
           {semanticProfile.thinking && (
             <div className="space-y-2 flex flex-col">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                <Brain className="h-3.5 w-3.5 text-slate-400" />
+              <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                <Brain className="h-3.5 w-3.5 text-muted-foreground" />
                 <span>AI Agent Thinking</span>
               </h3>
-              <div className="flex-1 border border-slate-100 rounded-lg p-3 bg-slate-50/50 flex flex-col justify-between">
-                <p className="text-xs text-slate-600 italic">
+              <div className="flex-1 border border-border rounded-lg p-3 bg-muted/10 flex flex-col justify-between">
+                <p className="text-xs text-muted-foreground italic">
                   Review the semantic analysis reasoning process and rules formulated by the Profiler Agent.
                 </p>
                 <button
                   type="button"
                   onClick={() => setShowThinking(!showThinking)}
-                  className="mt-3 inline-flex items-center justify-center space-x-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 h-9 px-3 w-full transition-colors cursor-pointer"
+                  className="mt-3 inline-flex items-center justify-center space-x-1.5 rounded border border-border bg-card hover:bg-muted text-xs font-semibold text-foreground h-9 px-3 w-full transition-colors cursor-pointer"
                 >
-                  <Brain className="h-3.5 w-3.5 text-indigo-500" />
+                  <Brain className="h-3.5 w-3.5 text-primary" />
                   <span>{showThinking ? 'Hide Agent Logics' : 'View Semantic Logics'}</span>
                 </button>
               </div>
@@ -154,9 +154,9 @@ export const SemanticProfilePanel: React.FC<SemanticProfilePanelProps> = ({ prof
 
         {/* Expanded Chain of Thought Log */}
         {showThinking && semanticProfile.thinking && (
-          <div className="bg-slate-900 text-slate-100 rounded-xl p-5 font-mono text-xs leading-relaxed max-h-72 overflow-y-auto border border-slate-800 shadow-inner mt-4 animate-fade-in custom-scrollbar">
+          <div className="bg-slate-950 text-slate-300 rounded-lg p-4 font-mono text-xs leading-relaxed max-h-72 overflow-y-auto border border-slate-800 shadow-inner mt-4 animate-fade-in custom-scrollbar">
             <div className="flex items-center justify-between border-b border-slate-800 pb-2 mb-3">
-              <span className="text-indigo-400 font-bold uppercase tracking-wider text-[10px]">Chain of Thought Log</span>
+              <span className="text-primary font-bold uppercase tracking-wider text-[10px]">Chain of Thought Log</span>
               <span className="text-[10px] text-slate-500 font-bold">ProfilerAgent v1.0</span>
             </div>
             {semanticProfile.thinking.split('\n').map((line: string, i: number) => (
@@ -171,14 +171,14 @@ export const SemanticProfilePanel: React.FC<SemanticProfilePanelProps> = ({ prof
       {/* Main Metadata List Section */}
       <div className="space-y-4">
         {/* Toolbar */}
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-card p-3 rounded-lg border border-border">
           {/* Search bar */}
           <div className="relative w-full sm:w-72">
-            <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+            <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
             <input
               type="text"
               placeholder="Search column metadata..."
-              className="w-full pl-9 pr-4 py-2 text-xs border border-slate-200 rounded-lg placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+              className="w-full pl-9 pr-4 py-2 text-xs border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary bg-background text-foreground transition-all"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
@@ -186,17 +186,17 @@ export const SemanticProfilePanel: React.FC<SemanticProfilePanelProps> = ({ prof
 
           {/* Group filters */}
           <div className="flex items-center space-x-2 w-full sm:w-auto overflow-x-auto select-none py-1 sm:py-0">
-            <Filter className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-            <span className="text-xs font-semibold text-slate-500 shrink-0 mr-1">Group:</span>
+            <Filter className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+            <span className="text-xs font-semibold text-muted-foreground shrink-0 mr-1">Group:</span>
             <div className="flex space-x-1.5">
               {groupNames.map((group) => (
                 <button
                   key={group}
                   onClick={() => setSelectedGroup(group)}
-                  className={`text-[10px] font-bold px-2.5 py-1 rounded-md border transition-all shrink-0 ${
+                  className={`text-[10px] font-bold px-2.5 py-1 rounded border transition-all shrink-0 cursor-pointer ${
                     selectedGroup === group
-                      ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
-                      : 'bg-slate-50 text-slate-600 border-slate-200/60 hover:bg-slate-100'
+                      ? 'bg-primary text-primary-foreground border-primary shadow-xs'
+                      : 'bg-muted text-muted-foreground border-border hover:bg-muted/80'
                   }`}
                 >
                   {formatDisplayValue(group)}
@@ -209,9 +209,9 @@ export const SemanticProfilePanel: React.FC<SemanticProfilePanelProps> = ({ prof
         {/* Column Metadata Grid */}
         <div className="grid grid-cols-1 gap-4">
           {filteredColumns.length === 0 ? (
-            <div className="bg-card rounded-xl border border-slate-200 p-8 text-center text-muted-foreground shadow-sm">
-              <Search className="h-6 w-6 mx-auto mb-2 text-slate-400" />
-              <p className="text-sm font-semibold">No columns match your filter criteria.</p>
+            <div className="bg-card rounded-lg border border-border p-8 text-center text-muted-foreground">
+              <Search className="h-5 w-5 mx-auto mb-2 text-muted-foreground/50" />
+              <p className="text-xs font-semibold">No columns match your filter criteria.</p>
             </div>
           ) : (
             filteredColumns.map(([colName, colDetail]: [string, any]) => {
@@ -224,10 +224,10 @@ export const SemanticProfilePanel: React.FC<SemanticProfilePanelProps> = ({ prof
               return (
                 <div 
                   key={colName} 
-                  className={`bg-card rounded-xl border transition-all ${
+                  className={`bg-card rounded-lg border transition-all ${
                     hasErrors 
-                      ? 'border-red-200 shadow-sm bg-red-50/5' 
-                      : 'border-slate-200 hover:border-slate-300 hover:shadow-sm'
+                      ? 'border-destructive/30 bg-destructive/5' 
+                      : 'border-border hover:border-border/80'
                   }`}
                 >
                   {/* Card Header */}
@@ -236,23 +236,23 @@ export const SemanticProfilePanel: React.FC<SemanticProfilePanelProps> = ({ prof
                     onClick={() => setExpandedColumn(isExpanded ? null : colName)}
                   >
                     <div className="flex items-center space-x-3 text-left">
-                      <div className={`p-2 rounded-lg ${
+                      <div className={`p-2 rounded ${
                         hasErrors 
-                          ? 'bg-red-50 text-red-600' 
-                          : 'bg-indigo-50 text-indigo-600'
+                          ? 'bg-destructive/10 text-destructive' 
+                          : 'bg-muted text-muted-foreground'
                       }`}>
-                        <FileText className="h-4 w-4" />
+                        <FileText className="h-3.5 w-3.5" />
                       </div>
                       <div>
                         <div className="flex items-center space-x-2">
-                          <h4 className="font-bold text-slate-800 text-sm tracking-tight">{colName}</h4>
-                          <div className="flex items-center space-x-1 font-mono text-[9px] bg-slate-100 text-slate-500 border border-slate-200/50 px-2 py-0.5 rounded-full select-none">
+                          <h4 className="font-bold text-foreground text-sm tracking-tight">{colName}</h4>
+                          <div className="flex items-center space-x-1 font-mono text-[9px] bg-muted text-muted-foreground border border-border px-2 py-0.5 rounded select-none">
                             <span>{profileData.columns?.[colName]?.dtype || 'unknown'}</span>
-                            <span className="text-slate-400">➔</span>
-                            <span className="text-indigo-600 font-semibold">{colDetail.expected_type}</span>
+                            <span className="text-muted-foreground">➔</span>
+                            <span className="text-primary font-semibold">{colDetail.expected_type}</span>
                           </div>
                           {hasErrors && (
-                            <span className="text-[9px] font-bold text-red-600 bg-red-100/50 px-2 py-0.5 rounded-full border border-red-200/30 flex items-center gap-1">
+                            <span className="text-[9px] font-bold text-destructive bg-destructive/10 px-2 py-0.5 rounded border border-destructive/20 flex items-center gap-1">
                               <AlertTriangle className="h-3 w-3" />
                               <span>{errorCount} error(s)</span>
                             </span>
@@ -265,14 +265,14 @@ export const SemanticProfilePanel: React.FC<SemanticProfilePanelProps> = ({ prof
                     </div>
 
                     {/* Metadata Badges in Header */}
-                    <div className="flex items-center justify-between sm:justify-end gap-3 border-t sm:border-0 pt-2 sm:pt-0 border-slate-100">
+                    <div className="flex items-center justify-between sm:justify-end gap-3 border-t sm:border-0 pt-2 sm:pt-0 border-border">
                       <div className="flex items-center space-x-2">
-                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Group:</span>
-                        <span className="text-[10px] font-bold text-slate-700 bg-slate-100 px-2.5 py-0.5 rounded-full border border-slate-200/40">
+                        <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Group:</span>
+                        <span className="font-mono text-[10px] text-muted-foreground bg-muted px-2.5 py-0.5 rounded border border-border">
                           {formatDisplayValue(colDetail.logical_group || 'Uncategorized')}
                         </span>
                       </div>
-                      <span className="text-xs font-bold text-indigo-600 hover:text-indigo-500">
+                      <span className="text-xs font-bold text-primary hover:underline">
                         {isExpanded ? 'Collapse' : 'Expand Details'}
                       </span>
                     </div>
@@ -280,60 +280,60 @@ export const SemanticProfilePanel: React.FC<SemanticProfilePanelProps> = ({ prof
 
                   {/* Card Expanded Content */}
                   {isExpanded && (
-                    <div className="border-t border-slate-100 px-5 py-5 bg-slate-50/10 text-left space-y-4 animate-fade-in">
+                    <div className="border-t border-border px-5 py-5 bg-muted/5 text-left space-y-4 animate-fade-in">
                       {/* Properties Grid Table */}
-                      <div className="border border-slate-150 rounded-lg overflow-hidden bg-white shadow-sm">
+                      <div className="border border-border rounded-lg overflow-hidden bg-card">
                         <table className="w-full text-xs border-collapse">
                           <thead>
-                            <tr className="bg-slate-50/80 border-b border-slate-200">
-                              <th className="text-left p-3 font-bold text-slate-500 w-[200px] border-r border-slate-150">Property & Expected State</th>
-                              <th className="text-left p-3 font-bold text-slate-500">Agent Reasoning & Business Context</th>
+                            <tr className="bg-muted/50 border-b border-border">
+                              <th className="text-left p-3 font-bold text-muted-foreground w-[200px] border-r border-border">Property & Expected State</th>
+                              <th className="text-left p-3 font-bold text-muted-foreground">Agent Reasoning & Business Context</th>
                             </tr>
                           </thead>
-                          <tbody className="divide-y divide-slate-150">
+                          <tbody className="divide-y divide-border">
                             {/* Semantic Data Type */}
-                            <tr className="hover:bg-slate-50/20">
-                              <td className="p-3 align-top font-semibold text-slate-700 border-r border-slate-150 flex items-center gap-1.5">
-                                <Workflow className="h-3.5 w-3.5 text-indigo-500 shrink-0" />
+                            <tr className="hover:bg-muted/30">
+                              <td className="p-3 align-top font-semibold text-foreground border-r border-border flex items-center gap-1.5">
+                                <Workflow className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                                 <span>Semantic Data Type</span>
                               </td>
-                              <td className="p-3 align-top text-slate-600">
+                              <td className="p-3 align-top text-foreground">
                                 <div className="flex items-center space-x-2">
-                                  <span className="font-bold text-indigo-700 bg-indigo-50 border border-indigo-200/30 px-2 py-0.5 rounded">
+                                  <span className="font-mono text-[10px] bg-muted text-muted-foreground border border-border px-2 py-0.5 rounded">
                                     {colDetail.semantic_data_type}
                                   </span>
                                   {colDetail.semantic_data_type_reason && (
-                                    <span className="text-xs text-slate-500">• {colDetail.semantic_data_type_reason}</span>
+                                    <span className="text-xs text-muted-foreground">• {colDetail.semantic_data_type_reason}</span>
                                   )}
                                 </div>
                               </td>
                             </tr>
 
                             {/* Current Physical Type */}
-                            <tr className="hover:bg-slate-50/20">
-                              <td className="p-3 align-top font-semibold text-slate-700 border-r border-slate-150">
+                            <tr className="hover:bg-muted/30">
+                              <td className="p-3 align-top font-semibold text-foreground border-r border-border">
                                 Current Physical Type
                               </td>
-                              <td className="p-3 align-top text-slate-600">
-                                <span className="font-mono font-bold text-slate-700 bg-slate-100 border px-1.5 py-0.5 rounded">
+                              <td className="p-3 align-top text-foreground">
+                                <span className="font-mono text-[10px] bg-muted text-muted-foreground border border-border px-1.5 py-0.5 rounded">
                                   {profileData.columns?.[colName]?.dtype || 'unknown'}
                                 </span>
                               </td>
                             </tr>
 
                             {/* Expected Type */}
-                            <tr className="hover:bg-slate-50/20">
-                              <td className="p-3 align-top font-semibold text-slate-700 border-r border-slate-150">
+                            <tr className="hover:bg-muted/30">
+                              <td className="p-3 align-top font-semibold text-foreground border-r border-border">
                                 Expected Type
                               </td>
-                              <td className="p-3 align-top text-slate-600">
+                              <td className="p-3 align-top text-foreground">
                                 <div className="flex flex-col gap-1">
                                   <div className="flex items-center space-x-2">
-                                    <span className="font-mono font-bold text-indigo-600 bg-indigo-50 border border-indigo-200/30 px-1.5 py-0.5 rounded">
+                                    <span className="font-mono text-[10px] bg-muted text-muted-foreground border border-border px-1.5 py-0.5 rounded">
                                       {colDetail.expected_type}
                                     </span>
                                     {colDetail.expected_type_reason && (
-                                      <span className="text-xs text-slate-500">• {colDetail.expected_type_reason}</span>
+                                      <span className="text-xs text-muted-foreground">• {colDetail.expected_type_reason}</span>
                                     )}
                                   </div>
                                 </div>
@@ -341,26 +341,26 @@ export const SemanticProfilePanel: React.FC<SemanticProfilePanelProps> = ({ prof
                             </tr>
 
                             {/* Nullability / Allow Missing */}
-                            <tr className="hover:bg-slate-50/20">
-                              <td className="p-3 align-top font-semibold text-slate-700 border-r border-slate-150 flex items-center gap-1.5">
+                            <tr className="hover:bg-muted/30">
+                              <td className="p-3 align-top font-semibold text-foreground border-r border-border flex items-center gap-1.5">
                                 {colDetail.allow_missing ? (
-                                  <CheckCircle className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                                  <CheckCircle className="h-3.5 w-3.5 text-success shrink-0" />
                                 ) : (
-                                  <XCircle className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                                  <XCircle className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                                 )}
                                 <span>Allow Missing (Nullable)</span>
                               </td>
-                              <td className="p-3 align-top text-slate-600">
+                              <td className="p-3 align-top text-foreground">
                                 <div className="flex items-center space-x-2">
                                   <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
                                     colDetail.allow_missing 
-                                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200/30' 
-                                      : 'bg-slate-100 text-slate-700 border-slate-200/50'
+                                      ? 'bg-success/5 text-success border-success/20' 
+                                      : 'bg-muted text-muted-foreground border-border'
                                   }`}>
                                     {colDetail.allow_missing ? 'Yes' : 'No'}
                                   </span>
                                   {colDetail.allow_missing_reason && (
-                                    <span className="text-xs text-slate-500">• {colDetail.allow_missing_reason}</span>
+                                    <span className="text-xs text-muted-foreground">• {colDetail.allow_missing_reason}</span>
                                   )}
                                 </div>
                               </td>
@@ -368,14 +368,14 @@ export const SemanticProfilePanel: React.FC<SemanticProfilePanelProps> = ({ prof
 
                             {/* Pre-assigned strategies */}
                             {colDetail.fill_strategies && colDetail.fill_strategies.length > 0 && (
-                              <tr className="hover:bg-slate-50/20">
-                                <td className="p-3 align-top font-semibold text-slate-700 border-r border-slate-150">
+                              <tr className="hover:bg-muted/30">
+                                <td className="p-3 align-top font-semibold text-foreground border-r border-border">
                                   Allowed Imputation Strategies
                                 </td>
                                 <td className="p-3 align-top">
                                   <div className="flex flex-wrap gap-1.5">
                                     {colDetail.fill_strategies.map((strat: string, i: number) => (
-                                      <span key={i} className="font-mono text-[10px] bg-slate-100 text-slate-600 border px-1.5 py-0.5 rounded">
+                                      <span key={i} className="font-mono text-[10px] bg-muted text-muted-foreground border border-border px-1.5 py-0.5 rounded">
                                         {strat}
                                       </span>
                                     ))}
@@ -386,22 +386,22 @@ export const SemanticProfilePanel: React.FC<SemanticProfilePanelProps> = ({ prof
 
                             {/* Disguised Missing Values */}
                             {hasDMVs && (
-                              <tr className="hover:bg-slate-50/20">
-                                <td className="p-3 align-top font-semibold text-slate-700 border-r border-slate-150 flex items-center gap-1.5">
-                                  <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                              <tr className="hover:bg-muted/30">
+                                <td className="p-3 align-top font-semibold text-foreground border-r border-border flex items-center gap-1.5">
+                                  <AlertTriangle className="h-3.5 w-3.5 text-warning shrink-0" />
                                   <span>Disguised Missing (DMVs)</span>
                                 </td>
-                                <td className="p-3 align-top text-slate-600">
+                                <td className="p-3 align-top text-foreground">
                                   <div className="space-y-1.5">
                                     <div className="flex flex-wrap gap-1">
                                       {colDetail.potential_dmv.map((dmv: string, i: number) => (
-                                        <span key={i} className="font-mono text-[10px] bg-amber-50 text-amber-800 border border-amber-200/30 px-1.5 py-0.5 rounded">
+                                        <span key={i} className="font-mono text-[10px] bg-muted text-muted-foreground border border-border px-1.5 py-0.5 rounded">
                                           "{dmv}"
                                         </span>
                                       ))}
                                     </div>
                                     {colDetail.potential_dmv_reason && (
-                                      <p className="text-xs text-slate-400 italic">{colDetail.potential_dmv_reason}</p>
+                                      <p className="text-xs text-muted-foreground italic">{colDetail.potential_dmv_reason}</p>
                                     )}
                                   </div>
                                 </td>
@@ -410,19 +410,19 @@ export const SemanticProfilePanel: React.FC<SemanticProfilePanelProps> = ({ prof
 
                             {/* Expected Pattern */}
                             {hasPattern && (
-                              <tr className="hover:bg-slate-50/20">
-                                <td className="p-3 align-top font-semibold text-slate-700 border-r border-slate-150">
+                              <tr className="hover:bg-muted/30">
+                                <td className="p-3 align-top font-semibold text-foreground border-r border-border">
                                   Format Validation Pattern
                                 </td>
-                                <td className="p-3 align-top text-slate-600">
+                                <td className="p-3 align-top text-foreground">
                                   <div className="space-y-1">
                                     <div className="flex items-center space-x-2">
-                                      <span className="font-mono text-[10px] bg-indigo-50 text-indigo-700 border border-indigo-100 px-2 py-0.5 rounded">
+                                      <span className="font-mono text-[10px] bg-muted text-muted-foreground border border-border px-2 py-0.5 rounded">
                                         {colDetail.expected_str_pattern}
                                       </span>
                                     </div>
                                     {colDetail.expected_str_pattern_reason && (
-                                      <p className="text-xs text-slate-400 italic">{colDetail.expected_str_pattern_reason}</p>
+                                      <p className="text-xs text-muted-foreground italic">{colDetail.expected_str_pattern_reason}</p>
                                     )}
                                   </div>
                                 </td>
@@ -431,14 +431,14 @@ export const SemanticProfilePanel: React.FC<SemanticProfilePanelProps> = ({ prof
 
                             {/* Relationships */}
                             {colDetail.relationships && colDetail.relationships.length > 0 && (
-                              <tr className="hover:bg-slate-50/20">
-                                <td className="p-3 align-top font-semibold text-slate-700 border-r border-slate-150">
+                              <tr className="hover:bg-muted/30">
+                                <td className="p-3 align-top font-semibold text-foreground border-r border-border">
                                   Cross-Column Dependencies
                                 </td>
                                 <td className="p-3 align-top">
                                   <div className="flex flex-col gap-1.5">
                                     {colDetail.relationships.map((rel: string, i: number) => (
-                                      <span key={i} className="font-mono text-[10px] bg-slate-50 text-slate-600 border border-slate-200/50 px-2 py-0.5 rounded inline-block max-w-max">
+                                      <span key={i} className="font-mono text-[10px] bg-muted text-muted-foreground border border-border px-2 py-0.5 rounded inline-block max-w-max">
                                         {rel}
                                       </span>
                                     ))}
@@ -449,16 +449,16 @@ export const SemanticProfilePanel: React.FC<SemanticProfilePanelProps> = ({ prof
 
                             {/* Quality Errors */}
                             {hasErrors && (
-                              <tr className="bg-red-50/15 hover:bg-red-50/25">
-                                <td className="p-3 align-top font-semibold text-red-700 border-r border-slate-150 flex items-center gap-1.5">
-                                  <AlertTriangle className="h-3.5 w-3.5 text-red-500 shrink-0" />
+                              <tr className="bg-destructive/5 hover:bg-destructive/10">
+                                <td className="p-3 align-top font-semibold text-destructive border-r border-border flex items-center gap-1.5">
+                                  <AlertTriangle className="h-3.5 w-3.5 text-destructive shrink-0" />
                                   <span>Semantic Quality Anomalies</span>
                                 </td>
-                                <td className="p-3 align-top text-red-700">
+                                <td className="p-3 align-top text-destructive">
                                   <div className="space-y-2">
                                     <div className="flex flex-wrap gap-1">
                                       {colDetail.error_types.map((err: string, i: number) => (
-                                        <span key={i} className="text-[9px] font-bold uppercase tracking-wider text-white bg-red-500 px-2 py-0.5 rounded border border-red-600">
+                                        <span key={i} className="text-[9px] font-bold uppercase tracking-wider text-destructive bg-destructive/10 px-2 py-0.5 rounded border border-destructive/20">
                                           {err}
                                         </span>
                                       ))}
