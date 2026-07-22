@@ -16,7 +16,23 @@ function loadMermaid(): Promise<MermaidApi> {
       mermaid.initialize({
         startOnLoad: false,
         securityLevel: 'strict',
-        theme: 'neutral',
+        theme: 'base',
+        themeVariables: {
+          background: '#ffffff',
+          fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif',
+          lineColor: '#64748b',
+          primaryColor: '#e0e7ff',
+          primaryBorderColor: '#4f46e5',
+          primaryTextColor: '#312e81',
+          secondaryColor: '#cffafe',
+          tertiaryColor: '#dcfce7',
+        },
+        flowchart: {
+          curve: 'basis',
+          nodeSpacing: 48,
+          rankSpacing: 64,
+          padding: 18,
+        },
       });
       return mermaid;
     });
@@ -91,7 +107,7 @@ export function MermaidDiagram({ definition, className = '' }: MermaidDiagramPro
 
   return (
     <div
-      className={`overflow-auto rounded-lg border bg-white p-4 [&_svg]:mx-auto [&_svg]:h-auto [&_svg]:max-w-full ${className}`}
+      className={`overflow-auto rounded-lg border border-slate-200 bg-gradient-to-br from-slate-50 via-white to-blue-50/70 p-5 shadow-inner [&_svg]:mx-auto [&_svg]:h-auto [&_svg]:max-w-full ${className}`}
       role="img"
       aria-label="Data lineage diagram"
       dangerouslySetInnerHTML={{ __html: currentRender.svg }}

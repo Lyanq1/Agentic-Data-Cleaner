@@ -21,6 +21,42 @@ from app.services.lineage_service import LineageService
 from app.services.lineage_utils import resolve_lineage_session_id
 
 
+_DIAGRAM_STYLE_LINES = [
+    "    classDef source fill:#DBEAFE,stroke:#2563EB,color:#1E3A8A,stroke-width:2px",
+    "    classDef profile fill:#E0E7FF,stroke:#4F46E5,color:#312E81,stroke-width:2px",
+    "    classDef plan fill:#F3E8FF,stroke:#9333EA,color:#581C87,stroke-width:2px",
+    "    classDef dedup fill:#FEF3C7,stroke:#D97706,color:#78350F,stroke-width:2px",
+    "    classDef nulls fill:#CFFAFE,stroke:#0891B2,color:#164E63,stroke-width:2px",
+    "    classDef typecast fill:#FCE7F3,stroke:#DB2777,color:#831843,stroke-width:2px",
+    "    classDef validation fill:#CCFBF1,stroke:#0D9488,color:#134E4A,stroke-width:2px",
+    "    classDef process fill:#EDE9FE,stroke:#7C3AED,color:#4C1D95,stroke-width:2px",
+    "    classDef final fill:#DCFCE7,stroke:#16A34A,color:#14532D,stroke-width:3px",
+    "    linkStyle default stroke:#64748B,stroke-width:2px",
+]
+
+
+def _diagram_class_for_agent(agent_name: Any) -> str:
+    """Map lineage agents to a stable, readable Mermaid color class."""
+    normalized = str(agent_name or "").lower()
+    if "ingest" in normalized or "upload" in normalized:
+        return "source"
+    if "dedup" in normalized:
+        return "dedup"
+    if "null" in normalized:
+        return "nulls"
+    if "type" in normalized or "cast" in normalized:
+        return "typecast"
+    if "valid" in normalized:
+        return "validation"
+    if "profil" in normalized:
+        return "profile"
+    if "plan" in normalized:
+        return "plan"
+    if "report" in normalized:
+        return "final"
+    return "process"
+
+
 def _model_to_dict(value: Any) -> Any:
     """Convert Pydantic/state objects to JSON-compatible nested data."""
     if value is None:
@@ -583,12 +619,26 @@ class ReportService:
             "    input_validator --> planner[Planner]",
         ]
         previous = "planner"
+        task_node_ids = []
+        validator_node_ids = []
         for index, task in enumerate(task_nodes, start=1):
             node_id = f"task{index}"
+            validator_id = f"validator{index}"
+            task_node_ids.append(node_id)
+            validator_node_ids.append(validator_id)
             lines.append(f"    {previous} --> {node_id}[{task}]")
-            lines.append(f"    {node_id} --> validator{index}[Validator]")
-            previous = f"validator{index}"
+            lines.append(f"    {node_id} --> {validator_id}[Validator]")
+            previous = validator_id
         lines.append(f"    {previous} --> report[Final Report Agent]")
+        lines.extend(_DIAGRAM_STYLE_LINES)
+        lines.extend([
+            "    class upload source",
+            "    class profiler,semantic profile",
+            "    class input_validator,planner plan",
+            f"    class {','.join(task_node_ids)} process",
+            f"    class {','.join(validator_node_ids)} validation",
+            "    class report final",
+        ])
         return "\n".join(lines)
 
     @staticmethod
@@ -597,17 +647,28 @@ class ReportService:
         lines = ["flowchart LR"]
         if not versions:
             lines.append("    raw[Uploaded Dataset] --> final[Final Dataset]")
+            lines.extend(_DIAGRAM_STYLE_LINES)
+            lines.extend([
+                "    class raw source",
+                "    class final final",
+            ])
             return "\n".join(lines)
 
         previous_id = None
+        node_classes = []
         for index, version in enumerate(versions, start=1):
             node_id = f"v{index}"
-            label = f"v{version.get('version')} {version.get('agent_name', 'agent')}"
+            agent_name = version.get("agent_name", "agent")
+            label = f"v{version.get('version')} {agent_name}"
             lines.append(f"    {node_id}[{label}]")
+            node_classes.append(f"    class {node_id} {_diagram_class_for_agent(agent_name)}")
             if previous_id:
                 lines.append(f"    {previous_id} --> {node_id}")
             previous_id = node_id
         lines.append(f"    {previous_id} --> final[Final Report]")
+        lines.extend(_DIAGRAM_STYLE_LINES)
+        lines.extend(node_classes)
+        lines.append("    class final final")
         return "\n".join(lines)
 
     @staticmethod
