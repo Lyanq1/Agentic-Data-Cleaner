@@ -1,13 +1,14 @@
 """Pipeline API — upload dataset, run pipeline, check state."""
 import copy
 import io
+import json
 import re
 import uuid
 import logging
 from typing import Any
 
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 from langchain_core.messages import HumanMessage
 
@@ -15,6 +16,7 @@ from app.exceptions.ingestion_exceptions import IngestionError
 from app.services.dataframe_order import restore_original_column_order
 from app.services.lineage_service import LineageService
 from app.services.lineage_utils import resolve_lineage_session_id
+from app.services.report_service import ReportService
 from app.services.ingestion import get_ingestion_service
 from app.services.pipeline import run_pipeline, get_pipeline_state
 from app.graphs.utils import _load_dataframe
@@ -24,6 +26,10 @@ from app.graphs.states.planning import DedupStrategy, ExecutionPlan
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+class ReportChatRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=1000)
 
 
 @router.post("/pipeline/run", summary="Upload dataset and run the cleaning pipeline")
@@ -218,6 +224,137 @@ async def api_preview_processed_dataset(run_id: str, limit: int = 50):
         "rows": rows,
         "row_count": int(len(df)),
         "preview_count": int(len(preview_df)),
+    }
+
+
+async def _build_final_report_or_404(run_id: str) -> dict[str, Any]:
+    state = await get_pipeline_state(run_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found.")
+    try:
+        return ReportService.build_report(run_id, state)
+    except Exception as e:
+        logger.error(f"Failed to build final report for run_id={run_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to build final report: {e}") from e
+
+
+@router.get("/pipeline/{run_id}/report", summary="Get final Report Agent artifact")
+async def api_get_final_report(run_id: str):
+    """Return the backend-owned final report for a completed or in-progress run."""
+    return await _build_final_report_or_404(run_id)
+
+
+@router.get("/pipeline/{run_id}/report/columns/{column_name}/changes", summary="Get before/after change evidence for a column")
+async def api_get_column_change_summary(run_id: str, column_name: str):
+    """Return deterministic before/after evidence for one column using lineage versions."""
+    state = await get_pipeline_state(run_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found.")
+    evidence = ReportService.build_column_change_summary(state, columns=[column_name])
+    if evidence.get("available") and not evidence.get("columns"):
+        raise HTTPException(status_code=404, detail=f"Column '{column_name}' was not found in before/after lineage versions.")
+    return evidence
+
+
+@router.get("/pipeline/{run_id}/report/changes/top", summary="Get columns with the most before/after changes")
+async def api_get_top_changed_columns(run_id: str, limit: int = 10):
+    """Return top changed columns using lineage version 1 vs latest approved version."""
+    state = await get_pipeline_state(run_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found.")
+    return ReportService.build_top_changed_columns(state, limit=max(1, min(limit, 50)))
+
+
+@router.get("/pipeline/{run_id}/report/columns/{column_name}/impact", summary="Get column impact within the current pipeline run")
+async def api_get_column_impact_summary(run_id: str, column_name: str):
+    """Return lineage-aware column impact for the current report/pipeline scope."""
+    state = await get_pipeline_state(run_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found.")
+    report = ReportService.build_report(run_id, state)
+    impact = ReportService.build_column_impact_summary(report, state, column_name)
+    if not impact.get("known_column"):
+        raise HTTPException(status_code=404, detail=f"Column '{column_name}' was not found in the report context.")
+    return impact
+
+
+@router.get("/pipeline/{run_id}/report/export", summary="Export final report")
+async def api_export_final_report(run_id: str, format: str = "json"):
+    """Export the final report as JSON, Markdown, or HTML."""
+    report = await _build_final_report_or_404(run_id)
+    export_format = format.lower()
+
+    if export_format == "json":
+        content = json.dumps(report, ensure_ascii=False, indent=2)
+        media_type = "application/json"
+        extension = "json"
+    elif export_format in {"md", "markdown"}:
+        content = ReportService.render_markdown(report)
+        media_type = "text/markdown; charset=utf-8"
+        extension = "md"
+    elif export_format == "html":
+        content = ReportService.render_html(report)
+        media_type = "text/html; charset=utf-8"
+        extension = "html"
+    else:
+        raise HTTPException(status_code=400, detail="Unsupported report format. Use json, md, or html.")
+
+    headers = {"Content-Disposition": f'attachment; filename="{run_id}_final_report.{extension}"'}
+    return Response(content=content, media_type=media_type, headers=headers)
+
+
+@router.get("/pipeline/{run_id}/diagram", summary="Export Report Agent diagram as Mermaid")
+async def api_get_report_diagram(run_id: str, type: str = "lineage"):
+    """Return a Mermaid diagram for the pipeline or data lineage."""
+    report = await _build_final_report_or_404(run_id)
+    diagram_type = type.lower()
+    if diagram_type == "pipeline":
+        diagram = ReportService.build_pipeline_diagram(report)
+    elif diagram_type == "lineage":
+        diagram = ReportService.build_lineage_diagram(report)
+    else:
+        raise HTTPException(status_code=400, detail="Unsupported diagram type. Use pipeline or lineage.")
+    return {
+        "run_id": run_id,
+        "type": diagram_type,
+        "format": "mermaid",
+        "diagram": diagram,
+    }
+
+
+@router.post("/pipeline/{run_id}/report/chat", summary="Ask a grounded question about the final report")
+async def api_chat_with_report(run_id: str, request: ReportChatRequest):
+    """Answer report questions using controlled report, lineage, and validation context."""
+    state = await get_pipeline_state(run_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found.")
+    report = ReportService.build_report(run_id, state)
+    history_before = ReportService.list_chat_messages(run_id)
+    ReportService.save_chat_message(run_id, "user", request.question)
+    answer = await ReportService.answer_question_with_llm(report, request.question, history_before, state)
+    assistant_message = ReportService.save_chat_message(
+        run_id,
+        "assistant",
+        answer["answer"],
+        sources=answer.get("sources", []),
+        metadata={"reasoning_summary": answer.get("reasoning_summary")},
+    )
+    return {
+        **answer,
+        "message": assistant_message,
+        "history": ReportService.list_chat_messages(run_id),
+    }
+
+
+@router.get("/pipeline/{run_id}/report/chat", summary="Get Report Agent chat history")
+async def api_get_report_chat_history(run_id: str):
+    """Return persisted Report Agent chat history for a pipeline run."""
+    state = await get_pipeline_state(run_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found.")
+    return {
+        "run_id": run_id,
+        "messages": ReportService.list_chat_messages(run_id),
     }
 
 

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { memo, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { pipelineApi } from '../../api/services';
 import {
@@ -9,6 +9,10 @@ import {
   ChevronDown,
   ChevronUp,
   FileJson,
+  FileText,
+  GitBranch,
+  MessageSquare,
+  Send,
   Shield,
   Layers,
   Database,
@@ -60,6 +64,8 @@ function flattenMetricLines(value: unknown, path = ''): string[] {
 
 function getColumnCount(report: Record<string, any> | undefined): number | 'N/A' {
   if (!report) return 'N/A';
+  const tracked = report.summary?.tracked_columns;
+  if (typeof tracked === 'number' && !Number.isNaN(tracked)) return tracked;
   const after = report.validation?.column_quality_after;
   if (after && typeof after === 'object' && Object.keys(after).length > 0) {
     return Object.keys(after).length;
@@ -76,7 +82,7 @@ function getColumnCount(report: Record<string, any> | undefined): number | 'N/A'
 
 function getRowsProcessed(report: Record<string, any> | undefined): number | 'N/A' {
   if (!report) return 'N/A';
-  const n = report.summary?.input_rows ?? report.profile?.row_count;
+  const n = report.summary?.output_rows ?? report.summary?.input_rows ?? report.profile?.row_count;
   if (typeof n === 'number' && !Number.isNaN(n)) return n;
   return 'N/A';
 }
@@ -157,12 +163,160 @@ const CircularProgress = ({ value, label }: { value: number, label: string }) =>
   );
 };
 
+interface ReportChatPanelProps {
+  runId: string;
+  suggestedQuestions: string[];
+}
+
+const ReportChatPanel = memo(({ runId, suggestedQuestions }: ReportChatPanelProps) => {
+  const [question, setQuestion] = useState('');
+  const [messages, setMessages] = useState<any[]>([]);
+  const [isAsking, setIsAsking] = useState(false);
+
+  useQuery({
+    queryKey: ['report-chat-history', runId],
+    queryFn: async () => {
+      const history = await pipelineApi.getReportChatHistory(runId);
+      setMessages(history.messages || []);
+      return history;
+    },
+  });
+
+  const handleAsk = async () => {
+    const trimmed = question.trim();
+    if (!trimmed) return;
+    setIsAsking(true);
+    setQuestion('');
+    setMessages((prev) => [
+      ...prev,
+      {
+        role: 'user',
+        content: trimmed,
+        created_at: new Date().toISOString(),
+      },
+    ]);
+    try {
+      const result = await pipelineApi.askReport(runId, trimmed);
+      const history = result.history || [];
+      if (history.length > 0 && result.reasoning_summary) {
+        const lastIndex = history.length - 1;
+        setMessages(history.map((message: any, index: number) => (
+          index === lastIndex
+            ? { ...message, reasoning_summary: result.reasoning_summary }
+            : message
+        )));
+      } else {
+        setMessages(history);
+      }
+    } finally {
+      setIsAsking(false);
+    }
+  };
+
+  return (
+    <div className="rounded-xl border shadow-sm overflow-hidden">
+      <div className="px-4 py-3 border-b bg-muted/30 flex items-center gap-2">
+        <MessageSquare className="w-4 h-4 text-muted-foreground" />
+        <span className="text-sm font-semibold">Ask the Report Agent</span>
+      </div>
+      <div className="p-4 space-y-3">
+        {messages.length > 0 && (
+          <div className="max-h-72 overflow-y-auto rounded-lg border bg-muted/10 divide-y">
+            {messages.map((message, index) => (
+              <div key={message.id || index} className="p-3 text-sm">
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+                  {message.role === 'user' ? 'You' : 'Report Agent'}
+                </div>
+                <p className="text-foreground whitespace-pre-wrap">{message.content}</p>
+                {message.sources?.length > 0 && (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Sources: {message.sources.join(', ')}
+                  </p>
+                )}
+                {message.reasoning_summary && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Checked: {message.reasoning_summary}
+                  </p>
+                )}
+              </div>
+            ))}
+            {isAsking && (
+              <div className="p-3 text-sm">
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+                  Report Agent
+                </div>
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <span className="inline-flex h-2 w-2 animate-pulse rounded-full bg-primary" />
+                  <span>Checking report, lineage, metrics, and recent chat...</span>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+        {messages.length === 0 && isAsking && (
+          <div className="rounded-lg border bg-muted/10 p-3 text-sm">
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+              Report Agent
+            </div>
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <span className="inline-flex h-2 w-2 animate-pulse rounded-full bg-primary" />
+              <span>Checking report, lineage, metrics, and recent chat...</span>
+            </div>
+          </div>
+        )}
+        <div className="flex flex-col sm:flex-row gap-2">
+          <input
+            value={question}
+            onChange={(event) => setQuestion(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') void handleAsk();
+            }}
+            placeholder="Ask what changed, which agent produced a version, or what to transform next..."
+            disabled={isAsking}
+            className="flex-1 rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+          />
+          <button
+            type="button"
+            disabled={isAsking || !question.trim()}
+            onClick={() => void handleAsk()}
+            className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
+          >
+            <Send className="mr-2 h-4 w-4" />
+            Ask
+          </button>
+        </div>
+        {suggestedQuestions.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {suggestedQuestions.map((suggestion, index) => (
+              <button
+                key={index}
+                type="button"
+                onClick={() => setQuestion(suggestion)}
+                className="rounded-full border px-3 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/20"
+              >
+                {suggestion}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+});
+
+ReportChatPanel.displayName = 'ReportChatPanel';
+
 export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) => {
   const [showRawJson, setShowRawJson] = useState(false);
+  const [showDiagram, setShowDiagram] = useState(false);
 
   const { data: report, isLoading, error } = useQuery({
     queryKey: ['pipeline-report', runId],
     queryFn: () => pipelineApi.getReport(runId),
+  });
+  const { data: lineageDiagram } = useQuery({
+    queryKey: ['report-diagram', runId, 'lineage'],
+    queryFn: () => pipelineApi.getReportDiagram(runId, 'lineage'),
   });
   const { data: preview } = useQuery({
     queryKey: ['processed-preview', runId],
@@ -180,6 +334,10 @@ export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) =>
 
   const handleDownload = (format: 'csv' | 'xlsx' | 'parquet') => {
     window.location.href = pipelineApi.getDownloadUrl(runId, format);
+  };
+
+  const handleReportExport = (format: 'json' | 'md' | 'html') => {
+    window.location.href = pipelineApi.getReportExportUrl(runId, format);
   };
 
   /** Outer fills main; inner scroll region gets flex-1 min-h-0 so it scrolls under h-screen + overflow-hidden. */
@@ -280,6 +438,43 @@ export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) =>
                   ))}
                 </ul>
               </div>
+
+              {report?.lineage?.versions?.length > 0 && (
+                <div className="rounded-xl border shadow-sm overflow-hidden">
+                  <div className="px-4 py-3 border-b bg-muted/30 flex items-center gap-2">
+                    <GitBranch className="w-4 h-4 text-muted-foreground" />
+                    <span className="text-sm font-semibold">Data lineage</span>
+                    <span className="ml-auto text-xs text-muted-foreground">
+                      {report.lineage.version_count} approved version(s)
+                    </span>
+                  </div>
+                  <div className="divide-y">
+                    {report.lineage.versions.map((version: any) => (
+                      <div key={version.version} className="px-4 py-3 text-sm">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold">v{version.version}</span>
+                          <span className="text-muted-foreground">{version.agent_name}</span>
+                        </div>
+                        {version.description && (
+                          <p className="text-xs text-muted-foreground mt-1">{version.description}</p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowDiagram(!showDiagram)}
+                    className="w-full border-t px-4 py-2 text-left text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/20"
+                  >
+                    {showDiagram ? 'Hide' : 'Show'} Mermaid lineage diagram
+                  </button>
+                  {showDiagram && (
+                    <pre className="m-4 rounded-lg border bg-slate-950 p-4 text-[11px] leading-relaxed text-slate-300 overflow-auto">
+                      {lineageDiagram?.diagram || 'Diagram is not available yet.'}
+                    </pre>
+                  )}
+                </div>
+              )}
 
               {hasValidation && (
                 <div
@@ -429,6 +624,11 @@ export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) =>
                 </div>
               )}
 
+              <ReportChatPanel
+                runId={runId}
+                suggestedQuestions={report?.suggested_questions || []}
+              />
+
               {preview?.columns?.length > 0 && (
                 <div className="rounded-xl border shadow-sm overflow-hidden">
                   <div className="px-4 py-3 border-b bg-muted/30 flex items-center justify-between gap-3">
@@ -497,6 +697,20 @@ export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) =>
 
       <div className="flex-shrink-0 flex flex-col sm:flex-row justify-center gap-3 sm:gap-4 pt-4 pb-2 border-t border-border/60 bg-background">
         <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
+          {([
+            ['md', 'Report MD'],
+            ['json', 'Report JSON'],
+            ['html', 'Report HTML'],
+          ] as const).map(([format, label]) => (
+            <button
+              key={format}
+              onClick={() => handleReportExport(format)}
+              className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-colors border border-input bg-background hover:bg-accent hover:text-accent-foreground h-11 px-4"
+            >
+              <FileText className="mr-2 h-4 w-4" />
+              {label}
+            </button>
+          ))}
           {([
             ['csv', 'CSV'],
             ['xlsx', 'XLSX'],

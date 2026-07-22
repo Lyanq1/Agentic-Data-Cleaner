@@ -182,6 +182,26 @@ class LineageService:
         finally:
             db.close()
 
+    @staticmethod
+    def list_versions(session_id: uuid.UUID) -> list[dict[str, Any]]:
+        """Return lineage version metadata for a dataset session."""
+        db: Session = SessionLocal()
+        try:
+            versions = db.query(LineageVersion).filter(
+                LineageVersion.session_id == session_id
+            ).order_by(LineageVersion.version).all()
+            return [
+                {
+                    "version": item.version,
+                    "agent_name": item.agent_name,
+                    "description": item.description or "",
+                    "created_at": item.created_at.isoformat() if item.created_at else None,
+                }
+                for item in versions
+            ]
+        finally:
+            db.close()
+
 
 def _json_safe_value(value: Any) -> Any:
     """Convert pandas missing scalar values and non-serializable objects (like Timestamp) to JSONB-safe values."""
