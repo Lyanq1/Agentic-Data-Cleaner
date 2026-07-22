@@ -1,6 +1,7 @@
 import React, { memo, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { pipelineApi } from '../../api/services';
+import { MermaidDiagram } from '../MermaidDiagram';
 import {
   Download,
   RotateCcw,
@@ -314,7 +315,11 @@ export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) =>
     queryKey: ['pipeline-report', runId],
     queryFn: () => pipelineApi.getReport(runId),
   });
-  const { data: lineageDiagram } = useQuery({
+  const {
+    data: lineageDiagram,
+    isLoading: isDiagramLoading,
+    error: diagramError,
+  } = useQuery({
     queryKey: ['report-diagram', runId, 'lineage'],
     queryFn: () => pipelineApi.getReportDiagram(runId, 'lineage'),
   });
@@ -469,9 +474,19 @@ export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) =>
                     {showDiagram ? 'Hide' : 'Show'} Mermaid lineage diagram
                   </button>
                   {showDiagram && (
-                    <pre className="m-4 rounded-lg border bg-slate-950 p-4 text-[11px] leading-relaxed text-slate-300 overflow-auto">
-                      {lineageDiagram?.diagram || 'Diagram is not available yet.'}
-                    </pre>
+                    <div className="m-4">
+                      {isDiagramLoading ? (
+                        <div className="flex min-h-40 items-center justify-center rounded-lg border bg-muted/10 p-4 text-sm text-muted-foreground">
+                          Loading diagram...
+                        </div>
+                      ) : diagramError ? (
+                        <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
+                          Failed to load the lineage diagram.
+                        </div>
+                      ) : (
+                        <MermaidDiagram definition={lineageDiagram?.diagram || ''} />
+                      )}
+                    </div>
                   )}
                 </div>
               )}
