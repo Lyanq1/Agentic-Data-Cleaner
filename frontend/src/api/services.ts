@@ -364,6 +364,10 @@ export const pipelineApi = {
     return `${apiClient.defaults.baseURL}/pipeline/${runId}/download?format=${format}`;
   },
 
+  getVersionDownloadUrl: (runId: string, version: number, format: 'csv' | 'xlsx' | 'parquet' = 'csv'): string => {
+    return `${apiClient.defaults.baseURL}/pipeline/${runId}/versions/${version}/download?format=${format}`;
+  },
+
   getReportExportUrl: (runId: string, format: 'json' | 'md' | 'html' = 'md'): string => {
     return `${apiClient.defaults.baseURL}/pipeline/${runId}/report/export?format=${format}`;
   },
