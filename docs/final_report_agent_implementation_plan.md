@@ -83,6 +83,12 @@ Report export:
 - `GET /api/v1/pipeline/{run_id}/report/export?format=json|md|html`
 - Supports JSON, Markdown, and HTML report exports.
 
+Versioned dataset export:
+
+- `GET /api/v1/pipeline/{run_id}/versions/{version}/download?format=csv|xlsx|parquet`
+- Downloads any persisted lineage version, not only the latest cleaned dataset.
+- The Result page exposes compact CSV/XLSX/Parquet buttons next to each lineage version.
+
 Diagram export:
 
 - `GET /api/v1/pipeline/{run_id}/diagram?type=pipeline|lineage`
@@ -103,6 +109,14 @@ Report chat:
 - The endpoint persists user and assistant messages, sources, and reasoning summaries.
 - The answer path normalizes accidental structured payloads from the LLM, so multi-part questions do not surface raw dict/JSON-like answers in the chat UI.
 - Multi-part questions are split into deterministic sub-answers, so a question such as "how many columns changed, how many tokens, and what did the pipeline do" answers all requested parts instead of only the first detected intent.
+- Multi-part metric questions also cover cell count, using `total_cells_evaluated` from F1 metrics when available or `rows x tracked columns` from the report summary otherwise.
+- The chat backend now uses a lightweight query planner before LLM synthesis: it decomposes broad user messages into sub-questions, classifies each intent, retrieves the matching report/metric/lineage/column evidence, and composes a complete answer.
+- The planner handles mixed questions such as "how much token was used, how many cells are there, which columns changed, and what did the pipeline do" without relying on fixed answer ordering or a single first-match fallback.
+- The planner now also covers deeper workflow questions about the steps needed to produce the final result, planner decisions, worker execution results, approval/validation evidence, and the full pipeline trace from upload to final report.
+- These deeper answers are grounded in `execution_plan_summary`, `worker_results`, `validation.items`, `lineage.versions`, and `pipeline_context`, so users can ask what was planned, what was skipped, what each worker did, and why a result was accepted.
+- The final report now exposes an `answer_contexts` inventory. The Report Agent can answer capability/scope questions such as "what can you answer?" from this inventory.
+- Scope guarding is applied per message and per decomposed sub-question, so unrelated general-knowledge requests are refused while report-scoped parts can still be answered.
+- Metric intents such as F1-score, precision, recall, accuracy, TP/FP/FN take priority over column-name matching, preventing phrases like "F1-score evaluation" from being misread as the dataset column `Score`.
 
 Grounded LLM answer path:
 
@@ -129,11 +143,13 @@ Before/after dataset preview:
 
 - `GET /api/v1/pipeline/{run_id}/report/compare-preview?limit=100`
 - `GET /api/v1/pipeline/{run_id}/report/compare-preview?full=true`
-- Loads lineage version 1 and the latest approved version.
+- `GET /api/v1/pipeline/{run_id}/report/compare-preview?before_version=1&after_version=3`
+- Loads lineage version 1 and the latest approved version by default, or any requested before/after version pair.
 - Returns two bounded table previews plus changed cell coordinates.
 - The frontend uses the backend-provided changed cell coordinates to highlight differences without recomputing the diff in the browser.
 - The Result page uses `full=true` for demo runs so users can inspect the whole uploaded file after cleaning.
 - The bounded `limit` mode remains available for future pagination or very large datasets.
+- Research conclusion for version comparison: because this app preserves lineage records by `session_id`, `version`, and `row_index`, the most reliable demo comparison is a deterministic row-index and column-name diff between two lineage versions. This gives changed cell coordinates, before/after values, changed counts, and column rankings without requiring vector RAG or generated SQL.
 
 Top changed columns:
 
@@ -155,15 +171,20 @@ Frontend Report Agent workspace:
 - The Result page is now full-width so wide datasets can be inspected more comfortably.
 - The page renders dataset documentation, profile highlights, a Cocoon-inspired Cleaning Summary, validation metrics, lineage, before/after preview, Report Agent chat, recommended next actions, and exports.
 - The page includes a Report JSON export button plus cleaned dataset downloads.
+- The page includes a compact Report Agent evidence map covering run summary, profiling, planning, worker execution, validation approval, lineage, metrics, pipeline trace, before/after diff, and exports.
 - The page shows lineage versions and auto-opens the Mermaid lineage visualization.
 - The before/after comparison shows the original and cleaned dataset side by side on desktop layouts, with changed cells highlighted in both tables.
 - Clicking a cell in the original table scrolls to the same row and column in the cleaned table, and clicking from cleaned scrolls back to original.
 - The Ask the Report Agent panel is separated into a memoized component to avoid input lag from re-rendering the full report page.
 - The Ask the Report Agent is now a compact bottom-right icon widget that can be opened or closed without taking space away from the report.
 - The open widget uses a scrollable transcript with role-based message bubbles and a fixed input area at the bottom.
+- The widget no longer renders suggested-question pills, leaving more room for the transcript and user input.
+- Report Agent answers now visually separate the answer, source badges, and a compact evidence/analysis summary so LLM-derived analysis is easier to scan.
+- Chat messages expose an `answer_mode` badge: `Backend evidence` for deterministic report/lineage/metric answers and `LLM synthesis` when the LLM is used to synthesize from bounded context.
+- Out-of-scope questions, such as general knowledge questions unrelated to the current report or dataset, are rejected by a scope guard and are not sent to the LLM.
 - Recommended next actions are rendered as compact bullet points so they support the report without dominating the page.
 - The chat panel loads persisted history for the current `run_id`.
-- While waiting for an answer, the UI shows a loading message: "Checking report, lineage, metrics, and recent chat..."
+- While waiting for an answer, the UI shows a loading message that names the deeper evidence being checked: report, planner, workers, validation, lineage, metrics, and recent chat.
 - Suggested questions are derived from the actual report context instead of being fixed generic prompts.
 
 ### Current Design Constraints

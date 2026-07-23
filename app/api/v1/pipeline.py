@@ -148,23 +148,8 @@ def _json_safe_preview_value(value):
     return value
 
 
-@router.get("/pipeline/{run_id}/download", summary="Download latest processed dataset")
-async def api_download_processed_dataset(run_id: str, format: str = "parquet"):
-    """Export the latest processed lineage version as CSV, XLSX, or Parquet."""
-    state = await get_pipeline_state(run_id)
-    if state is None:
-        raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found.")
-
-    try:
-        df = _load_latest_processed_dataframe(state)
-    except Exception as e:
-        logger.error(f"Failed to load processed dataset for run_id={run_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to load processed dataset: {e}")
-
-    if df is None or df.empty:
-        raise HTTPException(status_code=404, detail="No processed dataset available to download.")
-
-    export_format = format.lower()
+def _stream_dataframe_download(df, filename_stem: str, export_format: str) -> StreamingResponse:
+    export_format = export_format.lower()
     if export_format not in {"csv", "xlsx", "parquet"}:
         raise HTTPException(status_code=400, detail="Unsupported format. Use csv, xlsx, or parquet.")
 
@@ -183,13 +168,55 @@ async def api_download_processed_dataset(run_id: str, format: str = "parquet"):
             media_type = "application/octet-stream"
             extension = "parquet"
     except Exception as e:
-        logger.error(f"Failed to export processed dataset for run_id={run_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to export processed dataset: {e}")
+        logger.error(f"Failed to export dataframe {filename_stem}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to export dataset: {e}")
     buffer.seek(0)
 
-    filename = f"{run_id}_processed.{extension}"
-    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    headers = {"Content-Disposition": f'attachment; filename="{filename_stem}.{extension}"'}
     return StreamingResponse(buffer, media_type=media_type, headers=headers)
+
+
+@router.get("/pipeline/{run_id}/download", summary="Download latest processed dataset")
+async def api_download_processed_dataset(run_id: str, format: str = "parquet"):
+    """Export the latest processed lineage version as CSV, XLSX, or Parquet."""
+    state = await get_pipeline_state(run_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found.")
+
+    try:
+        df = _load_latest_processed_dataframe(state)
+    except Exception as e:
+        logger.error(f"Failed to load processed dataset for run_id={run_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to load processed dataset: {e}")
+
+    if df is None or df.empty:
+        raise HTTPException(status_code=404, detail="No processed dataset available to download.")
+
+    return _stream_dataframe_download(df, f"{run_id}_processed", format)
+
+
+@router.get("/pipeline/{run_id}/versions/{version}/download", summary="Download a specific lineage dataset version")
+async def api_download_dataset_version(run_id: str, version: int, format: str = "parquet"):
+    """Export a specific persisted lineage version as CSV, XLSX, or Parquet."""
+    state = await get_pipeline_state(run_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found.")
+    session_id = resolve_lineage_session_id(state)
+    if not session_id:
+        raise HTTPException(status_code=404, detail="No lineage session is available for this run.")
+
+    try:
+        df = LineageService.get_version(session_id, version)
+        if not df.empty:
+            df = restore_original_column_order(df, state)
+    except Exception as e:
+        logger.error(f"Failed to load lineage version {version} for run_id={run_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to load dataset version: {e}")
+
+    if df is None or df.empty:
+        raise HTTPException(status_code=404, detail=f"No dataset records found for version {version}.")
+
+    return _stream_dataframe_download(df, f"{run_id}_v{version}", format)
 
 
 @router.get("/pipeline/{run_id}/preview", summary="Preview latest processed dataset")
@@ -257,13 +284,24 @@ async def api_get_column_change_summary(run_id: str, column_name: str):
 
 
 @router.get("/pipeline/{run_id}/report/compare-preview", summary="Preview before/after dataset changes")
-async def api_get_dataset_compare_preview(run_id: str, limit: int = 100, full: bool = False):
+async def api_get_dataset_compare_preview(
+    run_id: str,
+    limit: int = 100,
+    full: bool = False,
+    before_version: int = 1,
+    after_version: int | None = None,
+):
     """Return side-by-side before/after preview rows with changed cell coordinates."""
     state = await get_pipeline_state(run_id)
     if state is None:
         raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found.")
     safe_limit = None if full else max(1, min(limit, 500))
-    return ReportService.build_dataset_compare_preview(state, limit=safe_limit)
+    return ReportService.build_dataset_compare_preview(
+        state,
+        limit=safe_limit,
+        before_version=max(1, before_version),
+        after_version=max(1, after_version) if after_version is not None else None,
+    )
 
 
 @router.get("/pipeline/{run_id}/report/changes/top", summary="Get columns with the most before/after changes")
@@ -347,7 +385,10 @@ async def api_chat_with_report(run_id: str, request: ReportChatRequest):
         "assistant",
         answer["answer"],
         sources=answer.get("sources", []),
-        metadata={"reasoning_summary": answer.get("reasoning_summary")},
+        metadata={
+            "reasoning_summary": answer.get("reasoning_summary"),
+            "answer_mode": answer.get("answer_mode"),
+        },
     )
     return {
         **answer,

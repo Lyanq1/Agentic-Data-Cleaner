@@ -194,6 +194,18 @@ def _worker_result_lines(worker_outputs: dict[str, Any] | None) -> list[str]:
     return lines
 
 
+def _compact_json(value: Any, max_chars: int = 260) -> str:
+    """Render nested evidence compactly for chat answers."""
+    if value in (None, "", [], {}):
+        return "not recorded"
+    try:
+        text = json.dumps(value, ensure_ascii=False, default=str)
+    except TypeError:
+        text = str(value)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text if len(text) <= max_chars else text[: max_chars - 3].rstrip() + "..."
+
+
 def _next_actions(report: dict[str, Any]) -> list[str]:
     actions: list[str] = []
     validation = report.get("validation") or {}
@@ -206,6 +218,83 @@ def _next_actions(report: dict[str, Any]) -> list[str]:
     actions.append("Download the cleaned dataset and use the report as documentation for downstream analysis.")
     actions.append("Ask the Report Agent about specific columns before planning the next transformation.")
     return actions
+
+
+def _answer_context_inventory(report: dict[str, Any]) -> list[dict[str, Any]]:
+    """Describe evidence areas the Report Agent can answer from for this run."""
+    summary = report.get("summary") or {}
+    validation = report.get("validation") or {}
+    plan = report.get("execution_plan_summary") or {}
+    worker_results = report.get("worker_results") or {}
+    lineage = report.get("lineage") or {}
+    metrics = report.get("metrics") or {}
+    pipeline_context = report.get("pipeline_context") or {}
+    profile_summary = report.get("profile_summary") or {}
+    semantic_summary = report.get("semantic_summary") or {}
+
+    contexts = [
+        {
+            "id": "summary",
+            "label": "Run summary",
+            "available": bool(summary),
+            "evidence": "filename, rows, columns, retry cycles, token total",
+        },
+        {
+            "id": "profiling",
+            "label": "Profiling",
+            "available": bool(profile_summary or semantic_summary),
+            "evidence": "statistical profile, semantic table summary, missing values, duplicates",
+        },
+        {
+            "id": "planning",
+            "label": "Planning decisions",
+            "available": bool(plan.get("tasks") or plan.get("plan_summary")),
+            "evidence": "planner summary, task list, skipped tasks, rationale",
+        },
+        {
+            "id": "worker_execution",
+            "label": "Worker execution",
+            "available": bool(worker_results),
+            "evidence": "worker outputs, changed rows, changed columns, task status",
+        },
+        {
+            "id": "validation",
+            "label": "Validation approval",
+            "available": bool(validation),
+            "evidence": "validator items, pass/fail, failed rules, issue count",
+        },
+        {
+            "id": "lineage",
+            "label": "Lineage versions",
+            "available": bool(lineage.get("versions")),
+            "evidence": "approved versions, producing agents, descriptions",
+        },
+        {
+            "id": "metrics",
+            "label": "Metrics",
+            "available": bool(metrics.get("token_metrics") or metrics.get("f1_metrics")),
+            "evidence": "token usage, F1, precision, recall, cell accuracy, TP/FP/FN",
+        },
+        {
+            "id": "pipeline_trace",
+            "label": "Pipeline trace",
+            "available": bool(pipeline_context),
+            "evidence": "upload, profiling, validation, planning, workers, lineage, report/export flow",
+        },
+        {
+            "id": "before_after",
+            "label": "Before/after diff",
+            "available": bool(lineage.get("versions")),
+            "evidence": "lineage version 1 vs latest version, changed cells, per-column samples",
+        },
+        {
+            "id": "exports",
+            "label": "Exports",
+            "available": True,
+            "evidence": "report JSON, cleaned CSV/XLSX/Parquet, versioned dataset downloads",
+        },
+    ]
+    return contexts
 
 
 def _suggested_questions(report: dict[str, Any]) -> list[str]:
@@ -351,6 +440,112 @@ def _contains_column_reference(value: Any, column_name: str) -> bool:
     return False
 
 
+def _has_metric_intent(question_lower: str) -> bool:
+    return any(
+        token in question_lower
+        for token in [
+            "f1",
+            "f1-score",
+            "score evaluation",
+            "precision",
+            "recall",
+            "accuracy",
+            "true positive",
+            "false positive",
+            "false negative",
+            "cell accuracy",
+        ]
+    )
+
+
+def _has_explicit_column_target(question_lower: str) -> bool:
+    return any(
+        token in question_lower
+        for token in [
+            "column ",
+            "columns ",
+            "field ",
+            "fields ",
+            "cột ",
+            "cot ",
+        ]
+    )
+
+
+def _is_report_scope_question(report: dict[str, Any], question_lower: str) -> bool:
+    scope_terms = [
+        "report",
+        "pipeline",
+        "dataset",
+        "data",
+        "clean",
+        "cleaning",
+        "changed",
+        "change",
+        "before",
+        "after",
+        "column",
+        "columns",
+        "row",
+        "rows",
+        "validation",
+        "validate",
+        "metric",
+        "metrics",
+        "f1",
+        "score",
+        "precision",
+        "recall",
+        "accuracy",
+        "true positive",
+        "false positive",
+        "false negative",
+        "cell",
+        "cells",
+        "token",
+        "cost",
+        "lineage",
+        "version",
+        "agent",
+        "step",
+        "steps",
+        "task",
+        "tasks",
+        "plan",
+        "planner",
+        "planned",
+        "worker",
+        "approved",
+        "approval",
+        "accepted",
+        "result",
+        "export",
+        "download",
+        "transform",
+        "next",
+        "summary",
+        "context",
+        "answer scope",
+        "what can you answer",
+        "what do you know",
+        "profile",
+        "schema",
+        "null",
+        "missing",
+        "duplicate",
+        "cột",
+        "dòng",
+        "thay đổi",
+        "xử lý",
+        "làm sạch",
+    ]
+    if any(term in question_lower for term in scope_terms):
+        return True
+
+    known_columns = [str(column).lower() for column in (report.get("summary") or {}).get("column_names") or []]
+    return any(re.search(rf"(?<!\w){re.escape(column)}(?!\w)", question_lower) for column in known_columns)
+
+
 class ReportService:
     """Builds the final Report Agent artifacts from pipeline state and lineage."""
 
@@ -434,6 +629,7 @@ class ReportService:
                 "f1_metrics": state.get("f1_metrics"),
             },
             "transformations": transformations,
+            "answer_contexts": [],
             "next_actions": [],
             "suggested_questions": [],
             "pipeline_context": {
@@ -446,6 +642,7 @@ class ReportService:
                 "agent_logs": _model_to_dict(state.get("agent_logs")) or {},
             },
         }
+        report["answer_contexts"] = _answer_context_inventory(report)
         report["next_actions"] = _next_actions(report)
         report["suggested_questions"] = _suggested_questions(report)
         return report
@@ -541,13 +738,22 @@ class ReportService:
         return result
 
     @staticmethod
-    def build_dataset_compare_preview(state: dict[str, Any], limit: int | None = 100) -> dict[str, Any]:
+    def build_dataset_compare_preview(
+        state: dict[str, Any],
+        limit: int | None = 100,
+        before_version: int = 1,
+        after_version: int | None = None,
+    ) -> dict[str, Any]:
         """Return a bounded before/after dataset preview with changed cell coordinates."""
         session_id = resolve_lineage_session_id(state)
         try:
             if session_id:
-                before_df = LineageService.get_version(session_id, 1)
-                after_df = LineageService.get_latest_version(session_id)
+                before_df = LineageService.get_version(session_id, before_version)
+                after_df = (
+                    LineageService.get_version(session_id, after_version)
+                    if after_version is not None
+                    else LineageService.get_latest_version(session_id)
+                )
             else:
                 before_df = _load_dataframe(state.get("dataset_path")) if state.get("dataset_path") else None
                 after_df = _load_latest_processed_dataframe(state)
@@ -610,8 +816,8 @@ class ReportService:
         return {
             "available": True,
             "session_id": str(session_id) if session_id else None,
-            "before_version": 1 if session_id else "input",
-            "after_version": "latest",
+            "before_version": before_version if session_id else "input",
+            "after_version": after_version if after_version is not None else "latest",
             "columns": columns,
             "before_rows": before_rows,
             "after_rows": after_rows,
@@ -718,6 +924,10 @@ class ReportService:
     @staticmethod
     def infer_requested_columns(report: dict[str, Any], question: str) -> list[str]:
         """Find columns mentioned in a free-form question."""
+        question_lower = question.lower()
+        if _has_metric_intent(question_lower) and not _has_explicit_column_target(question_lower):
+            return []
+
         known_columns: set[str] = set()
         for column in (report.get("summary") or {}).get("column_names") or []:
             known_columns.add(str(column))
@@ -733,7 +943,6 @@ class ReportService:
         metrics = (report.get("validation") or {}).get("metrics") or {}
         known_columns.update(str(column) for column in metrics.keys())
 
-        question_lower = question.lower()
         requested = [
             column for column in known_columns
             if re.search(rf"(?<!\w){re.escape(column.lower())}(?!\w)", question_lower)
@@ -860,6 +1069,19 @@ class ReportService:
         sources = ["report"]
         f1_metrics = (report.get("metrics") or {}).get("f1_metrics") or {}
         token_metrics = (report.get("metrics") or {}).get("token_metrics") or {}
+        asks_cell_count = any(
+            token in normalized
+            for token in [
+                "how many cells",
+                "number of cells",
+                "cell count",
+                "total cells",
+                "cells are there",
+                "evaluated cells",
+                "bao nhieu cell",
+                "bao nhieu o",
+            ]
+        )
         asks_token = any(token in normalized for token in ["token", "cost", "chi phí", "ton bao nhieu", "tốn bao nhiêu", "tốn bn"])
         asks_tp = any(token in normalized for token in ["true positive", "tp", "đúng dương", "duong tinh dung"])
         asks_fp = any(token in normalized for token in ["false positive", "fp", "dương giả", "duong gia"])
@@ -916,6 +1138,16 @@ class ReportService:
                 )
             else:
                 answer = "This run does not include an F1-score evaluation because no usable ground-truth clean file was available at report time."
+        elif asks_cell_count:
+            sources.append("metrics")
+            total_cells = f1_metrics.get("total_cells_evaluated")
+            if total_cells is not None:
+                answer = f"The report evaluated {total_cells} cells."
+            else:
+                summary = report.get("summary") or {}
+                row_count = summary.get("output_rows") or summary.get("input_rows") or 0
+                column_count = summary.get("tracked_columns") or 0
+                answer = f"The dataset has {int(row_count or 0) * int(column_count or 0)} cells ({row_count} rows x {column_count} tracked columns)."
         elif "lineage" in normalized or "version" in normalized or "agent" in normalized:
             lineage = report.get("lineage") or {}
             versions = lineage.get("versions") or []
@@ -953,7 +1185,8 @@ class ReportService:
         return {
             "answer": _humanize_answer_payload(answer, fallback=answer),
             "sources": sources,
-            "reasoning_summary": "Answered from the structured final report with deterministic fallback logic.",
+            "reasoning_summary": "Answered from structured backend report evidence.",
+            "answer_mode": "backend_evidence",
             "suggested_questions": _suggested_questions(report),
         }
 
@@ -966,21 +1199,85 @@ class ReportService:
         """Compose deterministic answers for questions that ask several facts at once."""
         normalized = question.lower()
         asks_token = any(token in normalized for token in ["token", "cost", "chi phí", "ton bao nhieu", "tốn bao nhiêu", "tốn bn"])
+        asks_cell_count = any(
+            token in normalized
+            for token in [
+                "how many cells",
+                "number of cells",
+                "cell count",
+                "total cells",
+                "cells are there",
+                "evaluated cells",
+            ]
+        )
         asks_changed_columns = any(
             token in normalized
-            for token in ["columns changed", "changed columns", "columns are changed", "column changed", "cột nào thay đổi"]
+            for token in [
+                "columns changed",
+                "changed columns",
+                "columns are changed",
+                "columns were changed",
+                "which columns were changed",
+                "how many columns were changed",
+                "column changed",
+                "cột nào thay đổi",
+            ]
         )
         asks_pipeline_actions = any(
             token in normalized
             for token in ["what did the pipeline do", "pipeline do", "what did it do", "completed steps", "pipeline actions"]
         )
         asks_transformations = any(token in normalized for token in ["transform", "cleaning step", "cleaned", "thay đổi", "làm gì"])
-        intent_count = sum([asks_token, asks_changed_columns, asks_pipeline_actions or asks_transformations])
+        intent_count = sum([asks_token, asks_cell_count, asks_changed_columns, asks_pipeline_actions or asks_transformations])
         if intent_count < 2:
             return None
 
         parts: list[str] = []
         sources: set[str] = {"report"}
+        asks_cell_count = any(token in normalized for token in ["how many cells", "number of cells", "cell count", "total cells", "cells are there", "evaluated cells"])
+
+        asks_cell_count = any(
+            token in normalized
+            for token in [
+                "how many cells",
+                "number of cells",
+                "cell count",
+                "total cells",
+                "cells are there",
+                "evaluated cells",
+                "bao nhieu cell",
+                "bao nhieu o",
+            ]
+        )
+
+        asks_cell_count = any(
+            token in normalized
+            for token in [
+                "how many cells",
+                "number of cells",
+                "cell count",
+                "total cells",
+                "cells are there",
+                "evaluated cells",
+                "bao nhieu cell",
+                "bao nhieu o",
+            ]
+        )
+
+        asks_cell_count = any(
+            token in normalized
+            for token in [
+                "how many cells",
+                "number of cells",
+                "cell count",
+                "total cells",
+                "cells are there",
+                "evaluated cells",
+                "bao nhieu cell",
+                "bao nhieu o",
+            ]
+        )
+
         if asks_token:
             token_metrics = (report.get("metrics") or {}).get("token_metrics") or {}
             parts.append(
@@ -989,6 +1286,22 @@ class ReportService:
                 f"{token_metrics.get('completion_tokens', 0)} completion)."
             )
             sources.add("token_metrics")
+
+        if asks_cell_count:
+            f1_metrics = (report.get("metrics") or {}).get("f1_metrics") or {}
+            summary = report.get("summary") or {}
+            total_cells = f1_metrics.get("total_cells_evaluated")
+            if total_cells is not None:
+                parts.append(f"Cell count: {total_cells} evaluated cells.")
+                sources.add("metrics")
+            else:
+                row_count = summary.get("output_rows") or summary.get("input_rows") or 0
+                column_count = summary.get("tracked_columns") or 0
+                parts.append(
+                    f"Cell count: {int(row_count or 0) * int(column_count or 0)} cells "
+                    f"({row_count} rows x {column_count} tracked columns)."
+                )
+                sources.add("final_report.summary")
 
         if asks_changed_columns:
             changed_columns = []
@@ -1023,7 +1336,553 @@ class ReportService:
         return {
             "answer": "\n".join(parts),
             "sources": sorted(sources),
-            "reasoning_summary": "Split the multi-part question into token usage, changed-column evidence, and pipeline action evidence before answering.",
+            "reasoning_summary": "Split the multi-part question into the requested metrics/evidence before answering each part.",
+            "answer_mode": "backend_evidence",
+            "suggested_questions": _suggested_questions(report),
+        }
+
+    @staticmethod
+    def decompose_report_question(question: str) -> list[str]:
+        """Split a free-form chat message into report-scoped sub-questions."""
+        normalized = re.sub(r"\s+", " ", question.strip())
+        if not normalized:
+            return []
+
+        starters = (
+            r"how|what|which|who|where|when|why|did|does|do|is|are|can|could|should|"
+            r"tokens?|cells?|columns?|rows?|f1|precision|recall|accuracy|validation|"
+            r"lineage|pipeline|download|export|metric|metrics|score|plan|planner|task|step|"
+            r"worker|agent|approve|approved|approval|duyet|bao nhieu|cot|dong"
+        )
+        seed_parts = re.split(rf"(?:\?+|;|\n|,\s+(?=(?:{starters})\b))+", normalized, flags=re.IGNORECASE)
+        connector_re = re.compile(
+            rf"\s+(?:and|also|plus|va|ngoai ra|con)\s+(?=(?:{starters})\b)",
+            flags=re.IGNORECASE,
+        )
+        parts: list[str] = []
+        for part in seed_parts:
+            for fragment in connector_re.split(part):
+                fragment = re.sub(
+                    r"^(?:and|also|plus|va|ngoai ra|con)\s+",
+                    "",
+                    fragment.strip(),
+                    flags=re.IGNORECASE,
+                )
+                if fragment:
+                    parts.append(fragment)
+        return parts or [normalized]
+
+    @staticmethod
+    def classify_report_intents(report: dict[str, Any], question_part: str) -> list[str]:
+        """Classify one sub-question into one or more answerable report intents."""
+        normalized = question_part.lower()
+        if not _is_report_scope_question(report, normalized):
+            return ["out_of_scope"]
+
+        intents: list[str] = []
+        if any(token in normalized for token in ["token", "cost", "chi ph", "ton bao nhieu", "ton bn"]):
+            intents.append("token_usage")
+        if any(
+            token in normalized
+            for token in [
+                "what can you answer",
+                "what do you know",
+                "which context",
+                "available context",
+                "answer scope",
+                "chatbot scope",
+                "report agent scope",
+                "what information do you have",
+                "context related",
+            ]
+        ):
+            intents.append("context_inventory")
+        if any(
+            token in normalized
+            for token in [
+                "how many cells",
+                "number of cells",
+                "cell count",
+                "total cells",
+                "cells are there",
+                "evaluated cells",
+                "bao nhieu cell",
+                "bao nhieu o",
+            ]
+        ):
+            intents.append("cell_count")
+        if any(token in normalized for token in ["how many rows", "row count", "total rows", "rows are there", "bao nhieu dong"]):
+            intents.append("row_count")
+        if any(token in normalized for token in ["tracked columns", "column count", "how many columns", "total columns", "bao nhieu cot"]) and not any(
+            token in normalized for token in ["changed", "change", "thay doi"]
+        ):
+            intents.append("column_count")
+        if _has_metric_intent(normalized) or "score evaluation" in normalized:
+            intents.append("f1_metrics")
+        if any(
+            token in normalized
+            for token in [
+                "columns changed",
+                "changed columns",
+                "columns are changed",
+                "columns were changed",
+                "which columns were changed",
+                "how many columns were changed",
+                "column changed",
+                "cot nao thay doi",
+            ]
+        ):
+            intents.append("changed_columns")
+        elif (
+            ReportService.infer_requested_columns(report, question_part)
+            and any(token in normalized for token in ["column", "before", "after", "changed", "change", "cot", "truoc", "sau"])
+            and not (_has_metric_intent(normalized) and not _has_explicit_column_target(normalized))
+        ):
+            intents.append("column_change_detail")
+        if any(token in normalized for token in ["lineage", "version", "agent", "produced", "approved dataset"]):
+            intents.append("lineage_versions")
+        if any(
+            token in normalized
+            for token in [
+                "plan",
+                "planner",
+                "planned",
+                "execution plan",
+                "task list",
+                "task",
+                "rationale",
+                "why did it choose",
+                "decided",
+                "decision",
+                "buoc can thuc hien",
+                "ke hoach",
+                "duyet",
+            ]
+        ):
+            intents.append("planning_decisions")
+        if any(
+            token in normalized
+            for token in [
+                "worker",
+                "worker result",
+                "agent result",
+                "which agent",
+                "agent did",
+                "handled",
+                "executed",
+                "da lam",
+                "da xu ly",
+            ]
+        ):
+            intents.append("worker_execution")
+        if any(token in normalized for token in ["valid", "validation", "issue", "pass", "failed", "check"]):
+            intents.append("validation")
+        if any(
+            token in normalized
+            for token in [
+                "approved",
+                "approval",
+                "accepted",
+                "duyet",
+                "chap nhan",
+                "passed validation",
+                "why was it approved",
+            ]
+        ):
+            intents.append("approval_evidence")
+        if any(
+            token in normalized
+            for token in [
+                "pipeline trace",
+                "full pipeline",
+                "whole pipeline",
+                "all steps",
+                "steps were needed",
+                "steps needed",
+                "steps to produce",
+                "how did it produce",
+                "produce the final result",
+                "from upload to result",
+                "ra thanh pham",
+                "to final result",
+            ]
+        ):
+            intents.append("pipeline_trace")
+        if any(
+            token in normalized
+            for token in ["what did the pipeline do", "pipeline do", "what did it do", "completed steps", "pipeline actions"]
+        ) or any(token in normalized for token in ["transform", "cleaning step", "cleaned", "thay doi", "lam gi"]):
+            intents.append("pipeline_actions")
+        if any(token in normalized for token in ["download", "export", "csv", "xlsx", "parquet"]):
+            intents.append("exports")
+        if any(token in normalized for token in ["next", "suggest", "recommend", "continue"]):
+            intents.append("next_actions")
+
+        unique_intents: list[str] = []
+        for intent in intents:
+            if intent not in unique_intents:
+                unique_intents.append(intent)
+        return unique_intents or ["general_report_summary"]
+
+    @staticmethod
+    def _answer_planned_intent(
+        report: dict[str, Any],
+        question_part: str,
+        intent: str,
+        state: dict[str, Any] | None,
+        evidence_cache: dict[str, Any],
+    ) -> dict[str, Any]:
+        sources: set[str] = {"report"}
+        summary = report.get("summary") or {}
+        f1_metrics = (report.get("metrics") or {}).get("f1_metrics") or {}
+
+        if intent == "out_of_scope":
+            return {
+                "label": "Out of scope",
+                "answer": (
+                    "I can only answer questions about this pipeline run, its report, cleaned dataset, "
+                    "lineage, validation, metrics, exports, and recommended next steps."
+                ),
+                "sources": ["scope_guard"],
+            }
+
+        if intent == "token_usage":
+            token_metrics = (report.get("metrics") or {}).get("token_metrics") or {}
+            return {
+                "label": "Token usage",
+                "answer": (
+                    f"{token_metrics.get('total_tokens', 0)} total LLM tokens "
+                    f"({token_metrics.get('prompt_tokens', 0)} prompt, "
+                    f"{token_metrics.get('completion_tokens', 0)} completion)."
+                ),
+                "sources": ["report", "token_metrics"],
+            }
+
+        if intent == "context_inventory":
+            contexts = report.get("answer_contexts") or _answer_context_inventory(report)
+            available = [item for item in contexts if item.get("available")]
+            missing = [item for item in contexts if not item.get("available")]
+            available_text = "; ".join(
+                f"{item.get('label')}: {item.get('evidence')}"
+                for item in available
+            ) or "No structured report contexts are available."
+            answer = f"I can answer from these run-scoped contexts: {available_text}."
+            if missing:
+                answer += " Not available for this run: " + ", ".join(str(item.get("label")) for item in missing) + "."
+            return {
+                "label": "Available context",
+                "answer": answer,
+                "sources": ["report", "answer_contexts"],
+            }
+
+        if intent == "cell_count":
+            total_cells = f1_metrics.get("total_cells_evaluated")
+            if total_cells is not None:
+                answer = f"{total_cells} evaluated cells."
+                sources.add("metrics")
+            else:
+                row_count = summary.get("output_rows") or summary.get("input_rows") or 0
+                column_count = summary.get("tracked_columns") or 0
+                answer = f"{int(row_count or 0) * int(column_count or 0)} cells ({row_count} rows x {column_count} tracked columns)."
+                sources.add("final_report.summary")
+            return {"label": "Cell count", "answer": answer, "sources": sorted(sources)}
+
+        if intent == "row_count":
+            return {
+                "label": "Rows",
+                "answer": f"{summary.get('input_rows')} input rows and {summary.get('output_rows')} output rows.",
+                "sources": ["report", "final_report.summary"],
+            }
+
+        if intent == "column_count":
+            column_names = summary.get("column_names") or []
+            names = f": {', '.join(str(column) for column in column_names)}" if column_names else "."
+            return {
+                "label": "Columns",
+                "answer": f"{summary.get('tracked_columns')} tracked columns{names}",
+                "sources": ["report", "final_report.summary"],
+            }
+
+        if intent == "f1_metrics":
+            metric_answer = ReportService.answer_question(report, question_part)
+            return {
+                "label": "F1 evaluation",
+                "answer": metric_answer["answer"],
+                "sources": metric_answer.get("sources", ["report", "metrics"]),
+            }
+
+        if intent == "changed_columns":
+            evidence = evidence_cache.get("top_changed_columns")
+            if evidence is None and state:
+                evidence = ReportService.build_column_change_summary(state, columns=None, sample_limit=3, max_columns=200)
+                evidence_cache["top_changed_columns"] = evidence
+            changed_columns = []
+            if evidence and evidence.get("available"):
+                changed_columns = [
+                    (column, data)
+                    for column, data in (evidence.get("columns") or {}).items()
+                    if data.get("changed_cells", 0) > 0
+                ]
+            if changed_columns:
+                ranked = sorted(changed_columns, key=lambda item: item[1].get("changed_cells", 0), reverse=True)
+                names = [column for column, _data in ranked]
+                details = "; ".join(
+                    f"{column}: {data.get('changed_cells')} cells"
+                    for column, data in ranked[:10]
+                )
+                answer = f"{len(names)} columns changed: {', '.join(names)}. Details: {details}."
+                if evidence and evidence.get("truncated_to_top_changed_columns"):
+                    answer += " This list is truncated to the top changed columns available in the evidence."
+                return {
+                    "label": "Changed columns",
+                    "answer": answer,
+                    "sources": ["report", "column_change_evidence", "lineage_versions"],
+                }
+            return {
+                "label": "Changed columns",
+                "answer": "No changed-column evidence is available for this run.",
+                "sources": ["report", "lineage_versions"],
+            }
+
+        if intent == "column_change_detail":
+            requested_columns = ReportService.infer_requested_columns(report, question_part)
+            evidence = None
+            if state:
+                cache_key = f"column_change_detail:{','.join(sorted(requested_columns))}"
+                evidence = evidence_cache.get(cache_key)
+                if evidence is None:
+                    evidence = ReportService.build_column_change_summary(
+                        state,
+                        columns=requested_columns or None,
+                        sample_limit=8,
+                    )
+                    evidence_cache[cache_key] = evidence
+            fallback = ReportService.answer_question(report, question_part)
+            answer = ReportService.answer_column_changes_from_evidence(evidence, fallback)
+            return {
+                "label": "Column changes",
+                "answer": answer.get("answer", fallback["answer"]),
+                "sources": answer.get("sources", fallback.get("sources", ["report"])),
+            }
+
+        if intent == "lineage_versions":
+            answer = ReportService.answer_question(report, question_part)
+            return {"label": "Lineage", "answer": answer["answer"], "sources": answer.get("sources", ["report", "lineage"])}
+
+        if intent == "planning_decisions":
+            plan = report.get("execution_plan_summary") or {}
+            tasks = plan.get("tasks") or []
+            if tasks:
+                task_lines = []
+                for task in tasks[:8]:
+                    status = "skipped" if task.get("skip") else "planned"
+                    columns = ", ".join(str(column) for column in task.get("columns") or []) or "no specific columns"
+                    reason = task.get("skip_reason") or task.get("rationale") or "no rationale recorded"
+                    task_lines.append(
+                        f"{task.get('task_id') or task.get('agent')}: {status} for {columns}; rationale: {reason}"
+                    )
+                answer = (
+                    f"Planner summary: {plan.get('plan_summary') or 'no summary recorded'}. "
+                    f"Active tasks: {plan.get('active_task_count', 0)}, skipped tasks: {plan.get('skipped_task_count', 0)}. "
+                    + " Planned decisions: "
+                    + "; ".join(task_lines)
+                    + "."
+                )
+            else:
+                answer = "No execution-plan tasks are recorded in the final report."
+            return {
+                "label": "Planning decisions",
+                "answer": answer,
+                "sources": ["report", "execution_plan"],
+            }
+
+        if intent == "worker_execution":
+            worker_results = report.get("worker_results") or {}
+            if isinstance(worker_results, dict) and worker_results:
+                lines = []
+                for agent_name, raw_result in worker_results.items():
+                    result = _model_to_dict(raw_result)
+                    if isinstance(result, dict):
+                        task_id = result.get("task_id") or result.get("agent_name") or agent_name
+                        status = result.get("status") or result.get("outcome") or "completed"
+                        changed_rows = result.get("changed_rows") or result.get("rows_removed") or result.get("rows_affected")
+                        changed_columns = result.get("changed_columns") or result.get("columns") or []
+                        details = []
+                        if changed_rows is not None:
+                            details.append(f"affected rows: {changed_rows}")
+                        if changed_columns:
+                            details.append("columns: " + ", ".join(str(column) for column in changed_columns))
+                        summary_text = result.get("summary") or result.get("message") or result.get("description")
+                        if summary_text:
+                            details.append(str(summary_text))
+                        lines.append(f"{task_id}: {status}" + (f" ({'; '.join(details)})" if details else ""))
+                    else:
+                        lines.append(f"{agent_name}: completed")
+                answer = "; ".join(lines) + "."
+            else:
+                answer = "No worker execution outputs are recorded in the final report."
+            return {
+                "label": "Worker execution",
+                "answer": answer,
+                "sources": ["report", "worker_outputs"],
+            }
+
+        if intent == "validation":
+            answer = ReportService.answer_question(report, question_part)
+            return {"label": "Validation", "answer": answer["answer"], "sources": answer.get("sources", ["report", "validation_results"])}
+
+        if intent == "approval_evidence":
+            validation = report.get("validation") or {}
+            lineage = report.get("lineage") or {}
+            versions = lineage.get("versions") or []
+            latest = versions[-1] if versions else {}
+            validation_items = validation.get("items") or []
+            item_summaries = []
+            for item in validation_items[:5]:
+                if isinstance(item, dict):
+                    agent = item.get("agent") or item.get("task_id") or "validator"
+                    passed = item.get("passed", True)
+                    failed_rules = item.get("failed_rules") or []
+                    metrics = item.get("metrics_observed") or {}
+                    detail = f"{agent}: passed={passed}"
+                    if failed_rules:
+                        detail += f", failed rules={', '.join(str(rule) for rule in failed_rules)}"
+                    if metrics:
+                        detail += f", metrics={_compact_json(metrics, 180)}"
+                    item_summaries.append(detail)
+            answer = (
+                f"Final validation passed={validation.get('passed')}, "
+                f"remaining issues={validation.get('issue_count', 0)}. "
+                f"Latest approved lineage version: v{latest.get('version', 'unknown')} from "
+                f"{latest.get('agent_name') or 'unknown agent'}"
+                f"{' - ' + str(latest.get('description')) if latest.get('description') else ''}. "
+            )
+            if item_summaries:
+                answer += "Validator details: " + "; ".join(item_summaries) + "."
+            return {
+                "label": "Approval evidence",
+                "answer": answer,
+                "sources": ["report", "validation_results", "lineage_versions"],
+            }
+
+        if intent == "pipeline_trace":
+            plan = report.get("execution_plan_summary") or {}
+            pipeline_context = report.get("pipeline_context") or {}
+            completed_steps = summary.get("completed_steps") or pipeline_context.get("completed_steps") or []
+            lineage = report.get("lineage") or {}
+            trace_parts = [
+                "Upload/canonical conversion",
+                "statistical profiling",
+                "semantic profiling",
+                "input validation",
+                "planning",
+            ]
+            active_tasks = [
+                str(task.get("task_id") or task.get("agent"))
+                for task in plan.get("tasks") or []
+                if isinstance(task, dict) and not task.get("skip")
+            ]
+            if active_tasks:
+                trace_parts.append("worker execution: " + ", ".join(active_tasks))
+            elif completed_steps:
+                trace_parts.append("completed workers: " + ", ".join(str(step) for step in completed_steps))
+            trace_parts.extend(["output validation/retry", "lineage promotion", "final report and exports"])
+            answer = (
+                " -> ".join(trace_parts)
+                + f". Current step recorded as {pipeline_context.get('current_step') or 'not recorded'}; "
+                + f"lineage versions recorded: {lineage.get('version_count', 0)}."
+            )
+            return {
+                "label": "Pipeline trace",
+                "answer": answer,
+                "sources": ["report", "pipeline_context", "execution_plan", "worker_outputs", "validation_results", "lineage_versions"],
+            }
+
+        if intent == "pipeline_actions":
+            transformations = report.get("transformations") or []
+            completed_steps = summary.get("completed_steps") or []
+            if transformations:
+                answer = "; ".join(str(item) for item in transformations) + "."
+            elif completed_steps:
+                answer = "Completed " + ", ".join(str(item) for item in completed_steps) + "."
+            else:
+                answer = "No detailed completed-step list is available in the report."
+            return {
+                "label": "Pipeline actions",
+                "answer": answer,
+                "sources": ["report", "worker_outputs", "completed_steps"],
+            }
+
+        if intent == "exports":
+            return {
+                "label": "Exports",
+                "answer": (
+                    "The result page can download the cleaned dataset as CSV, XLSX, or Parquet, "
+                    "download each lineage version, and export the structured report as JSON."
+                ),
+                "sources": ["report_exports", "lineage_versions"],
+            }
+
+        if intent == "next_actions":
+            actions = report.get("next_actions") or []
+            answer = "; ".join(str(action) for action in actions) if actions else "No next actions are available in the report."
+            return {"label": "Next actions", "answer": answer, "sources": ["report", "next_actions"]}
+
+        answer = ReportService.answer_question(report, question_part)
+        return {"label": "Report summary", "answer": answer["answer"], "sources": answer.get("sources", ["report"])}
+
+    @staticmethod
+    def answer_planned_question(
+        report: dict[str, Any],
+        question: str,
+        state: dict[str, Any] | None = None,
+        top_change_evidence: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        """Plan, retrieve evidence, and compose answers for broad multi-intent questions."""
+        question_parts = ReportService.decompose_report_question(question)
+        if not question_parts:
+            return None
+
+        planned_items: list[tuple[str, str]] = []
+        for part in question_parts:
+            for intent in ReportService.classify_report_intents(report, part):
+                planned_items.append((part, intent))
+
+        answerable_items = [
+            item
+            for item in planned_items
+            if item[1] not in {"general_report_summary"}
+        ]
+        if not answerable_items:
+            return None
+
+        evidence_cache: dict[str, Any] = {}
+        if top_change_evidence is not None:
+            evidence_cache["top_changed_columns"] = top_change_evidence
+
+        answer_parts: list[str] = []
+        sources: set[str] = set()
+        has_scope_guard = False
+        seen_answer_parts: set[str] = set()
+        for part, intent in planned_items:
+            item_answer = ReportService._answer_planned_intent(report, part, intent, state, evidence_cache)
+            label = item_answer.get("label") or "Answer"
+            formatted_answer = f"{label}: {item_answer.get('answer')}"
+            if formatted_answer not in seen_answer_parts:
+                answer_parts.append(formatted_answer)
+                seen_answer_parts.add(formatted_answer)
+            sources.update(str(source) for source in item_answer.get("sources") or [])
+            has_scope_guard = has_scope_guard or intent == "out_of_scope"
+
+        return {
+            "answer": "\n".join(answer_parts),
+            "sources": sorted(sources or {"report"}),
+            "reasoning_summary": (
+                f"Decomposed the message into {len(question_parts)} sub-question(s), classified "
+                "each requested intent, and retrieved the matching report, metric, lineage, or "
+                "column-change evidence before composing the answer."
+            ),
+            "answer_mode": "scope_guard" if has_scope_guard and len(answer_parts) == 1 else "backend_evidence",
             "suggested_questions": _suggested_questions(report),
         }
 
@@ -1055,6 +1914,7 @@ class ReportService:
             "answer": " ".join(parts),
             "sources": sorted(set([*fallback.get("sources", []), "column_change_evidence", "lineage_versions"])),
             "reasoning_summary": "Compared lineage version 1 against the latest approved version for the requested column evidence.",
+            "answer_mode": "backend_evidence",
         }
 
     @staticmethod
@@ -1079,6 +1939,7 @@ class ReportService:
             "answer": answer,
             "sources": sorted(set([*fallback.get("sources", []), "top_changed_columns", "lineage_versions"])),
             "reasoning_summary": "Ranked columns by changed cell count between lineage version 1 and the latest approved version.",
+            "answer_mode": "backend_evidence",
         }
 
     @staticmethod
@@ -1120,6 +1981,7 @@ class ReportService:
             "answer": answer,
             "sources": sorted(set([*fallback.get("sources", []), "column_impact", "execution_plan", "worker_outputs", "lineage_versions"])),
             "reasoning_summary": "Checked column references in the execution plan, worker outputs, validation artifacts, and lineage before/after evidence.",
+            "answer_mode": "backend_evidence",
         }
 
     @staticmethod
@@ -1130,10 +1992,28 @@ class ReportService:
         state: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Answer with an LLM grounded in the final report, with deterministic fallback."""
+        question_lower = question.lower()
+        if not _is_report_scope_question(report, question_lower):
+            return {
+                "answer": (
+                    "I can only answer questions about this pipeline run, its report, cleaned dataset, "
+                    "lineage, validation, metrics, exports, and recommended next steps."
+                ),
+                "sources": ["scope_guard"],
+                "reasoning_summary": "Rejected because the question is outside the current report and dataset scope.",
+                "answer_mode": "scope_guard",
+                "suggested_questions": _suggested_questions(report),
+        }
+
         fallback = ReportService.answer_question(report, question)
         try:
+            planned_answer = ReportService.answer_planned_question(report, question, state=state)
+            if planned_answer:
+                return planned_answer
+
+            metric_intent = _has_metric_intent(question_lower)
+            explicit_column_target = _has_explicit_column_target(question_lower)
             requested_columns = ReportService.infer_requested_columns(report, question)
-            question_lower = question.lower()
             asks_top_changes = any(
                 token in question_lower
                 for token in [
@@ -1142,9 +2022,16 @@ class ReportService:
                     "thay đổi nhiều nhất",
                     "cột nào thay đổi",
                     "columns changed",
+                    "changed columns",
+                    "columns were changed",
+                    "columns are changed",
+                    "which columns were changed",
+                    "how many columns were changed",
                     "top changed",
                 ]
             )
+            if metric_intent and not explicit_column_target and not asks_top_changes:
+                return fallback
             asks_impact = any(
                 token in question_lower
                 for token in [
@@ -1161,8 +2048,12 @@ class ReportService:
                 ]
             )
             needs_column_evidence = bool(
-                requested_columns
-                or any(token in question_lower for token in ["column", "cột", "before", "after", "trước", "sau", "changed", "thay đổi"])
+                (requested_columns and not (metric_intent and not explicit_column_target))
+                or (
+                    not asks_top_changes
+                    and not (metric_intent and not explicit_column_target)
+                    and any(token in question_lower for token in ["column", "cột", "before", "after", "trước", "sau", "changed", "thay đổi"])
+                )
             )
             column_evidence = None
             top_change_evidence = None
@@ -1192,6 +2083,8 @@ class ReportService:
             )
             if multi_part_answer:
                 return multi_part_answer
+            if asks_top_changes and not requested_columns and not asks_impact:
+                return fallback
 
             context = {
                 "final_report": report,
@@ -1249,6 +2142,7 @@ class ReportService:
                 "answer": answer,
                 "sources": [str(item) for item in sources],
                 "reasoning_summary": reasoning_summary,
+                "answer_mode": "llm_synthesis",
                 "suggested_questions": [str(item) for item in suggestions[:4]],
             }
         except Exception:
@@ -1270,6 +2164,7 @@ class ReportService:
                     "content": message.content,
                     "sources": message.sources or [],
                     "reasoning_summary": (message.metadata_ or {}).get("reasoning_summary"),
+                    "answer_mode": (message.metadata_ or {}).get("answer_mode"),
                     "created_at": message.created_at.isoformat() if message.created_at else None,
                 }
                 for message in messages
@@ -1305,6 +2200,7 @@ class ReportService:
                 "content": message.content,
                 "sources": message.sources or [],
                 "reasoning_summary": (message.metadata_ or {}).get("reasoning_summary"),
+                "answer_mode": (message.metadata_ or {}).get("answer_mode"),
                 "created_at": message.created_at.isoformat() if message.created_at else None,
             }
         except Exception:

@@ -1,4 +1,4 @@
-import React, { memo, useMemo, useRef, useState } from 'react';
+import React, { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { pipelineApi } from '../../api/services';
 import { MermaidDiagram } from '../MermaidDiagram';
@@ -19,6 +19,7 @@ import {
   Database,
   ArrowRightLeft,
   X,
+  Sparkles,
 } from 'lucide-react';
 
 interface ResultViewProps {
@@ -126,6 +127,25 @@ function buildTransformationLines(report: Record<string, any> | undefined): stri
     }
   }
   return lines.length > 0 ? lines : ['Worker tasks completed — see raw report for details'];
+}
+
+function buildEvidenceContexts(report: Record<string, any> | undefined): Array<{ id: string; label: string; available: boolean; evidence: string }> {
+  const contexts = report?.answer_contexts;
+  if (Array.isArray(contexts) && contexts.length > 0) {
+    return contexts.map((item: any, index: number) => ({
+      id: String(item.id || item.label || index),
+      label: String(item.label || item.id || 'Context'),
+      available: Boolean(item.available),
+      evidence: String(item.evidence || ''),
+    }));
+  }
+  return [
+    { id: 'summary', label: 'Run summary', available: Boolean(report?.summary), evidence: 'Rows, columns, retries, tokens' },
+    { id: 'planning', label: 'Planning decisions', available: Boolean(report?.execution_plan_summary?.tasks?.length), evidence: 'Tasks, skipped steps, rationale' },
+    { id: 'workers', label: 'Worker execution', available: Boolean(report?.worker_results && Object.keys(report.worker_results).length), evidence: 'Agent outputs and affected rows' },
+    { id: 'validation', label: 'Validation approval', available: Boolean(report?.validation), evidence: 'Checks, issues, pass/fail' },
+    { id: 'lineage', label: 'Lineage versions', available: Boolean(report?.lineage?.versions?.length), evidence: 'Version history and producing agents' },
+  ];
 }
 
 function formatGMT7(dateStr: string): string {
@@ -327,14 +347,19 @@ const CircularProgress = ({ value, label }: { value: number, label: string }) =>
 
 interface ReportChatPanelProps {
   runId: string;
-  suggestedQuestions: string[];
 }
 
-const ReportChatPanel = memo(({ runId, suggestedQuestions }: ReportChatPanelProps) => {
+const ReportChatPanel = memo(({ runId }: ReportChatPanelProps) => {
   const [isOpen, setIsOpen] = useState(false);
   const [question, setQuestion] = useState('');
   const [messages, setMessages] = useState<any[]>([]);
   const [isAsking, setIsAsking] = useState(false);
+  const transcriptEndRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [isOpen, messages.length, isAsking]);
 
   useQuery({
     queryKey: ['report-chat-history', runId],
@@ -365,7 +390,7 @@ const ReportChatPanel = memo(({ runId, suggestedQuestions }: ReportChatPanelProp
         const lastIndex = history.length - 1;
         setMessages(history.map((message: any, index: number) => (
           index === lastIndex
-            ? { ...message, reasoning_summary: result.reasoning_summary }
+            ? { ...message, reasoning_summary: result.reasoning_summary, answer_mode: result.answer_mode }
             : message
         )));
       } else {
@@ -381,7 +406,7 @@ const ReportChatPanel = memo(({ runId, suggestedQuestions }: ReportChatPanelProp
       <button
         type="button"
         onClick={() => setIsOpen(true)}
-        className="fixed bottom-24 right-6 z-50 inline-flex h-14 w-14 items-center justify-center rounded-full border bg-primary text-primary-foreground shadow-lg transition hover:bg-primary/90"
+        className="fixed bottom-6 right-6 z-50 inline-flex h-14 w-14 items-center justify-center rounded-full border bg-primary text-primary-foreground shadow-lg transition hover:bg-primary/90"
         aria-label="Ask Report Agent"
         title="Ask Report Agent"
       >
@@ -391,7 +416,7 @@ const ReportChatPanel = memo(({ runId, suggestedQuestions }: ReportChatPanelProp
   }
 
   return (
-    <div className="fixed bottom-24 right-6 z-50 flex h-[min(72vh,680px)] w-[min(92vw,420px)] flex-col overflow-hidden rounded-xl border bg-card text-card-foreground shadow-2xl">
+    <div className="fixed bottom-6 right-6 z-50 flex h-[min(72vh,680px)] w-[min(92vw,420px)] flex-col overflow-hidden rounded-xl border bg-card text-card-foreground shadow-2xl">
       <div className="px-5 py-4 border-b bg-muted/30 flex items-center gap-2">
         <MessageSquare className="w-4 h-4 text-muted-foreground" />
         <span className="text-sm font-semibold">Ask the Report Agent</span>
@@ -409,7 +434,7 @@ const ReportChatPanel = memo(({ runId, suggestedQuestions }: ReportChatPanelProp
           <div className="mx-auto flex max-w-full flex-col gap-4">
             {messages.length === 0 && !isAsking && (
               <div className="rounded-lg border border-dashed bg-background px-4 py-6 text-sm text-muted-foreground">
-                Ask about changed columns, before/after values, validation metrics, lineage, tokens, or what to transform next.
+                Ask about changed columns, before/after values, planner decisions, worker results, approval evidence, validation metrics, lineage, tokens, or next transformations.
               </div>
             )}
             {messages.map((message, index) => {
@@ -426,16 +451,36 @@ const ReportChatPanel = memo(({ runId, suggestedQuestions }: ReportChatPanelProp
                     <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
                       {isUser ? 'You' : 'Report Agent'}
                     </div>
+                    {!isUser && (
+                      <div className="mb-2 flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-primary">
+                          <Sparkles className="h-3 w-3" />
+                          Answer
+                        </div>
+                        <span className="rounded-full border bg-muted/40 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                          {message.answer_mode === 'llm_synthesis'
+                            ? 'LLM synthesis'
+                            : message.answer_mode === 'scope_guard'
+                              ? 'Out of scope'
+                              : 'Backend evidence'}
+                        </span>
+                      </div>
+                    )}
                     <p className="whitespace-pre-wrap leading-relaxed">{message.content}</p>
                     {message.sources?.length > 0 && (
-                      <p className="mt-2 text-xs text-muted-foreground">
-                        Sources: {message.sources.join(', ')}
-                      </p>
+                      <div className="mt-3 flex flex-wrap gap-1.5">
+                        {message.sources.map((source: string) => (
+                          <span key={source} className="rounded-full border bg-muted/40 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                            {source}
+                          </span>
+                        ))}
+                      </div>
                     )}
                     {message.reasoning_summary && (
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Checked: {message.reasoning_summary}
-                      </p>
+                      <div className="mt-3 rounded-lg border border-primary/15 bg-primary/5 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+                        <span className="font-semibold text-foreground">Analysis checked: </span>
+                        {message.reasoning_summary}
+                      </div>
                     )}
                   </div>
                 </div>
@@ -449,15 +494,16 @@ const ReportChatPanel = memo(({ runId, suggestedQuestions }: ReportChatPanelProp
                   </div>
                   <div className="flex items-center gap-2 text-muted-foreground">
                     <span className="inline-flex h-2 w-2 animate-pulse rounded-full bg-primary" />
-                    <span>Checking report, lineage, metrics, and recent chat...</span>
+                    <span>Checking report, planner, workers, validation, lineage, metrics, and recent chat...</span>
                   </div>
                 </div>
               </div>
             )}
+            <div ref={transcriptEndRef} />
           </div>
         </div>
         <div className="border-t bg-background p-4">
-          <div className="mx-auto max-w-full space-y-3">
+          <div className="mx-auto max-w-full">
             <div className="flex flex-col sm:flex-row gap-2">
               <input
                 value={question}
@@ -465,7 +511,7 @@ const ReportChatPanel = memo(({ runId, suggestedQuestions }: ReportChatPanelProp
                 onKeyDown={(event) => {
                   if (event.key === 'Enter') void handleAsk();
                 }}
-                placeholder="Ask what changed, which agent produced a version, or what to transform next..."
+                placeholder="Ask what changed, why it was approved, which worker ran, or what to transform next..."
                 disabled={isAsking}
                 className="flex-1 rounded-md border bg-background px-3 py-3 text-sm outline-none focus:ring-2 focus:ring-primary/30"
               />
@@ -480,20 +526,6 @@ const ReportChatPanel = memo(({ runId, suggestedQuestions }: ReportChatPanelProp
                 <Send className="h-4 w-4" />
               </button>
             </div>
-            {suggestedQuestions.length > 0 && (
-              <div className="flex max-h-24 flex-wrap gap-2 overflow-y-auto pr-1">
-                {suggestedQuestions.map((suggestion, index) => (
-                  <button
-                    key={index}
-                    type="button"
-                    onClick={() => setQuestion(suggestion)}
-                    className="rounded-full border px-3 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/20"
-                  >
-                    {suggestion}
-                  </button>
-                ))}
-              </div>
-            )}
           </div>
         </div>
       </div>
@@ -527,6 +559,7 @@ export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) =>
   const rowsProcessed = useMemo(() => getRowsProcessed(report), [report]);
   const columnCount = useMemo(() => getColumnCount(report), [report]);
   const transformationLines = useMemo(() => buildTransformationLines(report), [report]);
+  const evidenceContexts = useMemo(() => buildEvidenceContexts(report), [report]);
 
   const validation = report?.validation as Record<string, any> | undefined;
   const hasValidation = validation && Object.keys(validation).length > 0;
@@ -668,6 +701,32 @@ export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) =>
 
               <div>
                 <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">
+                  Report Agent evidence map
+                </h3>
+                <div className="grid grid-cols-1 gap-2 text-sm md:grid-cols-2 xl:grid-cols-5">
+                  {evidenceContexts.map((context) => (
+                    <div
+                      key={context.id}
+                      className={`rounded-lg border px-3 py-2 ${
+                        context.available ? 'bg-background' : 'bg-muted/20 text-muted-foreground'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`h-2 w-2 rounded-full ${
+                            context.available ? 'bg-emerald-500' : 'bg-slate-300'
+                          }`}
+                        />
+                        <span className="font-medium">{context.label}</span>
+                      </div>
+                      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{context.evidence}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">
                   Applied transformations
                 </h3>
                 <ul className="list-disc pl-5 text-sm space-y-1.5 text-foreground">
@@ -723,9 +782,26 @@ export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) =>
                   <div className="divide-y">
                     {report.lineage.versions.map((version: any) => (
                       <div key={version.version} className="px-4 py-3 text-sm">
-                        <div className="flex items-center gap-2">
-                          <span className="font-semibold">v{version.version}</span>
-                          <span className="text-muted-foreground">{version.agent_name}</span>
+                        <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
+                          <div className="flex min-w-0 flex-1 items-center gap-2">
+                            <span className="font-semibold">v{version.version}</span>
+                            <span className="truncate text-muted-foreground">{version.agent_name}</span>
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {(['csv', 'xlsx', 'parquet'] as const).map((format) => (
+                              <button
+                                key={format}
+                                type="button"
+                                onClick={() => {
+                                  window.location.href = pipelineApi.getVersionDownloadUrl(runId, version.version, format);
+                                }}
+                                className="inline-flex h-7 items-center rounded-md border bg-background px-2 text-[11px] font-medium uppercase text-muted-foreground hover:bg-muted/30 hover:text-foreground"
+                              >
+                                <Download className="mr-1 h-3 w-3" />
+                                {format}
+                              </button>
+                            ))}
+                          </div>
                         </div>
                         {version.description && (
                           <p className="text-xs text-muted-foreground mt-1">{version.description}</p>
@@ -910,7 +986,6 @@ export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) =>
 
               <ReportChatPanel
                 runId={runId}
-                suggestedQuestions={report?.suggested_questions || []}
               />
 
               {report?.next_actions?.length > 0 && (
@@ -942,43 +1017,43 @@ export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) =>
                   </div>
                 )}
               </div>
+
+              <div className="border-t pt-6">
+                <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+                  <button
+                    onClick={() => handleReportExport('json')}
+                    className="inline-flex h-11 items-center justify-center whitespace-nowrap rounded-md border border-input bg-background px-4 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground"
+                  >
+                    <FileText className="mr-2 h-4 w-4" />
+                    Report JSON
+                  </button>
+                  {([
+                    ['csv', 'CSV'],
+                    ['xlsx', 'XLSX'],
+                    ['parquet', 'Parquet'],
+                  ] as const).map(([format, label]) => (
+                    <button
+                      key={format}
+                      onClick={() => handleDownload(format)}
+                      className="inline-flex h-11 items-center justify-center whitespace-nowrap rounded-md bg-primary px-5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+                    >
+                      <Download className="mr-2 h-4 w-4" />
+                      Download {label}
+                    </button>
+                  ))}
+                  <button
+                    onClick={onStartOver}
+                    className="inline-flex h-11 items-center justify-center whitespace-nowrap rounded-md border border-input bg-background px-8 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground"
+                  >
+                    <RotateCcw className="mr-2 h-4 w-4" />
+                    Process Another File
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
           </>
         )}
-      </div>
-
-      <div className="flex-shrink-0 flex flex-col sm:flex-row justify-center gap-3 sm:gap-4 pt-4 pb-2 border-t border-border/60 bg-background">
-        <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
-          <button
-            onClick={() => handleReportExport('json')}
-            className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-colors border border-input bg-background hover:bg-accent hover:text-accent-foreground h-11 px-4"
-          >
-            <FileText className="mr-2 h-4 w-4" />
-            Report JSON
-          </button>
-          {([
-            ['csv', 'CSV'],
-            ['xlsx', 'XLSX'],
-            ['parquet', 'Parquet'],
-          ] as const).map(([format, label]) => (
-            <button
-              key={format}
-              onClick={() => handleDownload(format)}
-              className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-colors bg-primary text-primary-foreground hover:bg-primary/90 h-11 px-5"
-            >
-              <Download className="mr-2 h-4 w-4" />
-              Download {label}
-            </button>
-          ))}
-        </div>
-        <button
-          onClick={onStartOver}
-          className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-colors border border-input bg-background hover:bg-accent hover:text-accent-foreground h-11 px-8"
-        >
-          <RotateCcw className="mr-2 h-4 w-4" />
-          Process Another File
-        </button>
       </div>
     </div>
   );
