@@ -1,4 +1,4 @@
-import React, { memo, useMemo, useState } from 'react';
+import React, { memo, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { pipelineApi } from '../../api/services';
 import { MermaidDiagram } from '../MermaidDiagram';
@@ -17,11 +17,32 @@ import {
   Shield,
   Layers,
   Database,
+  ArrowRightLeft,
+  X,
 } from 'lucide-react';
 
 interface ResultViewProps {
   runId: string;
   onStartOver: () => void;
+}
+
+interface ComparePreview {
+  available?: boolean;
+  reason?: string;
+  columns?: string[];
+  before_rows?: Record<string, any>[];
+  after_rows?: Record<string, any>[];
+  before_row_count?: number;
+  after_row_count?: number;
+  preview_count?: number;
+  changed_cells?: Array<{
+    row_index: number;
+    column: string;
+    before: any;
+    after: any;
+  }>;
+  changed_cell_count?: number;
+  truncated?: boolean;
 }
 
 const SEVERITY_STYLES: Record<string, string> = {
@@ -137,6 +158,146 @@ function formatCell(value: any): string {
   }
 }
 
+function buildChangedCellLookup(comparePreview: ComparePreview | undefined): Map<string, NonNullable<ComparePreview['changed_cells']>[number]> {
+  const lookup = new Map<string, NonNullable<ComparePreview['changed_cells']>[number]>();
+  for (const cell of comparePreview?.changed_cells || []) {
+    lookup.set(`${cell.row_index}::${cell.column}`, cell);
+  }
+  return lookup;
+}
+
+const DatasetComparePreview = memo(({ comparePreview }: { comparePreview?: ComparePreview }) => {
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const [selectedCell, setSelectedCell] = useState<{ rowIndex: number; column: string; side: 'before' | 'after' } | null>(null);
+  const changedLookup = useMemo(() => buildChangedCellLookup(comparePreview), [comparePreview]);
+  const columns = comparePreview?.columns || [];
+  const beforeRows = comparePreview?.before_rows || [];
+  const afterRows = comparePreview?.after_rows || [];
+
+  const handleCellSelect = (rowIndex: number, column: string, side: 'before' | 'after') => {
+    const counterpartSide = side === 'before' ? 'after' : 'before';
+    setSelectedCell({ rowIndex, column, side });
+    window.setTimeout(() => {
+      const selector = `[data-compare-cell="${CSS.escape(`${counterpartSide}::${rowIndex}::${column}`)}"]`;
+      const target = rootRef.current?.querySelector<HTMLElement>(selector);
+      target?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+    }, 0);
+  };
+
+  const renderTable = (label: string, rows: Record<string, any>[], side: 'before' | 'after') => (
+    <div className="min-w-0 rounded-lg border bg-background overflow-hidden">
+      <div className="flex items-center justify-between gap-3 border-b bg-muted/25 px-4 py-3">
+        <div>
+          <h4 className="text-sm font-semibold">{label}</h4>
+          <p className="text-xs text-muted-foreground">{rows.length.toLocaleString()} preview row(s)</p>
+        </div>
+        <span className="rounded-full border bg-background px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
+          {side === 'before' ? 'Left: Input' : 'Right: Cleaned'}
+        </span>
+      </div>
+      <div className="max-h-[640px] overflow-auto">
+        <table className="w-full min-w-[72rem] border-separate border-spacing-0 text-xs">
+          <thead className="sticky top-0 z-10">
+            <tr>
+              <th className="sticky left-0 z-20 bg-slate-50 border-b border-r px-3 py-2 text-left font-semibold text-slate-600">#</th>
+              {columns.map((column) => (
+                <th key={column} className="bg-slate-50 border-b border-r px-3 py-2 text-left font-semibold text-slate-600 whitespace-nowrap">
+                  {column}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, rowIndex) => (
+              <tr key={rowIndex} className="hover:bg-muted/20">
+                <td className="sticky left-0 bg-background border-b border-r px-3 py-1.5 text-slate-500 tabular-nums">{rowIndex + 1}</td>
+                {columns.map((column) => {
+                  const change = changedLookup.get(`${rowIndex}::${column}`);
+                  const changed = Boolean(change);
+                  const selected = selectedCell?.rowIndex === rowIndex && selectedCell.column === column;
+                  const selectedOrigin = selected && selectedCell.side === side;
+                  const title = changed
+                    ? `Before: ${formatCell(change?.before)} -> After: ${formatCell(change?.after)}`
+                    : formatCell(row[column]);
+                  return (
+                    <td
+                      key={column}
+                      data-compare-cell={`${side}::${rowIndex}::${column}`}
+                      onClick={() => handleCellSelect(rowIndex, column, side)}
+                      className={`cursor-pointer border-b border-r px-3 py-1.5 whitespace-nowrap max-w-xs truncate ${
+                        selected
+                          ? selectedOrigin
+                            ? 'bg-blue-100 text-blue-950 ring-2 ring-inset ring-blue-500'
+                            : 'bg-cyan-100 text-cyan-950 ring-2 ring-inset ring-cyan-500'
+                          : changed
+                            ? 'bg-amber-100 text-amber-950 ring-1 ring-inset ring-amber-300'
+                            : 'text-slate-700'
+                      }`}
+                      title={title}
+                    >
+                      {formatCell(row[column])}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+
+  if (comparePreview && comparePreview.available === false) {
+    return (
+      <div className="rounded-xl border border-dashed bg-muted/10 p-5 text-sm text-muted-foreground">
+        Before/after preview is not available yet. {comparePreview.reason}
+      </div>
+    );
+  }
+
+  if (!columns.length) {
+    return (
+      <div className="rounded-xl border border-dashed bg-muted/10 p-5 text-sm text-muted-foreground">
+        Loading before/after dataset comparison...
+      </div>
+    );
+  }
+
+  return (
+    <div ref={rootRef} className="rounded-xl border shadow-sm overflow-hidden">
+      <div className="flex flex-col gap-3 border-b bg-muted/30 px-4 py-4 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <h3 className="flex items-center gap-2 text-base font-semibold">
+            <ArrowRightLeft className="h-4 w-4 text-muted-foreground" />
+            Before / After Dataset Comparison
+          </h3>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Showing {comparePreview?.truncated ? 'the first ' : ''}
+            {comparePreview?.preview_count?.toLocaleString?.() ?? beforeRows.length.toLocaleString()} row(s). Changed cells are highlighted; click any cell to jump to the same row and column in the other table.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2 text-xs">
+          <span className="rounded-full border bg-background px-3 py-1">
+            Before: {(comparePreview?.before_row_count ?? beforeRows.length).toLocaleString()} rows
+          </span>
+          <span className="rounded-full border bg-background px-3 py-1">
+            After: {(comparePreview?.after_row_count ?? afterRows.length).toLocaleString()} rows
+          </span>
+          <span className="rounded-full border border-amber-300 bg-amber-100 px-3 py-1 text-amber-900">
+            {(comparePreview?.changed_cell_count ?? 0).toLocaleString()} changed cells in preview
+          </span>
+        </div>
+      </div>
+      <div className="grid grid-cols-1 gap-4 p-4 lg:grid-cols-2">
+        {renderTable('Original dataset', beforeRows, 'before')}
+        {renderTable('Cleaned dataset', afterRows, 'after')}
+      </div>
+    </div>
+  );
+});
+
+DatasetComparePreview.displayName = 'DatasetComparePreview';
+
 const CircularProgress = ({ value, label }: { value: number, label: string }) => {
   const radius = 24;
   const circumference = 2 * Math.PI * radius;
@@ -170,6 +331,7 @@ interface ReportChatPanelProps {
 }
 
 const ReportChatPanel = memo(({ runId, suggestedQuestions }: ReportChatPanelProps) => {
+  const [isOpen, setIsOpen] = useState(false);
   const [question, setQuestion] = useState('');
   const [messages, setMessages] = useState<any[]>([]);
   const [isAsking, setIsAsking] = useState(false);
@@ -214,92 +376,126 @@ const ReportChatPanel = memo(({ runId, suggestedQuestions }: ReportChatPanelProp
     }
   };
 
+  if (!isOpen) {
+    return (
+      <button
+        type="button"
+        onClick={() => setIsOpen(true)}
+        className="fixed bottom-24 right-6 z-50 inline-flex h-14 w-14 items-center justify-center rounded-full border bg-primary text-primary-foreground shadow-lg transition hover:bg-primary/90"
+        aria-label="Ask Report Agent"
+        title="Ask Report Agent"
+      >
+        <MessageSquare className="h-5 w-5" />
+      </button>
+    );
+  }
+
   return (
-    <div className="rounded-xl border shadow-sm overflow-hidden">
-      <div className="px-4 py-3 border-b bg-muted/30 flex items-center gap-2">
+    <div className="fixed bottom-24 right-6 z-50 flex h-[min(72vh,680px)] w-[min(92vw,420px)] flex-col overflow-hidden rounded-xl border bg-card text-card-foreground shadow-2xl">
+      <div className="px-5 py-4 border-b bg-muted/30 flex items-center gap-2">
         <MessageSquare className="w-4 h-4 text-muted-foreground" />
         <span className="text-sm font-semibold">Ask the Report Agent</span>
+        <button
+          type="button"
+          onClick={() => setIsOpen(false)}
+          className="ml-auto inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground"
+          aria-label="Close Report Agent"
+        >
+          <X className="h-4 w-4" />
+        </button>
       </div>
-      <div className="p-4 space-y-3">
-        {messages.length > 0 && (
-          <div className="max-h-72 overflow-y-auto rounded-lg border bg-muted/10 divide-y">
-            {messages.map((message, index) => (
-              <div key={message.id || index} className="p-3 text-sm">
-                <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
-                  {message.role === 'user' ? 'You' : 'Report Agent'}
-                </div>
-                <p className="text-foreground whitespace-pre-wrap">{message.content}</p>
-                {message.sources?.length > 0 && (
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    Sources: {message.sources.join(', ')}
-                  </p>
-                )}
-                {message.reasoning_summary && (
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Checked: {message.reasoning_summary}
-                  </p>
-                )}
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="flex-1 overflow-y-auto bg-muted/5 px-5 py-5">
+          <div className="mx-auto flex max-w-full flex-col gap-4">
+            {messages.length === 0 && !isAsking && (
+              <div className="rounded-lg border border-dashed bg-background px-4 py-6 text-sm text-muted-foreground">
+                Ask about changed columns, before/after values, validation metrics, lineage, tokens, or what to transform next.
               </div>
-            ))}
-            {isAsking && (
-              <div className="p-3 text-sm">
-                <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
-                  Report Agent
+            )}
+            {messages.map((message, index) => {
+              const isUser = message.role === 'user';
+              return (
+                <div key={message.id || index} className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
+                  <div
+                    className={`max-w-[86%] rounded-xl border px-4 py-3 text-sm shadow-sm ${
+                      isUser
+                        ? 'border-primary/20 bg-primary/10 text-foreground'
+                        : 'bg-background text-foreground'
+                    }`}
+                  >
+                    <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+                      {isUser ? 'You' : 'Report Agent'}
+                    </div>
+                    <p className="whitespace-pre-wrap leading-relaxed">{message.content}</p>
+                    {message.sources?.length > 0 && (
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        Sources: {message.sources.join(', ')}
+                      </p>
+                    )}
+                    {message.reasoning_summary && (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Checked: {message.reasoning_summary}
+                      </p>
+                    )}
+                  </div>
                 </div>
-                <div className="flex items-center gap-2 text-muted-foreground">
-                  <span className="inline-flex h-2 w-2 animate-pulse rounded-full bg-primary" />
-                  <span>Checking report, lineage, metrics, and recent chat...</span>
+              );
+            })}
+            {isAsking && (
+              <div className="flex justify-start">
+                <div className="max-w-[86%] rounded-xl border bg-background px-4 py-3 text-sm shadow-sm">
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+                    Report Agent
+                  </div>
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <span className="inline-flex h-2 w-2 animate-pulse rounded-full bg-primary" />
+                    <span>Checking report, lineage, metrics, and recent chat...</span>
+                  </div>
                 </div>
               </div>
             )}
           </div>
-        )}
-        {messages.length === 0 && isAsking && (
-          <div className="rounded-lg border bg-muted/10 p-3 text-sm">
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
-              Report Agent
-            </div>
-            <div className="flex items-center gap-2 text-muted-foreground">
-              <span className="inline-flex h-2 w-2 animate-pulse rounded-full bg-primary" />
-              <span>Checking report, lineage, metrics, and recent chat...</span>
-            </div>
-          </div>
-        )}
-        <div className="flex flex-col sm:flex-row gap-2">
-          <input
-            value={question}
-            onChange={(event) => setQuestion(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') void handleAsk();
-            }}
-            placeholder="Ask what changed, which agent produced a version, or what to transform next..."
-            disabled={isAsking}
-            className="flex-1 rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/30"
-          />
-          <button
-            type="button"
-            disabled={isAsking || !question.trim()}
-            onClick={() => void handleAsk()}
-            className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
-          >
-            <Send className="mr-2 h-4 w-4" />
-            Ask
-          </button>
         </div>
-        {suggestedQuestions.length > 0 && (
-          <div className="flex flex-wrap gap-2">
-            {suggestedQuestions.map((suggestion, index) => (
+        <div className="border-t bg-background p-4">
+          <div className="mx-auto max-w-full space-y-3">
+            <div className="flex flex-col sm:flex-row gap-2">
+              <input
+                value={question}
+                onChange={(event) => setQuestion(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') void handleAsk();
+                }}
+                placeholder="Ask what changed, which agent produced a version, or what to transform next..."
+                disabled={isAsking}
+                className="flex-1 rounded-md border bg-background px-3 py-3 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+              />
               <button
-                key={index}
                 type="button"
-                onClick={() => setQuestion(suggestion)}
-                className="rounded-full border px-3 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/20"
+                disabled={isAsking || !question.trim()}
+                onClick={() => void handleAsk()}
+                className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground disabled:opacity-50"
+                aria-label="Send message"
+                title="Send message"
               >
-                {suggestion}
+                <Send className="h-4 w-4" />
               </button>
-            ))}
+            </div>
+            {suggestedQuestions.length > 0 && (
+              <div className="flex max-h-24 flex-wrap gap-2 overflow-y-auto pr-1">
+                {suggestedQuestions.map((suggestion, index) => (
+                  <button
+                    key={index}
+                    type="button"
+                    onClick={() => setQuestion(suggestion)}
+                    className="rounded-full border px-3 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/20"
+                  >
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
-        )}
+        </div>
       </div>
     </div>
   );
@@ -309,7 +505,7 @@ ReportChatPanel.displayName = 'ReportChatPanel';
 
 export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) => {
   const [showRawJson, setShowRawJson] = useState(false);
-  const [showDiagram, setShowDiagram] = useState(false);
+  const [showDiagram, setShowDiagram] = useState(true);
 
   const { data: report, isLoading, error } = useQuery({
     queryKey: ['pipeline-report', runId],
@@ -323,9 +519,9 @@ export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) =>
     queryKey: ['report-diagram', runId, 'lineage'],
     queryFn: () => pipelineApi.getReportDiagram(runId, 'lineage'),
   });
-  const { data: preview } = useQuery({
-    queryKey: ['processed-preview', runId],
-    queryFn: () => pipelineApi.getProcessedPreview(runId, 500),
+  const { data: comparePreview } = useQuery<ComparePreview>({
+    queryKey: ['dataset-compare-preview', runId],
+    queryFn: () => pipelineApi.getDatasetComparePreview(runId, 100, true),
   });
 
   const rowsProcessed = useMemo(() => getRowsProcessed(report), [report]);
@@ -347,8 +543,8 @@ export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) =>
 
   /** Outer fills main; inner scroll region gets flex-1 min-h-0 so it scrolls under h-screen + overflow-hidden. */
   return (
-    <div className="w-full max-w-4xl mx-auto flex flex-col flex-1 min-h-0 text-left self-center">
-      <div className="flex-1 min-h-0 overflow-y-auto pt-8 pb-4 hidden-scrollbar">
+    <div className="w-full max-w-none flex flex-col flex-1 min-h-0 text-left self-stretch">
+      <div className="flex-1 min-h-0 overflow-y-auto px-4 pt-6 pb-4 sm:px-6 lg:px-8 hidden-scrollbar">
         {isLoading ? (
           <div className="text-center py-12 text-muted-foreground">Loading report...</div>
         ) : error ? (
@@ -374,7 +570,7 @@ export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) =>
             <h1 className="text-2xl sm:text-3xl font-bold tracking-tight mb-2">
               {validationPassed ? 'Pipeline Completed' : 'Pipeline Completed — Validation Notes'}
             </h1>
-            <p className="text-muted-foreground max-w-lg">
+            <p className="text-muted-foreground max-w-2xl">
               {report?.filename ? (
                 <>
                   Output for <span className="font-medium text-foreground">{report.filename}</span>
@@ -387,7 +583,7 @@ export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) =>
               )}
             </p>
             {!validationPassed && (
-              <p className="text-sm text-amber-700 dark:text-amber-400 mt-3 max-w-lg">
+              <p className="text-sm text-amber-700 dark:text-amber-400 mt-3 max-w-2xl">
                 Validation did not fully pass. Review the summary below and the issue list — you can still download the output.
               </p>
             )}
@@ -433,6 +629,43 @@ export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) =>
                 </div>
               )}
 
+              <div className="rounded-xl border bg-muted/10 p-4">
+                <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">
+                  Cleaning Summary
+                </h3>
+                <div className="grid grid-cols-1 gap-3 text-sm md:grid-cols-2 xl:grid-cols-4">
+                  <div className="rounded-lg border bg-background px-4 py-3">
+                    <div className="text-xs text-muted-foreground mb-1">Original rows</div>
+                    <div className="font-semibold tabular-nums">
+                      {(comparePreview?.before_row_count ?? report?.summary?.input_rows ?? 0).toLocaleString()}
+                    </div>
+                  </div>
+                  <div className="rounded-lg border bg-background px-4 py-3">
+                    <div className="text-xs text-muted-foreground mb-1">Cleaned rows</div>
+                    <div className="font-semibold tabular-nums">
+                      {(comparePreview?.after_row_count ?? report?.summary?.output_rows ?? 0).toLocaleString()}
+                    </div>
+                  </div>
+                  <div className="rounded-lg border bg-background px-4 py-3">
+                    <div className="text-xs text-muted-foreground mb-1">Changed cells</div>
+                    <div className="font-semibold tabular-nums">
+                      {(comparePreview?.changed_cell_count ?? 0).toLocaleString()}
+                    </div>
+                  </div>
+                  <div className="rounded-lg border bg-background px-4 py-3">
+                    <div className="text-xs text-muted-foreground mb-1">Outcome</div>
+                    <div className="font-semibold">
+                      {validationPassed ? 'Validated output' : 'Completed with notes'}
+                    </div>
+                  </div>
+                </div>
+                <ul className="mt-3 list-disc pl-5 text-sm leading-relaxed text-muted-foreground">
+                  <li>{transformationLines.length.toLocaleString()} cleaning step(s) are documented for this run.</li>
+                  <li>{(report?.lineage?.version_count ?? 0).toLocaleString()} approved lineage version(s) are available for inspection.</li>
+                  <li>The before/after tables below link matching cells across the original and cleaned datasets.</li>
+                </ul>
+              </div>
+
               <div>
                 <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">
                   Applied transformations
@@ -442,6 +675,40 @@ export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) =>
                     <li key={i}>{line}</li>
                   ))}
                 </ul>
+              </div>
+
+              <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+                <div className="xl:col-span-2 rounded-xl border bg-muted/10 p-4">
+                  <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+                    Dataset documentation
+                  </h3>
+                  <p className="text-sm leading-relaxed text-foreground">
+                    {report?.semantic_summary?.table_summary || 'No semantic table summary was produced for this run.'}
+                  </p>
+                </div>
+                <div className="rounded-xl border bg-muted/10 p-4">
+                  <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">
+                    Profile highlights
+                  </h3>
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between gap-3">
+                      <span className="text-muted-foreground">Initial rows</span>
+                      <span className="font-medium tabular-nums">{report?.profile_summary?.total_rows?.toLocaleString?.() ?? 'â€”'}</span>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <span className="text-muted-foreground">Initial columns</span>
+                      <span className="font-medium tabular-nums">{report?.profile_summary?.total_columns?.toLocaleString?.() ?? 'â€”'}</span>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <span className="text-muted-foreground">Missing values</span>
+                      <span className="font-medium tabular-nums">{report?.profile_summary?.missing_values_detected?.toLocaleString?.() ?? 'â€”'}</span>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <span className="text-muted-foreground">Duplicate rows</span>
+                      <span className="font-medium tabular-nums">{report?.profile_summary?.duplicate_rows?.toLocaleString?.() ?? 'â€”'}</span>
+                    </div>
+                  </div>
+                </div>
               </div>
 
               {report?.lineage?.versions?.length > 0 && (
@@ -639,52 +906,23 @@ export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) =>
                 </div>
               )}
 
+              <DatasetComparePreview comparePreview={comparePreview} />
+
               <ReportChatPanel
                 runId={runId}
                 suggestedQuestions={report?.suggested_questions || []}
               />
 
-              {preview?.columns?.length > 0 && (
-                <div className="rounded-xl border shadow-sm overflow-hidden">
-                  <div className="px-4 py-3 border-b bg-muted/30 flex items-center justify-between gap-3">
-                    <div>
-                      <h3 className="text-sm font-semibold">Processed data preview</h3>
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        Showing {preview.preview_count?.toLocaleString?.() ?? preview.rows?.length ?? 0} of {preview.row_count?.toLocaleString?.() ?? 0} rows from the latest processed version.
-                      </p>
-                    </div>
-                  </div>
-                  <div className="overflow-auto max-h-[360px]">
-                    <table className="w-full min-w-[48rem] border-separate border-spacing-0 text-xs">
-                      <thead className="sticky top-0 z-10">
-                        <tr>
-                          {preview.columns.map((column: string) => (
-                            <th
-                              key={column}
-                              className="bg-slate-50 border-b border-r px-3 py-2 text-left font-semibold text-slate-600 whitespace-nowrap"
-                            >
-                              {column}
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {(preview.rows || []).map((row: Record<string, any>, rowIndex: number) => (
-                          <tr key={rowIndex} className="hover:bg-muted/20">
-                            {preview.columns.map((column: string) => (
-                              <td
-                                key={column}
-                                className="border-b border-r px-3 py-1.5 text-slate-700 whitespace-nowrap max-w-xs truncate"
-                                title={formatCell(row[column])}
-                              >
-                                {formatCell(row[column])}
-                              </td>
-                            ))}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+              {report?.next_actions?.length > 0 && (
+                <div className="rounded-xl border bg-muted/10 px-4 py-3">
+                  <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">
+                    Recommended next actions
+                  </h3>
+                  <ul className="list-disc pl-5 text-sm leading-relaxed text-foreground space-y-1">
+                    {report.next_actions.map((action: string, index: number) => (
+                      <li key={index}>{action}</li>
+                    ))}
+                  </ul>
                 </div>
               )}
 
@@ -712,20 +950,13 @@ export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) =>
 
       <div className="flex-shrink-0 flex flex-col sm:flex-row justify-center gap-3 sm:gap-4 pt-4 pb-2 border-t border-border/60 bg-background">
         <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
-          {([
-            ['md', 'Report MD'],
-            ['json', 'Report JSON'],
-            ['html', 'Report HTML'],
-          ] as const).map(([format, label]) => (
-            <button
-              key={format}
-              onClick={() => handleReportExport(format)}
-              className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-colors border border-input bg-background hover:bg-accent hover:text-accent-foreground h-11 px-4"
-            >
-              <FileText className="mr-2 h-4 w-4" />
-              {label}
-            </button>
-          ))}
+          <button
+            onClick={() => handleReportExport('json')}
+            className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-colors border border-input bg-background hover:bg-accent hover:text-accent-foreground h-11 px-4"
+          >
+            <FileText className="mr-2 h-4 w-4" />
+            Report JSON
+          </button>
           {([
             ['csv', 'CSV'],
             ['xlsx', 'XLSX'],

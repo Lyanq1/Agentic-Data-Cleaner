@@ -352,6 +352,13 @@ export const pipelineApi = {
     });
     return response.data;
   },
+
+  getDatasetComparePreview: async (runId: string, limit = 100, full = false): Promise<any> => {
+    const response = await apiClient.get<any>(`/pipeline/${runId}/report/compare-preview`, {
+      params: { limit, full },
+    });
+    return response.data;
+  },
   
   getDownloadUrl: (runId: string, format: 'csv' | 'xlsx' | 'parquet' = 'parquet'): string => {
     return `${apiClient.defaults.baseURL}/pipeline/${runId}/download?format=${format}`;

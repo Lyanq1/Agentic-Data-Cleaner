@@ -256,6 +256,16 @@ async def api_get_column_change_summary(run_id: str, column_name: str):
     return evidence
 
 
+@router.get("/pipeline/{run_id}/report/compare-preview", summary="Preview before/after dataset changes")
+async def api_get_dataset_compare_preview(run_id: str, limit: int = 100, full: bool = False):
+    """Return side-by-side before/after preview rows with changed cell coordinates."""
+    state = await get_pipeline_state(run_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found.")
+    safe_limit = None if full else max(1, min(limit, 500))
+    return ReportService.build_dataset_compare_preview(state, limit=safe_limit)
+
+
 @router.get("/pipeline/{run_id}/report/changes/top", summary="Get columns with the most before/after changes")
 async def api_get_top_changed_columns(run_id: str, limit: int = 10):
     """Return top changed columns using lineage version 1 vs latest approved version."""

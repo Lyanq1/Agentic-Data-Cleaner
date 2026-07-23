@@ -40,6 +40,8 @@ The current implementation keeps the existing cleaning pipeline unchanged. All n
 Reference inspiration:
 
 - The design is adapted from the Cocoon/dbt lineage-based RAG idea described in the project discussion and video summary.
+- The Results UI also adapts Cocoon's cleaning gallery presentation pattern: a report-like page that documents the table, exposes generated artifacts, and makes the cleaned output inspectable instead of ending at a simple success message.
+- Main reference page for this UI pass: https://cocoon-data-transformation.github.io/page/clean_gallery/stg_hospital.html
 - Cocoon's original domain is dbt project assistance: retrieve relevant upstream/downstream dbt models from a lineage graph instead of sending the whole project to an LLM.
 - Our domain is different: a single uploaded dataset goes through a data-cleaning pipeline. Therefore, we adapt the methodology from dbt model lineage to pipeline artifact lineage.
 - In this project, "lineage-aware retrieval" means retrieving pipeline-specific artifacts: dataset versions, worker outputs, validation results, metrics, report sections, and before/after column evidence.
@@ -99,6 +101,8 @@ Report chat:
 - The chat remembers only the current pipeline run, not all previous runs.
 - The LLM receives the final report and the recent chat history for the current `run_id` only.
 - The endpoint persists user and assistant messages, sources, and reasoning summaries.
+- The answer path normalizes accidental structured payloads from the LLM, so multi-part questions do not surface raw dict/JSON-like answers in the chat UI.
+- Multi-part questions are split into deterministic sub-answers, so a question such as "how many columns changed, how many tokens, and what did the pipeline do" answers all requested parts instead of only the first detected intent.
 
 Grounded LLM answer path:
 
@@ -121,6 +125,16 @@ Before/after column evidence:
 - Report chat automatically builds this evidence when the question mentions a column or asks about before/after changes.
 - The LLM receives this evidence, and fallback can also answer from it.
 
+Before/after dataset preview:
+
+- `GET /api/v1/pipeline/{run_id}/report/compare-preview?limit=100`
+- `GET /api/v1/pipeline/{run_id}/report/compare-preview?full=true`
+- Loads lineage version 1 and the latest approved version.
+- Returns two bounded table previews plus changed cell coordinates.
+- The frontend uses the backend-provided changed cell coordinates to highlight differences without recomputing the diff in the browser.
+- The Result page uses `full=true` for demo runs so users can inspect the whole uploaded file after cleaning.
+- The bounded `limit` mode remains available for future pagination or very large datasets.
+
 Top changed columns:
 
 - `GET /api/v1/pipeline/{run_id}/report/changes/top?limit=10`
@@ -138,9 +152,16 @@ Column impact / dependency awareness:
 Frontend Report Agent workspace:
 
 - Final Result view now uses backend-owned report data.
-- The page includes report export buttons for Markdown, JSON, and HTML.
-- The page shows lineage versions and Mermaid lineage diagram text.
+- The Result page is now full-width so wide datasets can be inspected more comfortably.
+- The page renders dataset documentation, profile highlights, a Cocoon-inspired Cleaning Summary, validation metrics, lineage, before/after preview, Report Agent chat, recommended next actions, and exports.
+- The page includes a Report JSON export button plus cleaned dataset downloads.
+- The page shows lineage versions and auto-opens the Mermaid lineage visualization.
+- The before/after comparison shows the original and cleaned dataset side by side on desktop layouts, with changed cells highlighted in both tables.
+- Clicking a cell in the original table scrolls to the same row and column in the cleaned table, and clicking from cleaned scrolls back to original.
 - The Ask the Report Agent panel is separated into a memoized component to avoid input lag from re-rendering the full report page.
+- The Ask the Report Agent is now a compact bottom-right icon widget that can be opened or closed without taking space away from the report.
+- The open widget uses a scrollable transcript with role-based message bubbles and a fixed input area at the bottom.
+- Recommended next actions are rendered as compact bullet points so they support the report without dominating the page.
 - The chat panel loads persisted history for the current `run_id`.
 - While waiting for an answer, the UI shows a loading message: "Checking report, lineage, metrics, and recent chat..."
 - Suggested questions are derived from the actual report context instead of being fixed generic prompts.
@@ -157,8 +178,7 @@ Frontend Report Agent workspace:
 
 ### Remaining Improvements
 
-- Render Mermaid diagrams as SVG/PNG instead of showing raw Mermaid text.
-- Add column-change UI panels for direct before/after inspection.
+- Add a column-level drilldown panel from the before/after table into detailed change evidence.
 - Let the LLM generate even better suggested questions from bounded report context.
 - Add explicit token/cost estimates if pricing configuration is available.
 - Add tests for report generation, chat history persistence, and column diff summaries.
@@ -342,6 +362,7 @@ Recommended implementation order:
 - The backend report includes data lineage, validation, worker decisions, and metrics.
 - Users can export a readable report.
 - Users can inspect a diagram of how the dataset reached its final version.
+- Users can inspect the original and cleaned dataset side by side and see changed cells.
 - The architecture is ready for grounded Report Q&A without arbitrary database access.
 
 Current status against success criteria:
@@ -349,7 +370,8 @@ Current status against success criteria:
 - Backend-owned report: done.
 - Data lineage, validation, worker decisions, and metrics in report: done.
 - Report export: done for JSON, Markdown, and HTML.
-- Diagram inspection: done as Mermaid text.
+- Diagram inspection: done as auto-opened Mermaid visualization in the Result page.
 - Grounded Report Q&A without arbitrary DB access: done as an MVP.
 - Before/after column change evidence: done as an MVP.
+- Before/after dataset preview UI: done as an MVP.
 - Cocoon-inspired lineage-aware targeted retrieval: done as an MVP for report, lineage, top changed columns, and scoped column impact.

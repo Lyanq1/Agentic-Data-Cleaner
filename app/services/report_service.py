@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import html
+import ast
 import json
 import re
 from datetime import datetime, timezone
@@ -256,6 +257,61 @@ def _extract_json_object(text: str) -> dict[str, Any] | None:
         return None
 
 
+def _humanize_answer_payload(payload: Any, fallback: str = "") -> str:
+    """Convert accidental structured answer payloads into user-facing prose."""
+    if isinstance(payload, str):
+        text = payload.strip()
+        if not text:
+            return fallback
+        if text.startswith("{") and text.endswith("}"):
+            try:
+                parsed = ast.literal_eval(text)
+                if isinstance(parsed, (dict, list)):
+                    return _humanize_answer_payload(parsed, fallback=fallback)
+            except (SyntaxError, ValueError):
+                try:
+                    parsed = json.loads(text)
+                    if isinstance(parsed, (dict, list)):
+                        return _humanize_answer_payload(parsed, fallback=fallback)
+                except json.JSONDecodeError:
+                    pass
+        return text
+
+    if isinstance(payload, list):
+        items = [str(item) for item in payload if item is not None]
+        return ", ".join(items) if items else fallback
+
+    if not isinstance(payload, dict):
+        return str(payload).strip() if payload is not None else fallback
+
+    parts: list[str] = []
+    tokens_used = payload.get("tokens_used") or payload.get("total_tokens") or payload.get("token_count")
+    if tokens_used is not None:
+        parts.append(f"This run used {tokens_used} total LLM tokens")
+
+    changed_columns = payload.get("changed_columns") or payload.get("columns_changed_names")
+    columns_changed = payload.get("columns_changed") or payload.get("changed_column_count")
+    if isinstance(changed_columns, list):
+        column_names = [str(column) for column in changed_columns]
+        count = columns_changed if columns_changed is not None else len(column_names)
+        parts.append(f"{count} columns changed: {', '.join(column_names)}")
+    elif columns_changed is not None:
+        parts.append(f"{columns_changed} columns changed")
+
+    if payload.get("answer") and not parts:
+        return _humanize_answer_payload(payload.get("answer"), fallback=fallback)
+
+    if parts:
+        return ". ".join(parts) + "."
+
+    readable_items = [
+        f"{str(key).replace('_', ' ')}: {value}"
+        for key, value in payload.items()
+        if value is not None
+    ]
+    return "; ".join(readable_items) if readable_items else fallback
+
+
 def _normalize_cell(value: Any) -> str:
     try:
         if pd.isna(value):
@@ -483,6 +539,89 @@ class ReportService:
             result["columns"] = dict(top_items)
             result["truncated_to_top_changed_columns"] = True
         return result
+
+    @staticmethod
+    def build_dataset_compare_preview(state: dict[str, Any], limit: int | None = 100) -> dict[str, Any]:
+        """Return a bounded before/after dataset preview with changed cell coordinates."""
+        session_id = resolve_lineage_session_id(state)
+        try:
+            if session_id:
+                before_df = LineageService.get_version(session_id, 1)
+                after_df = LineageService.get_latest_version(session_id)
+            else:
+                before_df = _load_dataframe(state.get("dataset_path")) if state.get("dataset_path") else None
+                after_df = _load_latest_processed_dataframe(state)
+        except Exception as exc:
+            return {
+                "available": False,
+                "reason": f"Failed to load before/after dataset versions: {exc}",
+                "columns": [],
+                "before_rows": [],
+                "after_rows": [],
+                "changed_cells": [],
+            }
+
+        if before_df is None or after_df is None or before_df.empty or after_df.empty:
+            return {
+                "available": False,
+                "reason": "Before or after dataset preview is unavailable.",
+                "columns": [],
+                "before_rows": [],
+                "after_rows": [],
+                "changed_cells": [],
+            }
+
+        before_df = restore_original_column_order(before_df, state)
+        after_df = restore_original_column_order(after_df, state)
+        before_columns = [str(column) for column in before_df.columns]
+        after_columns = [str(column) for column in after_df.columns]
+        columns = before_columns + [column for column in after_columns if column not in before_columns]
+        total_row_count = max(len(before_df), len(after_df))
+        preview_count = total_row_count if limit is None else min(max(1, limit), total_row_count)
+
+        def row_at(dataframe: pd.DataFrame, row_index: int) -> dict[str, Any]:
+            if row_index >= len(dataframe):
+                return {column: None for column in columns}
+            row: dict[str, Any] = {}
+            for column in columns:
+                if column in dataframe.columns:
+                    row[column] = _display_cell(dataframe.iloc[row_index][column])
+                else:
+                    row[column] = None
+            return row
+
+        before_rows = [row_at(before_df, row_index) for row_index in range(preview_count)]
+        after_rows = [row_at(after_df, row_index) for row_index in range(preview_count)]
+        changed_cells: list[dict[str, Any]] = []
+        for row_index in range(preview_count):
+            for column in columns:
+                before_value = before_rows[row_index].get(column)
+                after_value = after_rows[row_index].get(column)
+                if _normalize_cell(before_value) != _normalize_cell(after_value):
+                    changed_cells.append(
+                        {
+                            "row_index": row_index,
+                            "column": column,
+                            "before": before_value,
+                            "after": after_value,
+                        }
+                    )
+
+        return {
+            "available": True,
+            "session_id": str(session_id) if session_id else None,
+            "before_version": 1 if session_id else "input",
+            "after_version": "latest",
+            "columns": columns,
+            "before_rows": before_rows,
+            "after_rows": after_rows,
+            "before_row_count": int(len(before_df)),
+            "after_row_count": int(len(after_df)),
+            "preview_count": int(preview_count),
+            "changed_cells": changed_cells,
+            "changed_cell_count": int(len(changed_cells)),
+            "truncated": preview_count < total_row_count,
+        }
 
     @staticmethod
     def build_top_changed_columns(
@@ -812,9 +951,79 @@ class ReportService:
             )
 
         return {
-            "answer": answer,
+            "answer": _humanize_answer_payload(answer, fallback=answer),
             "sources": sources,
             "reasoning_summary": "Answered from the structured final report with deterministic fallback logic.",
+            "suggested_questions": _suggested_questions(report),
+        }
+
+    @staticmethod
+    def answer_multi_part_question(
+        report: dict[str, Any],
+        question: str,
+        top_change_evidence: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        """Compose deterministic answers for questions that ask several facts at once."""
+        normalized = question.lower()
+        asks_token = any(token in normalized for token in ["token", "cost", "chi phí", "ton bao nhieu", "tốn bao nhiêu", "tốn bn"])
+        asks_changed_columns = any(
+            token in normalized
+            for token in ["columns changed", "changed columns", "columns are changed", "column changed", "cột nào thay đổi"]
+        )
+        asks_pipeline_actions = any(
+            token in normalized
+            for token in ["what did the pipeline do", "pipeline do", "what did it do", "completed steps", "pipeline actions"]
+        )
+        asks_transformations = any(token in normalized for token in ["transform", "cleaning step", "cleaned", "thay đổi", "làm gì"])
+        intent_count = sum([asks_token, asks_changed_columns, asks_pipeline_actions or asks_transformations])
+        if intent_count < 2:
+            return None
+
+        parts: list[str] = []
+        sources: set[str] = {"report"}
+        if asks_token:
+            token_metrics = (report.get("metrics") or {}).get("token_metrics") or {}
+            parts.append(
+                f"Token usage: {token_metrics.get('total_tokens', 0)} total LLM tokens "
+                f"({token_metrics.get('prompt_tokens', 0)} prompt, "
+                f"{token_metrics.get('completion_tokens', 0)} completion)."
+            )
+            sources.add("token_metrics")
+
+        if asks_changed_columns:
+            changed_columns = []
+            if top_change_evidence and top_change_evidence.get("available"):
+                changed_columns = [
+                    (column, summary)
+                    for column, summary in (top_change_evidence.get("columns") or {}).items()
+                    if summary.get("changed_cells", 0) > 0
+                ]
+            if changed_columns:
+                names = [column for column, _summary in changed_columns]
+                details = "; ".join(
+                    f"{column}: {summary.get('changed_cells')} cells"
+                    for column, summary in changed_columns
+                )
+                parts.append(f"Changed columns: {len(names)} columns changed ({', '.join(names)}). Details: {details}.")
+                sources.update({"top_changed_columns", "lineage_versions"})
+            else:
+                parts.append("Changed columns: no changed-column evidence was available for this run.")
+
+        if asks_pipeline_actions or asks_transformations:
+            transformations = report.get("transformations") or []
+            completed_steps = (report.get("summary") or {}).get("completed_steps") or []
+            if transformations:
+                parts.append("Pipeline actions: " + "; ".join(str(item) for item in transformations) + ".")
+            elif completed_steps:
+                parts.append("Pipeline actions: completed " + ", ".join(str(item) for item in completed_steps) + ".")
+            else:
+                parts.append("Pipeline actions: no detailed completed-step list is available in the report.")
+            sources.update({"worker_outputs", "completed_steps"})
+
+        return {
+            "answer": "\n".join(parts),
+            "sources": sorted(sources),
+            "reasoning_summary": "Split the multi-part question into token usage, changed-column evidence, and pipeline action evidence before answering.",
             "suggested_questions": _suggested_questions(report),
         }
 
@@ -976,6 +1185,14 @@ class ReportService:
                 )
                 fallback = ReportService.answer_column_changes_from_evidence(column_evidence, fallback)
 
+            multi_part_answer = ReportService.answer_multi_part_question(
+                report,
+                question,
+                top_change_evidence=top_change_evidence or column_evidence,
+            )
+            if multi_part_answer:
+                return multi_part_answer
+
             context = {
                 "final_report": report,
                 "column_change_evidence": column_evidence,
@@ -1014,7 +1231,10 @@ class ReportService:
             if not parsed:
                 return fallback
 
-            answer = str(parsed.get("answer") or fallback["answer"]).strip()
+            answer_payload = parsed.get("answer") if "answer" in parsed else parsed
+            answer = _humanize_answer_payload(answer_payload, fallback=fallback["answer"]).strip()
+            if asks_token and re.fullmatch(r"\d+(\.\d+)?", answer):
+                answer = f"Token usage: {answer} total LLM tokens."
             sources = parsed.get("sources")
             if not isinstance(sources, list) or not sources:
                 sources = fallback["sources"]
