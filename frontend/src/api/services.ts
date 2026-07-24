@@ -334,40 +334,8 @@ export const pipelineApi = {
   },
 
   getReport: async (runId: string): Promise<any> => {
-    const state = await pipelineApi.getFullState(runId);
-    
-    // Construct validation result for ResultView
-    return {
-      filename: state.structured_cleaning_spec?.dataset_name || 'dataset.parquet',
-      completed_at: new Date().toISOString(),
-      summary: {
-        input_rows: state.data_profile?.total_rows || 0,
-        total_tokens_used: state.token_metrics?.total_tokens ?? 0,
-        retry_cycles: 0,
-      },
-      transformations: [
-        'Parquet conversion and normalization applied',
-        'Statistical profiling completed',
-        'Data structure schema validation complete',
-      ],
-      validation: {
-        passed: true,
-        metrics: {
-          'Intent Analysis': state.data_profile ? {
-            'Matched Columns': state.structured_cleaning_spec?.columns_mapping?.length || 0,
-            'Missing values detected': Object.values(state.data_profile.columns || {}).reduce((acc: number, col: any) => acc + (col.categorical_stats?.missing_count || col.numeric_stats?.missing_count || 0), 0),
-          } : {},
-          ...(state.f1_metrics ? { 'F1-Score Evaluation': state.f1_metrics } : {}),
-        },
-        issues: (state.structured_cleaning_spec?.open_questions || []).map((q: string, i: number) => ({
-          severity: 'info',
-          column: `Rule #${i + 1}`,
-          issue_type: 'Clarification Needed',
-          description: q,
-          affected_rows: 0,
-        })),
-      },
-    };
+    const response = await apiClient.get<any>(`/pipeline/${runId}/report`);
+    return response.data;
   },
   
   getProfile: async (runId: string): Promise<any> => {
@@ -384,9 +352,60 @@ export const pipelineApi = {
     });
     return response.data;
   },
+
+  getDatasetComparePreview: async (runId: string, limit = 100, full = false): Promise<any> => {
+    const response = await apiClient.get<any>(`/pipeline/${runId}/report/compare-preview`, {
+      params: { limit, full },
+    });
+    return response.data;
+  },
   
   getDownloadUrl: (runId: string, format: 'csv' | 'xlsx' | 'parquet' = 'parquet'): string => {
     return `${apiClient.defaults.baseURL}/pipeline/${runId}/download?format=${format}`;
+  },
+
+  getVersionDownloadUrl: (runId: string, version: number, format: 'csv' | 'xlsx' | 'parquet' = 'csv'): string => {
+    return `${apiClient.defaults.baseURL}/pipeline/${runId}/versions/${version}/download?format=${format}`;
+  },
+
+  getReportExportUrl: (runId: string, format: 'json' | 'md' | 'html' = 'md'): string => {
+    return `${apiClient.defaults.baseURL}/pipeline/${runId}/report/export?format=${format}`;
+  },
+
+  getReportDiagram: async (runId: string, type: 'pipeline' | 'lineage' = 'lineage'): Promise<any> => {
+    const response = await apiClient.get<any>(`/pipeline/${runId}/diagram`, {
+      params: { type },
+    });
+    return response.data;
+  },
+
+  getTopChangedColumns: async (runId: string, limit = 10): Promise<any> => {
+    const response = await apiClient.get<any>(`/pipeline/${runId}/report/changes/top`, {
+      params: { limit },
+    });
+    return response.data;
+  },
+
+  getColumnChangeSummary: async (runId: string, columnName: string): Promise<any> => {
+    const response = await apiClient.get<any>(`/pipeline/${runId}/report/columns/${encodeURIComponent(columnName)}/changes`);
+    return response.data;
+  },
+
+  getColumnImpactSummary: async (runId: string, columnName: string): Promise<any> => {
+    const response = await apiClient.get<any>(`/pipeline/${runId}/report/columns/${encodeURIComponent(columnName)}/impact`);
+    return response.data;
+  },
+
+  askReport: async (runId: string, question: string): Promise<any> => {
+    const response = await apiClient.post<any>(`/pipeline/${runId}/report/chat`, {
+      question,
+    });
+    return response.data;
+  },
+
+  getReportChatHistory: async (runId: string): Promise<any> => {
+    const response = await apiClient.get<any>(`/pipeline/${runId}/report/chat`);
+    return response.data;
   }
 };
 

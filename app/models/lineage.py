@@ -52,3 +52,20 @@ class DatasetRecord(Base):
     __table_args__ = (
         Index("ix_dataset_records_session_version", "session_id", "version"),
     )
+
+
+class ReportChatMessage(Base):
+    """Stores Report Agent chat history for a pipeline run."""
+    __tablename__ = "report_chat_messages"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    run_id = Column(String, nullable=False)
+    role = Column(String, nullable=False)
+    content = Column(String, nullable=False)
+    sources = Column(JSONB, nullable=True)
+    metadata_ = Column("metadata", JSONB, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        Index("ix_report_chat_messages_run_created", "run_id", "created_at"),
+    )
