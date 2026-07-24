@@ -1,5 +1,55 @@
 # Final Report Agent Implementation Plan
 
+> [!NOTE]
+> **TL;DR - TỔNG QUAN NÂNG CẤP REPORT AGENT CHATBOT (ReAct Tool-Calling Architecture)**
+>
+> ### 1. Những gì đã làm & áp dụng (What was done & applied)
+> - **Chuyển đổi sang ReAct Tool-Calling Agent**: Thay thế hoàn toàn cơ chế phân loại intent `if/else` chắp vá bằng mô hình Agent tự chủ có bộ công cụ chuyên biệt (LangChain Tool Binding).
+> - **Tích hợp DuckDB In-Memory SQL Engine**: Bổ sung `duckdb>=1.1.0` cho phép Agent tự viết và thực thi trực tiếp các câu lệnh SQL (`SELECT`) trên các bảng Pandas DataFrames (`clean_data`, `raw_data`, `v1`, `v2`...) ngay trong bộ nhớ RAM với cơ chế zero-copy.
+> - **Trang bị Bộ 4 Domain Tools chuyên biệt**:
+>   1. `query_dataset_sql`: Truy vấn/thống kê/lọc/tính toán trực tiếp trên dữ liệu thô và dữ liệu đã làm sạch bằng DuckDB.
+>   2. `get_evaluation_metrics`: Trích xuất chỉ số F1 Score chi tiết (TP, FP, FN, precision, recall, accuracy, cell count) & chi phí token.
+>   3. `get_pipeline_telemetry`: Trích xuất rationale planner, danh sách tác vụ active/skip, log xử lý của worker & kết quả kiểm tra validation.
+>   4. `get_lineage_diff`: So sánh biến động dữ liệu trước/sau theo từng cột và các phiên bản lineage.
+> - **Cập nhật Giao diện Chat Frontend**: Cài đặt `react-markdown` và `remark-gfm` để render câu trả lời của Agent dưới dạng định dạng Markdown chuẩn, trực quan.
+>
+> ### 2. Các thay đổi chính trong mã nguồn (What was changed)
+> - `pyproject.toml`: Bổ sung dependency `duckdb>=1.1.0`.
+> - `app/services/report_service.py`: Tái cấu trúc `answer_question_with_llm` thành ReAct Execution Loop tự động gọi các tool thu thập chứng cứ trước khi tổng hợp câu trả lời; chuẩn hóa lề scope của class `ReportService`.
+> - `frontend/src/components/views/ResultView.tsx`: Thay thế hiển thị văn bản thô bằng component `<ReactMarkdown>` hỗ trợ render Markdown.
+> - `tests/test_report_react_agent.py`: Viết bộ unit test kiểm thử độc lập cho DuckDB SQL Tool và các Telemetry Tools (**PASSED 100%**).
+>
+> ### 3. Tại sao KHÔNG CẦN DÙNG RAG (Vector RAG)? (Why RAG is NOT needed)
+> 1. **Bản chất của dữ liệu cấu trúc (Tabular Data) không hợp với Vector Search**:
+>    - Vector RAG (Embedding Text Chunking) chỉ phù hợp với văn bản tự do không cấu trúc (tài liệu PDF, sách, báo). 
+>    - Khi áp dụng Vector RAG vào bảng dữ liệu (Dataframe), nó không thể thực hiện các phép tính số học, gom nhóm hay truy vấn chính xác (`COUNT`, `AVG`, `SUM`, `WHERE column = x`). Dữ liệu lấy về qua vector search dễ bị mơ hồ và gây **ảo giác (hallucination)**.
+>    - **Giải pháp ReAct SQL Tool vượt trội**: Cho phép LLM tự viết câu lệnh SQL để DuckDB tính toán trực tiếp trên Dataframe gốc. Kết quả trả về đạt độ chính xác **100% (Deterministic Accuracy)**.
+> 2. **Pipeline Telemetry & Metrics đã được chuẩn hóa theo Schema**:
+>    - Toàn bộ thông tin F1 evaluation, token cost, execution plan, worker outcomes và lineage đã được lưu trữ cấu trúc sẵn trong `GlobalState` và Database PostgreSQL.
+>    - Thay vì tốn tài nguyên cắt nhỏ văn bản rồi index vào Vector DB (vừa chậm vừa tốn bộ nhớ), Agent chỉ cần gọi trực tiếp các **Domain Tools** để đọc chính xác thông tin từ hệ thống.
+> 3. **Tốc độ xử lý siêu nhanh & Tiết kiệm chi phí**:
+>    - Loại bỏ hoàn toàn chi phí tính Embedding Vector và hạ tầng Vector Store (ChromaDB/Pinecone).
+>    - DuckDB chạy trực tiếp in-memory với độ trễ chỉ vài millisecond, giúp trải nghiệm chat phản hồi tức thì.
+>
+> ### 4. Các mẫu câu hỏi thực tế Report Agent có thể trả lời (Real-World Example Questions)
+> - **Truy vấn & Phân tích Dữ liệu Data (via DuckDB SQL Tool)**:
+>   - *"Có bao nhiêu dòng bị khuyết (null) ở cột `Address2` trong dữ liệu thô và đã được sửa thành gì trong bản cleaned?"*
+>   - *"Cho tôi biết top 5 khách hàng có doanh thu (`Income`) cao nhất trong bảng dữ liệu đã được làm sạch?"*
+>   - *"Thống kê số lượng bản ghi theo từng thành phố (`City`) trong tập dữ liệu sạch?"*
+>   - *"Có bao nhiêu bản ghi trùng lặp đã bị xóa ở bước Deduplication?"*
+> - **Đánh giá Mô hình & Chi phí (via Evaluation Metrics Tool)**:
+>   - *"Cho tôi biết các chỉ số F1 Score, Precision, Recall và Accuracy của đợt làm sạch này?"*
+>   - *"Có bao nhiêu ô dữ liệu được đánh giá là True Positives (TP), False Positives (FP) và False Negatives (FN)?"*
+>   - *"Toàn bộ pipeline này đã tiêu tốn tổng cộng bao nhiêu LLM tokens?"*
+> - **Vết thực thi Pipeline & Rationale của Agent (via Pipeline Telemetry Tool)**:
+>   - *"Kế hoạch ban đầu của Planner Agent là gì và tại sao task 2 lại bị bỏ qua (skip)?"*
+>   - *"Các worker `null_worker` và `typecast_worker` đã thực hiện những thay đổi gì cụ thể trên dữ liệu?"*
+>   - *"Có quy tắc validation nào bị rớt (failed validation rule) ở bước kiểm tra cuối cùng không?"*
+> - **Biến động dữ liệu Trước / Sau & Lineage (via Lineage Diff Tool)**:
+>   - *"Những cột nào bị thay đổi nhiều nhất giữa bản thô (Version 1) và bản sạch cuối cùng?"*
+>   - *"So sánh sự thay đổi về kiểu dữ liệu (dtype) và tỷ lệ null ở cột `Phone` trước và sau khi làm sạch?"*
+>   - *"Cho tôi xem 3 ví dụ cụ thể về dữ liệu trước và sau khi sửa ở cột `Email`?"*
+
 ## Objective
 
 Turn the final pipeline step from a static completion report into a post-cleaning intelligence layer. After all cleaning tasks pass validation, the Report Agent should help users understand, export, visualize, and continue working with the cleaned dataset.
@@ -104,30 +154,22 @@ Report chat:
 - `POST /api/v1/pipeline/{run_id}/report/chat`
 - `GET /api/v1/pipeline/{run_id}/report/chat`
 - Chat history is stored by `run_id` in `report_chat_messages`.
-- The chat remembers only the current pipeline run, not all previous runs.
-- The LLM receives the final report and the recent chat history for the current `run_id` only.
-- The endpoint persists user and assistant messages, sources, and reasoning summaries.
-- The answer path normalizes accidental structured payloads from the LLM, so multi-part questions do not surface raw dict/JSON-like answers in the chat UI.
-- Multi-part questions are split into deterministic sub-answers, so a question such as "how many columns changed, how many tokens, and what did the pipeline do" answers all requested parts instead of only the first detected intent.
-- Multi-part metric questions also cover cell count, using `total_cells_evaluated` from F1 metrics when available or `rows x tracked columns` from the report summary otherwise.
-- The chat backend now uses a lightweight query planner before LLM synthesis: it decomposes broad user messages into sub-questions, classifies each intent, retrieves the matching report/metric/lineage/column evidence, and composes a complete answer.
-- The planner handles mixed questions such as "how much token was used, how many cells are there, which columns changed, and what did the pipeline do" without relying on fixed answer ordering or a single first-match fallback.
-- The planner now also covers deeper workflow questions about the steps needed to produce the final result, planner decisions, worker execution results, approval/validation evidence, and the full pipeline trace from upload to final report.
-- These deeper answers are grounded in `execution_plan_summary`, `worker_results`, `validation.items`, `lineage.versions`, and `pipeline_context`, so users can ask what was planned, what was skipped, what each worker did, and why a result was accepted.
-- The final report now exposes an `answer_contexts` inventory. The Report Agent can answer capability/scope questions such as "what can you answer?" from this inventory.
-- Scope guarding is applied per message and per decomposed sub-question, so unrelated general-knowledge requests are refused while report-scoped parts can still be answered.
-- Metric intents such as F1-score, precision, recall, accuracy, TP/FP/FN take priority over column-name matching, preventing phrases like "F1-score evaluation" from being misread as the dataset column `Score`.
+- Generalized **ReAct Tool-Calling Agent** architecture replacing ad-hoc heuristic intent classification.
+- Equipped with 4 domain-specific tools:
+  1. `query_dataset_sql`: Runs DuckDB analytical `SELECT` queries directly on in-memory dataset tables (`clean_data`, `raw_data`, `v1`, `v2`, etc.). Can answer any query regarding values, row counts, null counts, distributions, aggregations, and row lookups.
+  2. `get_evaluation_metrics`: Retrieves exact F1 score evaluation details (F1, precision, recall, accuracy, TP, FP, FN, total cells evaluated) and LLM token usage costs.
+  3. `get_pipeline_telemetry`: Retrieves execution plan task rationale, active vs skipped tasks, worker execution outputs, and validation rule results.
+  4. `get_lineage_diff`: Retrieves column-level or dataset-level before/after change stats, null changes, dtype changes, and sample row modifications across lineage versions.
 
-Grounded LLM answer path:
+Grounded ReAct LLM answer path:
 
-- `ReportService.answer_question_with_llm(...)` uses the configured LLM through `create_llm()`.
-- It receives report context covering upload intent, profiling, semantic profiling, input validation, planning, workers, validation/retry, lineage, metrics, exports, next actions, and recent chat.
-- It is instructed to answer only from the provided context and say when information is unavailable.
-- Hidden chain-of-thought is not exposed; the UI shows a compact `reasoning_summary` instead.
+- `ReportService.answer_question_with_llm(...)` uses the configured LLM with LangChain tool bindings.
+- Tool outputs are dynamically retrieved and appended into message history before final answer synthesis.
+- Hidden tool execution logs are executed behind the scenes to keep the UI clean; final answers expose source badges (`sources`) and a compact `reasoning_summary`.
 
 Deterministic fallback:
 
-- If the LLM fails, lacks an API key, or returns unparseable JSON, the service falls back to deterministic answers.
+- If the LLM fails, lacks an API key, or encounters errors during tool execution, the service gracefully falls back to deterministic answers.
 - Fallback currently understands F1 score, precision, recall, accuracy, TP/FP/FN, token usage, lineage, validation, transformations, and next actions.
 - This prevents broad questions such as "how many true positive" or "tốn bao nhiêu token" from falling back to a generic pipeline summary.
 

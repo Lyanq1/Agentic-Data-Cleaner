@@ -1,5 +1,7 @@
 import React, { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { pipelineApi } from '../../api/services';
 import { MermaidDiagram } from '../MermaidDiagram';
 import {
@@ -466,7 +468,11 @@ const ReportChatPanel = memo(({ runId }: ReportChatPanelProps) => {
                         </span>
                       </div>
                     )}
-                    <p className="whitespace-pre-wrap leading-relaxed">{message.content}</p>
+                    <div className="prose prose-sm dark:prose-invert max-w-none text-sm leading-relaxed [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4 [&_p]:mb-2 [&_p:last-child]:mb-0 [&_strong]:font-semibold [&_li]:my-0.5">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {message.content}
+                      </ReactMarkdown>
+                    </div>
                     {message.sources?.length > 0 && (
                       <div className="mt-3 flex flex-wrap gap-1.5">
                         {message.sources.map((source: string) => (

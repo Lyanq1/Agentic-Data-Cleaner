@@ -10,7 +10,8 @@ from datetime import datetime, timezone
 from typing import Any
 
 import pandas as pd
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.tools import StructuredTool
 from sqlalchemy import text
 
 from app.core.database import engine, SessionLocal
@@ -543,7 +544,108 @@ def _is_report_scope_question(report: dict[str, Any], question_lower: str) -> bo
         return True
 
     known_columns = [str(column).lower() for column in (report.get("summary") or {}).get("column_names") or []]
-    return any(re.search(rf"(?<!\w){re.escape(column)}(?!\w)", question_lower) for column in known_columns)
+def _run_duckdb_sql_tool(query: str, state: dict[str, Any] | None = None) -> str:
+    """Run an analytical SQL SELECT query using DuckDB on raw_data, clean_data, or lineage tables (v1, v2, etc.)."""
+    try:
+        import duckdb
+    except ImportError:
+        return "DuckDB library is not installed."
+
+    try:
+        conn = duckdb.connect(database=":memory:")
+        clean_df = _load_latest_processed_dataframe(state or {})
+        if clean_df is not None and not clean_df.empty:
+            conn.register("clean_data", clean_df)
+            conn.register("dataset", clean_df)
+
+        session_id = resolve_lineage_session_id(state or {})
+        if session_id:
+            try:
+                raw_df = LineageService.get_version(session_id, 1)
+                if not raw_df.empty:
+                    conn.register("raw_data", raw_df)
+            except Exception:
+                pass
+            try:
+                versions = LineageService.list_versions(session_id)
+                for ver_info in versions:
+                    v_num = ver_info.get("version")
+                    if v_num:
+                        v_df = LineageService.get_version(session_id, v_num)
+                        if not v_df.empty:
+                            conn.register(f"v{v_num}", v_df)
+            except Exception:
+                pass
+
+        query_upper = query.strip().upper()
+        if not (query_upper.startswith("SELECT") or query_upper.startswith("WITH") or query_upper.startswith("DESCRIBE") or query_upper.startswith("SHOW")):
+            return "Error: Only read-only SELECT/WITH/DESCRIBE queries are allowed."
+
+        res_df = conn.execute(query).df()
+        if res_df.empty:
+            return "Query executed successfully. Result set is empty (0 rows)."
+
+        total_rows = len(res_df)
+        truncated_df = res_df.head(50)
+        output = truncated_df.to_markdown(index=False)
+        if total_rows > 50:
+            output += f"\n\n(Note: Showing top 50 rows of {total_rows} total matching rows)"
+        return output
+    except Exception as exc:
+        return f"DuckDB SQL Execution Error: {exc}"
+
+
+def _get_evaluation_metrics_data(report: dict[str, Any], state: dict[str, Any] | None = None) -> dict[str, Any]:
+    metrics = report.get("metrics") or {}
+    f1_metrics = metrics.get("f1_metrics") or (state.get("f1_metrics") if state else None) or {}
+    token_metrics = metrics.get("token_metrics") or (state.get("token_metrics") if state else None) or {}
+
+    return {
+        "f1_evaluation": {
+            "f1_score": f1_metrics.get("f1_score"),
+            "precision": f1_metrics.get("precision"),
+            "recall": f1_metrics.get("recall"),
+            "accuracy": f1_metrics.get("accuracy"),
+            "true_positives_tp": f1_metrics.get("tp"),
+            "false_positives_fp": f1_metrics.get("fp"),
+            "false_negatives_fn": f1_metrics.get("fn"),
+            "total_cells_evaluated": f1_metrics.get("total_cells_evaluated"),
+            "eval_status": "Ground truth evaluated" if f1_metrics else "No ground truth provided",
+        },
+        "token_usage": token_metrics,
+    }
+
+
+def _get_pipeline_telemetry_data(report: dict[str, Any], state: dict[str, Any] | None = None) -> dict[str, Any]:
+    exec_plan = report.get("execution_plan_summary") or {}
+    worker_res = report.get("worker_results") or {}
+    val_res = report.get("validation") or {}
+    pipeline_ctx = report.get("pipeline_context") or {}
+
+    return {
+        "execution_plan": {
+            "plan_summary": exec_plan.get("plan_summary"),
+            "tasks": exec_plan.get("tasks", []),
+            "active_tasks_count": exec_plan.get("active_task_count"),
+            "skipped_tasks_count": exec_plan.get("skipped_task_count"),
+        },
+        "worker_results": worker_res,
+        "validation_results": {
+            "passed": val_res.get("passed"),
+            "issues": val_res.get("issues"),
+            "issue_count": val_res.get("issue_count"),
+        },
+        "pipeline_context": pipeline_ctx,
+    }
+
+
+def _get_lineage_diff_data(report: dict[str, Any], state: dict[str, Any] | None = None, column_name: str | None = None) -> dict[str, Any]:
+    if state and column_name:
+        return ReportService.build_column_change_summary(state, columns=[column_name], sample_limit=8)
+    elif state:
+        return ReportService.build_top_changed_columns(state, limit=10, sample_limit=3)
+    else:
+        return {"lineage": report.get("lineage") or {}, "transformations": report.get("transformations") or []}
 
 
 class ReportService:
@@ -1961,6 +2063,8 @@ class ReportService:
             if item.get("agent")
         ]
         change_columns = (impact.get("change_evidence") or {}).get("columns") or {}
+
+
         change_summary = change_columns.get(column) if isinstance(change_columns, dict) else None
         change_text = ""
         if change_summary:
@@ -1983,7 +2087,6 @@ class ReportService:
             "reasoning_summary": "Checked column references in the execution plan, worker outputs, validation artifacts, and lineage before/after evidence.",
             "answer_mode": "backend_evidence",
         }
-
     @staticmethod
     async def answer_question_with_llm(
         report: dict[str, Any],
@@ -1991,7 +2094,7 @@ class ReportService:
         history: list[dict[str, Any]] | None = None,
         state: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Answer with an LLM grounded in the final report, with deterministic fallback."""
+        """Answer with a ReAct Tool-Calling LLM Agent grounded in dataset SQL, metrics, and pipeline trace."""
         question_lower = question.lower()
         if not _is_report_scope_question(report, question_lower):
             return {
@@ -2003,148 +2106,137 @@ class ReportService:
                 "reasoning_summary": "Rejected because the question is outside the current report and dataset scope.",
                 "answer_mode": "scope_guard",
                 "suggested_questions": _suggested_questions(report),
-        }
+            }
 
         fallback = ReportService.answer_question(report, question)
+
         try:
-            planned_answer = ReportService.answer_planned_question(report, question, state=state)
-            if planned_answer:
-                return planned_answer
+            # 1. Define ReAct tools
+            def query_dataset_sql(query: str) -> str:
+                """Execute a read-only DuckDB SQL SELECT query on dataset tables: clean_data (or dataset), raw_data, or lineage version tables (v1, v2). Use this to answer any question about values, counts, nulls, aggregations, filtering, distributions, or row details in the dataset."""
+                return _run_duckdb_sql_tool(query, state=state)
 
-            metric_intent = _has_metric_intent(question_lower)
-            explicit_column_target = _has_explicit_column_target(question_lower)
-            requested_columns = ReportService.infer_requested_columns(report, question)
-            asks_top_changes = any(
-                token in question_lower
-                for token in [
-                    "most changed",
-                    "changed most",
-                    "thay đổi nhiều nhất",
-                    "cột nào thay đổi",
-                    "columns changed",
-                    "changed columns",
-                    "columns were changed",
-                    "columns are changed",
-                    "which columns were changed",
-                    "how many columns were changed",
-                    "top changed",
-                ]
-            )
-            if metric_intent and not explicit_column_target and not asks_top_changes:
-                return fallback
-            asks_impact = any(
-                token in question_lower
-                for token in [
-                    "impact",
-                    "downstream",
-                    "dependency",
-                    "depend",
-                    "rename",
-                    "đổi tên",
-                    "ảnh hưởng",
-                    "phụ thuộc",
-                    "lien quan",
-                    "liên quan",
-                ]
-            )
-            needs_column_evidence = bool(
-                (requested_columns and not (metric_intent and not explicit_column_target))
-                or (
-                    not asks_top_changes
-                    and not (metric_intent and not explicit_column_target)
-                    and any(token in question_lower for token in ["column", "cột", "before", "after", "trước", "sau", "changed", "thay đổi"])
-                )
-            )
-            column_evidence = None
-            top_change_evidence = None
-            impact_evidence = None
-            if state and asks_top_changes:
-                top_change_evidence = ReportService.build_top_changed_columns(state, limit=10, sample_limit=3)
-                fallback = ReportService.answer_top_changes_from_evidence(top_change_evidence, fallback)
-            if state and asks_impact and requested_columns:
-                impact_evidence = [
-                    ReportService.build_column_impact_summary(report, state, column)
-                    for column in requested_columns[:5]
-                ]
-                if len(impact_evidence) == 1:
-                    fallback = ReportService.answer_column_impact_from_evidence(impact_evidence[0], fallback)
-            if state and needs_column_evidence:
-                column_evidence = ReportService.build_column_change_summary(
-                    state,
-                    columns=requested_columns or None,
-                    sample_limit=8,
-                )
-                fallback = ReportService.answer_column_changes_from_evidence(column_evidence, fallback)
+            def get_evaluation_metrics() -> str:
+                """Get exact F1 score evaluation metrics (F1 score, precision, recall, accuracy, true positives TP, false positives FP, false negatives FN, total cells evaluated) and LLM token cost metrics for this run."""
+                m = _get_evaluation_metrics_data(report, state=state)
+                return json.dumps(m, ensure_ascii=False, indent=2)
 
-            multi_part_answer = ReportService.answer_multi_part_question(
-                report,
-                question,
-                top_change_evidence=top_change_evidence or column_evidence,
-            )
-            if multi_part_answer:
-                return multi_part_answer
-            if asks_top_changes and not requested_columns and not asks_impact:
-                return fallback
+            def get_pipeline_telemetry() -> str:
+                """Get execution plan rationale, active vs skipped cleaning tasks, worker agent execution results, validation rule pass/fail results, and pipeline run metadata."""
+                t = _get_pipeline_telemetry_data(report, state=state)
+                return json.dumps(t, ensure_ascii=False, indent=2)
 
-            context = {
-                "final_report": report,
-                "column_change_evidence": column_evidence,
-                "top_changed_columns_evidence": top_change_evidence,
-                "column_impact_evidence": impact_evidence,
-                "recent_chat_history": (history or [])[-10:],
-            }
-            llm = create_llm(temperature=0)
-            messages = [
-                SystemMessage(
-                    content=(
-                        "You are the Final Report Agent for an agentic data-cleaning pipeline. "
-                        "Answer only from the provided report context. You understand the full "
-                        "pipeline: upload, profiling, semantic analysis, input validation, planning, "
-                        "worker execution, validation/retry, lineage promotion, metrics, exports, and "
-                        "next transformations. For column impact questions, use the provided column "
-                        "impact evidence and explain impact within the current data-cleaning run, not "
-                        "as a dbt-wide downstream model graph. If a requested fact is missing, say it is not available "
-                        "in the report instead of guessing. Do not reveal hidden chain-of-thought. "
-                        "Return compact JSON with keys: answer, sources, reasoning_summary, "
-                        "suggested_questions. reasoning_summary should briefly state what evidence "
-                        "you checked, not private step-by-step reasoning."
-                    )
-                ),
-                HumanMessage(
-                    content=(
-                        "Report context:\n"
-                        f"{_compact_for_prompt(context)}\n\n"
-                        f"User question: {question}"
-                    )
-                ),
+            def get_lineage_diff(column_name: str = "") -> str:
+                """Get before/after change stats, null count changes, dtype changes, top changed columns, or sample row modifications for specific columns across lineage versions."""
+                d = _get_lineage_diff_data(report, state=state, column_name=column_name if column_name else None)
+                return json.dumps(d, ensure_ascii=False, indent=2, default=str)
+
+            tools = [
+                StructuredTool.from_function(query_dataset_sql),
+                StructuredTool.from_function(get_evaluation_metrics),
+                StructuredTool.from_function(get_pipeline_telemetry),
+                StructuredTool.from_function(get_lineage_diff),
             ]
-            response = await llm.ainvoke(messages)
+            tool_map = {t.name: t for t in tools}
+
+            # 2. ReAct Agent Prompts and Memory
+            system_prompt = SystemMessage(
+                content=(
+                    "You are the Final Report Agent for an agentic data-cleaning pipeline.\n"
+                    "Your goal is to accurately answer user questions about the pipeline run, F1 evaluation metrics, "
+                    "token costs, execution plan rationale, worker outputs, validation rules, and the raw/cleaned dataset itself.\n\n"
+                    "Available tools:\n"
+                    "- `query_dataset_sql`: Run DuckDB SQL (SELECT) queries on dataset tables (`clean_data`, `raw_data`, `v1`, etc.). Use this whenever asked about data contents, row counts, null counts, distributions, top values, or data comparisons.\n"
+                    "- `get_evaluation_metrics`: Retrieve F1 score (TP, FP, FN, precision, recall, accuracy) and token consumption metrics.\n"
+                    "- `get_pipeline_telemetry`: Retrieve execution plan task rationale, skipped tasks, worker outputs, and validation rule results.\n"
+                    "- `get_lineage_diff`: Retrieve before/after column change stats and sample modifications.\n\n"
+                    "Instructions:\n"
+                    "1. Call relevant tools to gather exact evidence before answering. You may call multiple tools in sequence if needed.\n"
+                    "2. Always base your answer strictly on the tool output results or provided report summary.\n"
+                    "3. Return a JSON object with keys:\n"
+                    "   - `answer` (string): The clear, direct, and complete response to the user.\n"
+                    "   - `sources` (list of strings): List of data/telemetry sources used (e.g., ['dataset_sql', 'f1_metrics', 'execution_plan', 'lineage_diff']).\n"
+                    "   - `reasoning_summary` (string): A short 1-2 sentence summary of what tools and evidence were checked.\n"
+                    "   - `suggested_questions` (list of strings): 3-4 relevant follow-up questions.\n"
+                    "4. If a requested detail is not found, state clearly that it is not available."
+                )
+            )
+
+            compact_ctx = {
+                "report_summary": report.get("summary"),
+                "profile_summary": report.get("profile_summary"),
+                "transformations": report.get("transformations"),
+                "recent_chat_history": (history or [])[-5:],
+            }
+
+            user_msg = HumanMessage(
+                content=(
+                    f"Background Summary Context:\n{json.dumps(compact_ctx, ensure_ascii=False, default=str)}\n\n"
+                    f"User Question: {question}"
+                )
+            )
+
+            messages = [system_prompt, user_msg]
+            llm = create_llm(temperature=0)
+
+            llm_with_tools = llm.bind_tools(tools) if hasattr(llm, "bind_tools") else llm
+
+            used_sources: set[str] = set()
+
+            # ReAct Execution Loop (max 4 turns)
+            for _ in range(4):
+                response = await llm_with_tools.ainvoke(messages)
+                messages.append(response)
+
+                tool_calls = getattr(response, "tool_calls", None)
+                if not tool_calls:
+                    break
+
+                for tc in tool_calls:
+                    t_name = tc.get("name")
+                    t_args = tc.get("args") or {}
+                    t_id = tc.get("id")
+
+                    used_sources.add(t_name)
+
+                    if t_name in tool_map:
+                        tool_func = tool_map[t_name]
+                        try:
+                            t_output = tool_func.invoke(t_args)
+                        except Exception as terr:
+                            t_output = f"Tool invocation error: {terr}"
+                    else:
+                        t_output = f"Unknown tool: {t_name}"
+
+                    messages.append(ToolMessage(content=str(t_output), tool_call_id=t_id))
+
             raw_content = response.content if isinstance(response.content, str) else str(response.content)
             parsed = _extract_json_object(raw_content)
-            if not parsed:
-                return fallback
 
-            answer_payload = parsed.get("answer") if "answer" in parsed else parsed
-            answer = _humanize_answer_payload(answer_payload, fallback=fallback["answer"]).strip()
-            if asks_token and re.fullmatch(r"\d+(\.\d+)?", answer):
-                answer = f"Token usage: {answer} total LLM tokens."
-            sources = parsed.get("sources")
-            if not isinstance(sources, list) or not sources:
-                sources = fallback["sources"]
-            reasoning_summary = str(
-                parsed.get("reasoning_summary") or "Checked the final report context and related pipeline evidence."
-            ).strip()
-            suggestions = parsed.get("suggested_questions")
-            if not isinstance(suggestions, list) or not suggestions:
-                suggestions = _suggested_questions(report)
+            if parsed and isinstance(parsed, dict) and "answer" in parsed:
+                answer = str(parsed["answer"]).strip()
+                sources = parsed.get("sources") or list(used_sources or ["report"])
+                reasoning = parsed.get("reasoning_summary") or "Executed ReAct data & telemetry tools."
+                suggestions = parsed.get("suggested_questions") or _suggested_questions(report)
+                return {
+                    "answer": answer,
+                    "sources": [str(s) for s in sources],
+                    "reasoning_summary": str(reasoning),
+                    "answer_mode": "react_tool_agent",
+                    "suggested_questions": [str(q) for q in suggestions[:4]],
+                }
 
-            return {
-                "answer": answer,
-                "sources": [str(item) for item in sources],
-                "reasoning_summary": reasoning_summary,
-                "answer_mode": "llm_synthesis",
-                "suggested_questions": [str(item) for item in suggestions[:4]],
-            }
+            if raw_content and not raw_content.startswith("{"):
+                return {
+                    "answer": raw_content.strip(),
+                    "sources": list(used_sources or ["report"]),
+                    "reasoning_summary": "Executed ReAct data & telemetry tools and synthesized final answer.",
+                    "answer_mode": "react_tool_agent",
+                    "suggested_questions": _suggested_questions(report),
+                }
+
+            return fallback
+
         except Exception:
             return fallback
 
