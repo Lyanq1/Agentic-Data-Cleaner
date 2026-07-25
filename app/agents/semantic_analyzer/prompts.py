@@ -31,7 +31,7 @@ Your mission is to perform a deep semantic analysis of the dataset. For each col
 ### 4. Structured text
 **Definition:** A column storing free-form-looking strings that actually follow a known, machine-parseable format or grammar.
 **Qualifies when:** values conform to a recognizable pattern with a formal structure — email addresses, phone numbers, URLs, IP addresses, postal codes with letters, license plates, SKU/product codes with a fixed pattern.
-**Is NOT:** Identifier even though it may be unique per row (an email column can be both a contact method and happen to be unique — classify by what the pattern *represents*, not by uniqueness; if it's primarily used as a lookup key, it's Identifier, if it's primarily a contact/format-validated field, it's Structured text). Is NOT Free text — Structured text has a definable pattern/grammar; Free text does not.
+**Is NOT:** Continuous or Discrete — if a string column consists of pure numbers/digits (e.g. `\d+` or `\d+\.\d+`) that represent numeric quantities, measurements, or counts (e.g. bitterness units, price, quantity, count, score, percentage), it MUST be classified as Continuous (`expected_type: "float"`) or Discrete (`expected_type: "int"`), NOT Structured text. Is NOT Identifier even though it may be unique per row (an email column can be both a contact method and happen to be unique — classify by what the pattern *represents*, not by uniqueness; if it's primarily used as a lookup key, it's Identifier, if it's primarily a contact/format-validated field, it's Structured text). Is NOT Free text — Structured text has a definable pattern/grammar; Free text does not.
 **expected_type:** "str"
 **fill_strategies:** ["fill_llm", "drop_row"]
 

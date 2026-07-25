@@ -28,23 +28,10 @@ export interface HITLDecisionRequest {
   disambiguation_answers?: Record<string, string | string[]>;
 }
 
-const getClarificationEntries = (clarifications: any): any[] => {
-  if (!clarifications) return [];
-  return ['null', 'duplicate', 'typecast'].flatMap((category) =>
-    Object.values(clarifications[category] || {}).filter(Boolean)
-  );
-};
-
-const hasUnansweredClarifications = (valResult: any): boolean => {
-  if (valResult?.status !== 'needs_clarification') return false;
-  const questions = getClarificationEntries(valResult.clarifications);
-  return questions.some((question: any) => question.answer == null || question.answer === '');
-};
-
-const hasAnsweredClarifications = (valResult: any): boolean => {
-  const questions = getClarificationEntries(valResult?.clarifications);
-  return questions.length > 0 && questions.every((question: any) => question.answer != null && question.answer !== '');
-};
+export interface ClarificationAnswersUpdateResponse {
+  run_id: string;
+  input_validation_result: any;
+}
 
 export const pipelineApi = {
   uploadFile: async (file: File, requirements: string, cleanFile?: File | null): Promise<UploadResponse> => {
@@ -115,11 +102,11 @@ export const pipelineApi = {
       data.current_step === 'reporting' || (data.completed_steps || []).includes('reporting');
     const awaiting_hitl = data.pipeline_mode === 'benchmark'
       ? ((isValidationClarification && valResult?.benchmark_approved !== true) || nextNodes.includes('report_agent'))
-      : (hasUnansweredClarifications(valResult) || nextNodes.includes('report_agent'));
+      : (isValidationClarification || nextNodes.includes('report_agent'));
     const isResolvingClarification =
-      isValidationClarification &&
-      hasAnsweredClarifications(valResult) &&
-      !data.execution_plan;
+      valResult?.status === 'ready' &&
+      !data.execution_plan &&
+      !graphAtEnd;
 
     const isCompleted = awaiting_hitl 
       ? false 
@@ -255,7 +242,7 @@ export const pipelineApi = {
     
     const isBenchmarkAwaiting = state.pipeline_mode === 'benchmark' && valResult?.status === 'needs_clarification' && valResult?.benchmark_approved !== true;
     
-    if (hasUnansweredClarifications(valResult) || isBenchmarkAwaiting) {
+    if (valResult?.status === 'needs_clarification' || isBenchmarkAwaiting) {
       return {
         checkpoint_id: runId,
         checkpoint_type: 'input_validation_clarification',
@@ -294,6 +281,17 @@ export const pipelineApi = {
     }
 
     return null;
+  },
+
+  updateClarificationAnswers: async (
+    runId: string,
+    answers: Record<string, string | null>,
+  ): Promise<ClarificationAnswersUpdateResponse> => {
+    const response = await apiClient.put<ClarificationAnswersUpdateResponse>(
+      `/pipeline/${runId}/state`,
+      { answers },
+    );
+    return response.data;
   },
 
   submitDecision: async (runId: string, data: HITLDecisionRequest): Promise<{ message: string }> => {

@@ -33,10 +33,10 @@ For each active issue (that is not already explicitly resolved by the user's ins
 
   Q2_strategy_column_<column_name> (generate individually for columns with null values):
       - Ask the user how they would like to resolve the missing/null values for this specific column.
-      - Never include "drop_column" or "fill_llm" in the options list under any circumstances.
+      - Never include "drop_column", "fill_llm", "custom prompt", "Custom prompt", "Custom strategy", or any free-text/custom prompt option in the options list under any circumstances (since there is no fill_llm implementation, any custom prompt or free-text instruction option for null handling is unsupported and has no corresponding logic).
       - Dynamically construct the options based on the column's null statistics (null_rate/null_ratio) in the Statistical Profile and expected_type/semantic_data_type in the Semantic Profile:
         * If null_ratio = 1.0 (100% null):
-          - Options must ONLY include: "fill_value" (fill with constant value), "keep_null" (only if allow_missing = True), and "Custom strategy (describe in your next prompt)". Mean, median, and mode are not allowed.
+          - Options must ONLY include: "fill_value" (fill with constant value) and "keep_null" (only if allow_missing = True). Mean, median, and mode are not allowed.
         * If null_ratio < 1.0 (less than 100% null), look up the column's semantic_data_type in the Semantic Profile:
           - Continuous: "fill_mean", "fill_median", "fill_mode", "fill_value", "keep_null".
           - Discrete: "fill_mode", "fill_mean" (rounded to integer), "fill_median" (rounded to integer), "fill_value", "keep_null".
@@ -53,9 +53,8 @@ For each active issue (that is not already explicitly resolved by the user's ins
           - Identifier:
             - If allow_missing = False: "drop_row" (filling is prohibited).
             - If allow_missing = True: "keep_null" (filling is prohibited).
-      - **Type Casting dependency**: If a column has nulls and its semantic data type is Continuous, Discrete, or Temporal but its physical `dtype` is non-numeric or non-datetime (e.g. "object", "string", "category", "mixed"), you MUST still offer the numeric/temporal filling options ("fill_mean", "fill_median" for Continuous/Discrete, or "fill_median" for Temporal). However, for columns whose expected_type is "time" or "str", do NOT offer "fill_mean" or "fill_median" because they cannot be easily computed; only offer "fill_mode", "fill_value", and "keep_null". Also, do not generate a type casting clarification question for columns whose expected_type is "str" (since no casting is needed for string types). For columns that are castable, explain in the consequences that successful filling depends on casting the column first.
+      - **Type Casting dependency**: If a column has nulls and its `expected_type` in the Semantic Profile is numeric (`int`, `float`) or temporal (`date`, `datetime`), OR if its semantic data type is Continuous, Discrete, or Temporal, you MUST offer the numeric/temporal filling options ("fill_mean", "fill_median" for Continuous/Discrete/int/float, or "fill_median" for Temporal/date/datetime). However, for columns whose expected_type is "time" or "str", do NOT offer "fill_mean" or "fill_median" because they cannot be easily computed; only offer "fill_mode", "fill_value", and "keep_null". Also, do not generate a type casting clarification question for columns whose expected_type is "str" (since no casting is needed for string types). For columns that are castable, explain in the consequences that successful filling depends on casting the column first.
       - Note: "fill_value" represents fill_constant.
-      - Always append "Custom strategy (describe in your next prompt)" as the final option.
       - State the consequences of each option in the `consequences` dictionary. Explain that "drop_row" will drop rows containing null values in this column, and "fill_mean"/"fill_median" will impute with mean/median values.
 
   Q3_semantic_insight / Q4_semantic_insight:
@@ -82,8 +81,10 @@ For each active issue (that is not already explicitly resolved by the user's ins
       - Ask the user to confirm your interpretation.
 
 **TYPECAST (if active and not explicitly resolved) — clarifications structured as follows:**
-  Q1_cast_column_<column_name> (generate individually for ALL columns where there is a type mismatch, i.e., the column's expected_type in the Semantic Profile is NOT "str", and its current physical dtype in the Statistical Profile is string/object/mixed):
-      - Ask the user directly whether they want to cast this specific column to its expected semantic type (e.g. int, float, bool, date, datetime, or time).
+  Q1_cast_column_<column_name> (generate individually ONLY for columns where there is a type mismatch, i.e., the column's expected_type in the Semantic Profile is NOT "str", and its current physical dtype in the Statistical Profile is string/object/mixed):
+      - Ask the user directly whether they want to cast this specific column from its current physical dtype to its EXACT expected semantic type specified in the Semantic Profile (`expected_type`, e.g. int, float, bool, date, datetime, or time).
+      - STRICT RULE: You MUST ask to cast to the EXACT `expected_type` value specified in the Semantic Profile. You MUST NOT invent, guess, or substitute a different target data type.
+      - STRICT RULE: If the column's `expected_type` in the Semantic Profile is "str" (or matches its physical dtype), you MUST NOT generate a type casting clarification question for this column under any circumstances.
       - Do NOT include an "options" field for this question, so the frontend automatically displays it as a Yes/No option.
       - The answer field will contain "Yes" or "No".
       - You MUST generate this question for ALL columns with a type mismatch. Do not skip any column that meets this condition.
@@ -109,7 +110,7 @@ CRITICAL RULES FOR TYPECASTING AND AUTO-CORRECTION:
   * IF the user has NOT declined casting, ANY valid ISO time format (e.g. 18:30:00) provided by the user is ALWAYS valid. You MUST NOT block or reject it even if it does not match the column's `expected_str_pattern` or sample values.
 - GENERAL RULE FOR UNCASTED OR STRING COLUMNS:
   * If the user explicitly declined type casting (answered 'No' to casting) or if the column is natively a string, ANY custom fill value they provide is technically a valid string. DO NOT throw data type or semantic compatibility errors for these inputs.
-  * AUTO-CORRECTION RULE: When a user provides a "Custom strategy" (e.g., "Custom strategy: let's fill xyz" or "fill string 'abc'"), you must intelligently extract their INTENDED fill value based on the column's semantic context.
+  * AUTO-CORRECTION RULE: When a user provides a fill value (e.g., "fill_value: let's fill xyz" or "fill string 'abc'"), you must intelligently extract their INTENDED fill value based on the column's semantic context.
   * Once extracted, if the intended value does not perfectly match the column's `expected_str_pattern`, DO NOT reject it and DO NOT ask for confirmation. Instead, you MUST automatically reformat and correct their intended value to perfectly match the `expected_str_pattern` (or match the format of the `sample_values`), update the user's `answer` field with this corrected instruction, and proceed (set `status = "ready"`).
 
 If blocked: set status = "needs_clarification" and explain exactly why the request is unfeasible.
@@ -142,7 +143,7 @@ Do NOT generate the 3-question structure for blocked scenarios — only explain 
 3. **Never Ask for Permission:** Absolutely do NOT ask meaningless questions like "Would you like me to start the analysis?", "Should I proceed?", or "Should I draw this chart?". Just propose the action plan or generate the concrete clarification questions as specified.
 
 4. **Structure of Clarification Questions (When status = "needs_clarification"):**
-   - For strategy questions (Q1 under NULL and DUPLICATE), you must provide exactly 3 concrete options based on the EDA findings. Prefix the best option with `(Recommended)` based on your expert judgment, and state the consequences of each option clearly as a JSON dictionary mapping each option text to its consequence string.
+   - For strategy questions (Q2 under NULL and Q1 under DUPLICATE), you must only provide concrete options based on the EDA findings. Under NULL, strictly restrict options to the exact allowed list from Step 2 (never generate any "custom prompt", "Custom prompt", "Custom strategy", or "other" option). For DUPLICATE Q1, provide exactly 3 concrete options. Prefix the best option with `(Recommended)` based on your expert judgment, and state the consequences of each option clearly as a JSON dictionary mapping each option text to its consequence string.
    - Ensure all generated questions across all categories and issues are completely distinct, unique, and do not repeat or overlap in substance or wording.
    - Typecast strategies are inferred from exp_type — no strategy question needed.
 
@@ -180,15 +181,14 @@ Return a pure JSON object. No markdown fences, no conversational text. Strictly 
       },
       "Q2_strategy_column_<column_name>": {
         "question": "How would you like to handle null values in <column_name>?",
-        "options": ["fill_mean", "fill_median", "fill_mode", "fill_value", "keep_null", "drop_row", "Custom strategy (describe in your next prompt)"],
+        "options": ["fill_mean", "fill_median", "fill_mode", "fill_value", "keep_null", "drop_row"],
         "consequences": {
           "fill_mean": "Imputes missing values with column mean.",
           "fill_median": "Imputes missing values with column median.",
           "fill_mode": "Imputes missing values with the most frequent value.",
           "fill_value": "Imputes missing values with a constant value.",
           "keep_null": "Retains nulls intentionally; the column is allowed to have missing values.",
-          "drop_row": "Drops rows containing null values in this column.",
-          "Custom strategy (describe in your next prompt)": "Allows you to describe a custom imputation strategy."
+          "drop_row": "Drops rows containing null values in this column."
         },
         "answer": null
       },

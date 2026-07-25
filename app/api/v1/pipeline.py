@@ -32,6 +32,12 @@ class ReportChatRequest(BaseModel):
     question: str = Field(min_length=1, max_length=1000)
 
 
+class ClarificationAnswersUpdateRequest(BaseModel):
+    """Persist one or more draft clarification answers without resuming the graph."""
+
+    answers: dict[str, str | None] = Field(min_length=1)
+
+
 @router.post("/pipeline/run", summary="Upload dataset and run the cleaning pipeline")
 async def api_run_pipeline(
     background_tasks: BackgroundTasks,
@@ -107,6 +113,104 @@ async def api_get_pipeline_state(run_id: str):
         raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found.")
 
     return state
+
+
+@router.put(
+    "/pipeline/{run_id}/state",
+    summary="Persist draft input-validation clarification answers",
+)
+async def api_update_pipeline_state(
+    run_id: str,
+    payload: ClarificationAnswersUpdateRequest,
+):
+    """Patch clarification answers while keeping the pipeline paused for review.
+
+    This endpoint intentionally updates only
+    ``input_validation_result.clarifications.<category>.<question>.answer``.
+    Final submission and graph resumption remain the responsibility of
+    ``POST /pipeline/{run_id}/resolve``.
+    """
+    config = {"configurable": {"thread_id": run_id}}
+
+    async with get_checkpointer_manager().get() as checkpointer:
+        graph = build_graph(checkpointer=checkpointer)
+        snapshot = await graph.aget_state(config)
+
+        if not snapshot or not snapshot.values:
+            raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found.")
+
+        val_result = snapshot.values.get("input_validation_result")
+        if not val_result:
+            raise HTTPException(
+                status_code=400,
+                detail="No input validation result found to update.",
+            )
+
+        if hasattr(val_result, "model_dump"):
+            val_result_dict = val_result.model_dump()
+        elif hasattr(val_result, "dict"):
+            val_result_dict = val_result.dict()
+        else:
+            val_result_dict = copy.deepcopy(dict(val_result))
+
+        if val_result_dict.get("status") != "needs_clarification":
+            raise HTTPException(
+                status_code=409,
+                detail="Clarification answers can only be updated while clarification is pending.",
+            )
+
+        clarifications = val_result_dict.get("clarifications")
+        if not isinstance(clarifications, dict):
+            raise HTTPException(
+                status_code=400,
+                detail="No clarifications found in input validation result.",
+            )
+
+        pending_updates: list[tuple[dict[str, Any], str | None]] = []
+        for key, answer in payload.answers.items():
+            parts = key.split(".")
+            if len(parts) != 2:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid clarification key '{key}'. Expected '<category>.<question_key>'.",
+                )
+
+            category, question_key = parts
+            if category not in {"null", "duplicate", "typecast"}:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Unknown clarification category '{category}'.",
+                )
+
+            category_data = clarifications.get(category)
+            question_data = (
+                category_data.get(question_key)
+                if isinstance(category_data, dict)
+                else None
+            )
+            if not isinstance(question_data, dict):
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Clarification question '{key}' was not found.",
+                )
+
+            pending_updates.append((question_data, answer))
+
+        for question_data, answer in pending_updates:
+            question_data["answer"] = answer
+            if answer is not None:
+                question_data["error"] = None
+
+        await graph.aupdate_state(
+            snapshot.config if getattr(snapshot, "config", None) else config,
+            {"input_validation_result": val_result_dict},
+            as_node="input_validator",
+        )
+
+    return {
+        "run_id": run_id,
+        "input_validation_result": val_result_dict,
+    }
 
 
 def _load_latest_processed_dataframe(state: dict):
@@ -758,7 +862,7 @@ async def api_resolve_pipeline(
                                 while True:
                                     matched = False
                                     lower_ans = ans_stripped.lower()
-                                    for p in ["custom strategy:", "fill_value:", "fill_value ", "fill ", "impute "]:
+                                    for p in ["fill_value:", "fill_value ", "fill ", "impute "]:
                                         if lower_ans.startswith(p):
                                             idx = len(p)
                                             prefix += ans_stripped[:idx]

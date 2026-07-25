@@ -264,6 +264,38 @@ class NullAgent(BaseAgent):
         )
 
     @staticmethod
+    def _coerce_fill_value_to_physical_dtype(
+        series: pd.Series,
+        fill_value: Any,
+    ) -> Any:
+        """Coerce a constant to the dtype that reaches the null worker.
+
+        Type casting runs before null handling, so ``series.dtype`` is the
+        user-approved final dtype at this point. Coercing constants here keeps
+        ``fillna`` from widening a numeric/datetime column back to object.
+        """
+        value = fill_value.strip() if isinstance(fill_value, str) else fill_value
+        if pd.api.types.is_integer_dtype(series.dtype):
+            numeric_value = pd.to_numeric(value, errors="raise")
+            if float(numeric_value).is_integer():
+                return int(numeric_value)
+            raise ValueError(f"'{fill_value}' is not an integer constant")
+        if pd.api.types.is_float_dtype(series.dtype):
+            return float(pd.to_numeric(value, errors="raise"))
+        if pd.api.types.is_datetime64_any_dtype(series.dtype):
+            return pd.to_datetime(value, errors="raise")
+        if pd.api.types.is_bool_dtype(series.dtype):
+            if isinstance(value, bool):
+                return value
+            normalized = str(value).lower()
+            if normalized in {"true", "1", "yes"}:
+                return True
+            if normalized in {"false", "0", "no"}:
+                return False
+            raise ValueError(f"'{fill_value}' is not a boolean constant")
+        return fill_value
+
+    @staticmethod
     def _apply_null_strategies(
         df: pd.DataFrame,
         task: TaskDetail | None,
@@ -416,7 +448,23 @@ class NullAgent(BaseAgent):
             elif strategy == "fill_value":
                 fill_val = cfg.get("fill_value", "Unknown")
 
-                # Coerce fill_val to temporal object to avoid PyArrow mixed type serialization errors
+                try:
+                    fill_val = NullAgent._coerce_fill_value_to_physical_dtype(
+                        cleaned_df[col],
+                        fill_val,
+                    )
+                except (TypeError, ValueError) as exc:
+                    raise NullHandlingError(
+                        (
+                            f"Column '{col}': fill_value '{fill_val}' is incompatible "
+                            f"with final dtype '{cleaned_df[col].dtype}'."
+                        ),
+                        failed_rules=["fill_value_final_dtype_mismatch"],
+                        notes=[str(exc)],
+                    ) from exc
+
+                # Coerce object-backed temporal values to avoid mixed-type
+                # PyArrow serialization errors.
                 if semantic_type == "Temporal" and isinstance(fill_val, str):
                     try:
                         import datetime

@@ -38,7 +38,7 @@ class InputValidatorAgent(BaseAgent):
         # Get prior messages in case this is a continuation of a conversation
         prior_messages = state.get("messages", [])
 
-        # Pre-process user-submitted custom strategy datetime strings to ISO format
+        # Pre-process user-submitted datetime strings to ISO format
         val_result = state.get("input_validation_result")
         if val_result:
             if hasattr(val_result, "clarifications") and val_result.clarifications:
@@ -86,7 +86,7 @@ class InputValidatorAgent(BaseAgent):
                                         while True:
                                             matched = False
                                             lower_ans = ans_stripped.lower()
-                                            for p in ["custom strategy:", "fill_value:", "fill_value ", "fill ", "impute "]:
+                                            for p in ["fill_value:", "fill_value ", "fill ", "impute "]:
                                                 if lower_ans.startswith(p):
                                                     idx = len(p)
                                                     prefix += ans_stripped[:idx]
@@ -146,7 +146,7 @@ class InputValidatorAgent(BaseAgent):
                                             while True:
                                                 matched = False
                                                 lower_ans = ans_stripped.lower()
-                                                for p in ["custom strategy:", "fill_value:", "fill_value ", "fill ", "impute "]:
+                                                for p in ["fill_value:", "fill_value ", "fill ", "impute "]:
                                                     if lower_ans.startswith(p):
                                                         idx = len(p)
                                                         prefix += ans_stripped[:idx]
@@ -256,7 +256,7 @@ class InputValidatorAgent(BaseAgent):
                 "1. Set status = 'needs_clarification'. "
                 "2. Clear the 'answer' field of that specific unfeasible question to null so the user can re-answer. "
                 "3. Set the 'error' field of that question with a clear explanation of why it was unfeasible (e.g., 'The strategy \"fill abc\" is invalid because this is a numeric column'). "
-                "4. Set the 'previous_answer' field of that question to the exact user answer they submitted (e.g., 'Custom strategy: fill abc'). "
+                "4. Set the 'previous_answer' field of that question to the exact user answer they submitted (e.g., 'fill_value: abc'). "
                 "5. Keep the valid answers for other questions in their 'answer' field (leaving 'error' and 'previous_answer' as null for valid questions). "
                 "Only if ALL user answers are feasible, you must: "
                 "1. Set status = 'ready'. "
