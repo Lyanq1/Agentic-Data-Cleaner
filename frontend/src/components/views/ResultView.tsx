@@ -21,7 +21,6 @@ import {
   Database,
   ArrowRightLeft,
   X,
-  Sparkles,
 } from 'lucide-react';
 
 interface ResultViewProps {
@@ -47,6 +46,97 @@ interface ComparePreview {
   changed_cell_count?: number;
   truncated?: boolean;
 }
+
+type EvidenceTabId = 'overview' | 'quality' | 'decisions' | 'lineage' | 'exports';
+
+interface EvidenceContext {
+  id: string;
+  label: string;
+  available: boolean;
+  evidence: string;
+}
+
+interface ExecutionTask {
+  task_id?: string;
+  agent?: string;
+  columns?: string[];
+  skip?: boolean;
+  skip_reason?: string;
+  rationale?: string;
+}
+
+interface WorkerResult {
+  task_id?: string;
+  agent_name?: string;
+  status?: unknown;
+  outcome?: unknown;
+  success?: boolean;
+  changed_rows?: unknown;
+  rows_removed?: unknown;
+  rows_affected?: unknown;
+  changed_columns?: unknown;
+  columns?: unknown;
+  [key: string]: unknown;
+}
+
+interface ValidationItem {
+  task_id?: string;
+  agent?: string;
+  passed?: boolean;
+  failed_rules?: string[];
+}
+
+interface LineageVersion {
+  version: number;
+  agent_name?: string;
+  description?: string;
+  created_at?: string;
+}
+
+interface F1Metrics {
+  f1_score?: number;
+  error_correction_precision?: number;
+  error_correction_recall?: number;
+  cell_accuracy?: number;
+  total_cells_evaluated?: number;
+  tp?: number;
+  fp?: number;
+  fn?: number;
+}
+
+interface TokenMetrics {
+  total_tokens?: number;
+  prompt_tokens?: number;
+  completion_tokens?: number;
+}
+
+const EVIDENCE_TABS: Array<{
+  id: EvidenceTabId;
+  label: string;
+  contextIds: string[];
+}> = [
+  { id: 'overview', label: 'Overview', contextIds: ['summary', 'pipeline_trace'] },
+  { id: 'quality', label: 'Quality', contextIds: ['profiling', 'validation', 'metrics'] },
+  { id: 'decisions', label: 'Decisions & execution', contextIds: ['planning', 'worker_execution', 'workers'] },
+  { id: 'lineage', label: 'Lineage & changes', contextIds: ['lineage', 'before_after'] },
+  { id: 'exports', label: 'Exports', contextIds: ['exports'] },
+];
+
+const PIPELINE_STAGES: Array<{
+  id: string;
+  label: string;
+  tab: EvidenceTabId;
+  contextIds: string[];
+}> = [
+  { id: 'upload', label: 'Upload', tab: 'overview', contextIds: ['summary'] },
+  { id: 'profiling', label: 'Profiling', tab: 'quality', contextIds: ['profiling'] },
+  { id: 'input-validation', label: 'Input validation', tab: 'quality', contextIds: ['pipeline_trace'] },
+  { id: 'planning', label: 'Planning', tab: 'decisions', contextIds: ['planning'] },
+  { id: 'workers', label: 'Workers', tab: 'decisions', contextIds: ['worker_execution', 'workers'] },
+  { id: 'approval', label: 'Approval', tab: 'quality', contextIds: ['validation'] },
+  { id: 'lineage', label: 'Lineage', tab: 'lineage', contextIds: ['lineage'] },
+  { id: 'report', label: 'Report & export', tab: 'exports', contextIds: ['exports'] },
+];
 
 const SEVERITY_STYLES: Record<string, string> = {
   error: 'bg-red-100 text-red-700 border-red-200 dark:bg-red-950/40 dark:text-red-300 dark:border-red-900',
@@ -131,7 +221,7 @@ function buildTransformationLines(report: Record<string, any> | undefined): stri
   return lines.length > 0 ? lines : ['Worker tasks completed — see raw report for details'];
 }
 
-function buildEvidenceContexts(report: Record<string, any> | undefined): Array<{ id: string; label: string; available: boolean; evidence: string }> {
+function buildEvidenceContexts(report: Record<string, any> | undefined): EvidenceContext[] {
   const contexts = report?.answer_contexts;
   if (Array.isArray(contexts) && contexts.length > 0) {
     return contexts.map((item: any, index: number) => ({
@@ -142,13 +232,143 @@ function buildEvidenceContexts(report: Record<string, any> | undefined): Array<{
     }));
   }
   return [
-    { id: 'summary', label: 'Run summary', available: Boolean(report?.summary), evidence: 'Rows, columns, retries, tokens' },
-    { id: 'planning', label: 'Planning decisions', available: Boolean(report?.execution_plan_summary?.tasks?.length), evidence: 'Tasks, skipped steps, rationale' },
-    { id: 'workers', label: 'Worker execution', available: Boolean(report?.worker_results && Object.keys(report.worker_results).length), evidence: 'Agent outputs and affected rows' },
-    { id: 'validation', label: 'Validation approval', available: Boolean(report?.validation), evidence: 'Checks, issues, pass/fail' },
-    { id: 'lineage', label: 'Lineage versions', available: Boolean(report?.lineage?.versions?.length), evidence: 'Version history and producing agents' },
+    { id: 'summary', label: 'Run summary', available: Boolean(report?.summary), evidence: 'Filename, rows, columns, retry cycles, token total' },
+    { id: 'profiling', label: 'Profiling', available: Boolean(report?.profile_summary || report?.semantic_summary), evidence: 'Statistical profile, semantic summary, missing values, duplicates' },
+    { id: 'planning', label: 'Planning decisions', available: Boolean(report?.execution_plan_summary?.tasks?.length), evidence: 'Planner summary, tasks, skipped steps, rationale' },
+    { id: 'worker_execution', label: 'Worker execution', available: Boolean(report?.worker_results && Object.keys(report.worker_results).length), evidence: 'Worker outputs, changed rows and columns, task status' },
+    { id: 'validation', label: 'Validation approval', available: Boolean(report?.validation), evidence: 'Validator items, pass/fail, failed rules, issue count' },
+    { id: 'lineage', label: 'Lineage versions', available: Boolean(report?.lineage?.versions?.length), evidence: 'Approved versions, producing agents, descriptions' },
+    { id: 'metrics', label: 'Metrics', available: Boolean(report?.metrics), evidence: 'Token usage, F1, precision, recall, cell accuracy, TP/FP/FN' },
+    { id: 'pipeline_trace', label: 'Pipeline trace', available: Boolean(report?.pipeline_context), evidence: 'Upload, profiling, validation, planning, workers, lineage, report/export' },
+    { id: 'before_after', label: 'Before/after diff', available: Boolean(report?.lineage?.versions?.length), evidence: 'Version 1 versus latest, changed cells, per-column samples' },
+    { id: 'exports', label: 'Exports', available: Boolean(report), evidence: 'Report JSON, cleaned files, versioned dataset downloads' },
   ];
 }
+
+function getWorkerChangedRows(result: WorkerResult): number | null {
+  const value = result.changed_rows ?? result.rows_removed ?? result.rows_affected;
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function getWorkerChangedColumns(result: WorkerResult): string[] {
+  const value = result.changed_columns ?? result.columns;
+  if (Array.isArray(value)) {
+    return value.map((column) => {
+      if (typeof column === 'string') return column;
+      if (column && typeof column === 'object') {
+        const item = column as Record<string, unknown>;
+        return String(item.name ?? item.column ?? item.column_name ?? JSON.stringify(column));
+      }
+      return String(column);
+    });
+  }
+  if (typeof value === 'string' && value.trim()) return [value];
+  return [];
+}
+
+function getWorkerStatus(result: WorkerResult): string {
+  return String(result.status ?? result.outcome ?? (result.success === false ? 'failed' : 'completed'));
+}
+
+const ReportEvidenceNavigation = ({
+  activeTab,
+  contexts,
+  onTabChange,
+}: {
+  activeTab: EvidenceTabId;
+  contexts: EvidenceContext[];
+  onTabChange: (tab: EvidenceTabId) => void;
+}) => {
+  const contextAvailability = useMemo(
+    () => new Map(contexts.map((context) => [context.id, context.available])),
+    [contexts],
+  );
+  const availableCount = contexts.filter((context) => context.available).length;
+
+  const hasAnyContext = (contextIds: string[]) =>
+    contextIds.some((contextId) => contextAvailability.get(contextId) === true);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+            Report Agent evidence
+          </h3>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {availableCount} of {contexts.length} evidence areas are available for this run.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2" role="tablist" aria-label="Report evidence sections">
+          {EVIDENCE_TABS.map((tab) => {
+            const selected = activeTab === tab.id;
+            const available = hasAnyContext(tab.contextIds);
+            return (
+              <button
+                key={tab.id}
+                id={`evidence-tab-${tab.id}`}
+                type="button"
+                role="tab"
+                aria-selected={selected}
+                aria-controls={`evidence-panel-${tab.id}`}
+                onClick={() => onTabChange(tab.id)}
+                className={`inline-flex min-h-9 items-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
+                  selected
+                    ? 'border-primary bg-primary text-primary-foreground'
+                    : 'bg-background text-muted-foreground hover:bg-muted/40 hover:text-foreground'
+                }`}
+              >
+                <span
+                  className={`h-2 w-2 rounded-full ${
+                    available
+                      ? selected
+                        ? 'bg-primary-foreground'
+                        : 'bg-emerald-500'
+                      : 'bg-muted-foreground/35'
+                  }`}
+                  aria-hidden="true"
+                />
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="rounded-xl border bg-muted/10 p-3">
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Pipeline trace
+          </span>
+          <span className="text-xs text-muted-foreground">Select a stage to inspect its evidence</span>
+        </div>
+        <div className="grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-8">
+          {PIPELINE_STAGES.map((stage, index) => {
+            const available = hasAnyContext(stage.contextIds);
+            return (
+              <button
+                key={stage.id}
+                type="button"
+                onClick={() => onTabChange(stage.tab)}
+                className="group flex min-h-16 flex-col items-start justify-between rounded-lg border bg-background px-3 py-2 text-left transition-colors hover:border-primary/40 hover:bg-muted/20"
+              >
+                <span className="flex w-full items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                  <span>{String(index + 1).padStart(2, '0')}</span>
+                  {available ? (
+                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" aria-label="Evidence available" />
+                  ) : (
+                    <span className="h-2 w-2 rounded-full bg-muted-foreground/30" aria-label="Evidence unavailable" />
+                  )}
+                </span>
+                <span className="text-xs font-medium text-foreground">{stage.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+};
 
 function formatGMT7(dateStr: string): string {
   try {
@@ -188,7 +408,7 @@ function buildChangedCellLookup(comparePreview: ComparePreview | undefined): Map
   return lookup;
 }
 
-const DatasetComparePreview = memo(({ comparePreview }: { comparePreview?: ComparePreview }) => {
+export const DatasetComparePreview = memo(({ comparePreview }: { comparePreview?: ComparePreview }) => {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [selectedCell, setSelectedCell] = useState<{ rowIndex: number; column: string; side: 'before' | 'after' } | null>(null);
   const changedLookup = useMemo(() => buildChangedCellLookup(comparePreview), [comparePreview]);
@@ -202,12 +422,17 @@ const DatasetComparePreview = memo(({ comparePreview }: { comparePreview?: Compa
     window.setTimeout(() => {
       const selector = `[data-compare-cell="${CSS.escape(`${counterpartSide}::${rowIndex}::${column}`)}"]`;
       const target = rootRef.current?.querySelector<HTMLElement>(selector);
-      target?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+      const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      target?.scrollIntoView({
+        behavior: prefersReducedMotion ? 'auto' : 'smooth',
+        block: 'center',
+        inline: 'center',
+      });
     }, 0);
   };
 
   const renderTable = (label: string, rows: Record<string, any>[], side: 'before' | 'after') => (
-    <div className="min-w-0 rounded-lg border bg-background overflow-hidden">
+    <div className="min-w-0 overflow-hidden rounded-xl border bg-background shadow-sm">
       <div className="flex items-center justify-between gap-3 border-b bg-muted/25 px-4 py-3">
         <div>
           <h4 className="text-sm font-semibold">{label}</h4>
@@ -217,13 +442,13 @@ const DatasetComparePreview = memo(({ comparePreview }: { comparePreview?: Compa
           {side === 'before' ? 'Left: Input' : 'Right: Cleaned'}
         </span>
       </div>
-      <div className="max-h-[640px] overflow-auto">
-        <table className="w-full min-w-[72rem] border-separate border-spacing-0 text-xs">
+      <div className="custom-scrollbar max-h-[640px] overflow-auto">
+        <table className="w-full min-w-[64rem] border-separate border-spacing-0 text-xs">
           <thead className="sticky top-0 z-10">
             <tr>
-              <th className="sticky left-0 z-20 bg-slate-50 border-b border-r px-3 py-2 text-left font-semibold text-slate-600">#</th>
+              <th className="sticky left-0 z-20 border-b border-r bg-muted px-3 py-2 text-left font-semibold text-muted-foreground">#</th>
               {columns.map((column) => (
-                <th key={column} className="bg-slate-50 border-b border-r px-3 py-2 text-left font-semibold text-slate-600 whitespace-nowrap">
+                <th key={column} className="whitespace-nowrap border-b border-r bg-muted px-3 py-2 text-left font-semibold text-muted-foreground">
                   {column}
                 </th>
               ))}
@@ -231,8 +456,8 @@ const DatasetComparePreview = memo(({ comparePreview }: { comparePreview?: Compa
           </thead>
           <tbody>
             {rows.map((row, rowIndex) => (
-              <tr key={rowIndex} className="hover:bg-muted/20">
-                <td className="sticky left-0 bg-background border-b border-r px-3 py-1.5 text-slate-500 tabular-nums">{rowIndex + 1}</td>
+              <tr key={rowIndex} className="transition-colors duration-150 hover:bg-muted/20 motion-reduce:transition-none">
+                <td className="sticky left-0 border-b border-r bg-background px-3 py-1.5 text-muted-foreground tabular-nums">{rowIndex + 1}</td>
                 {columns.map((column) => {
                   const change = changedLookup.get(`${rowIndex}::${column}`);
                   const changed = Boolean(change);
@@ -242,22 +467,24 @@ const DatasetComparePreview = memo(({ comparePreview }: { comparePreview?: Compa
                     ? `Before: ${formatCell(change?.before)} -> After: ${formatCell(change?.after)}`
                     : formatCell(row[column]);
                   return (
-                    <td
-                      key={column}
-                      data-compare-cell={`${side}::${rowIndex}::${column}`}
-                      onClick={() => handleCellSelect(rowIndex, column, side)}
-                      className={`cursor-pointer border-b border-r px-3 py-1.5 whitespace-nowrap max-w-xs truncate ${
-                        selected
-                          ? selectedOrigin
-                            ? 'bg-blue-100 text-blue-950 ring-2 ring-inset ring-blue-500'
-                            : 'bg-cyan-100 text-cyan-950 ring-2 ring-inset ring-cyan-500'
-                          : changed
-                            ? 'bg-amber-100 text-amber-950 ring-1 ring-inset ring-amber-300'
-                            : 'text-slate-700'
-                      }`}
-                      title={title}
-                    >
-                      {formatCell(row[column])}
+                    <td key={column} className="max-w-xs border-b border-r p-0">
+                      <button
+                        type="button"
+                        data-compare-cell={`${side}::${rowIndex}::${column}`}
+                        onClick={() => handleCellSelect(rowIndex, column, side)}
+                        className={`block w-full cursor-pointer truncate whitespace-nowrap px-3 py-1.5 text-left outline-none transition-[background-color,box-shadow] duration-150 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring motion-reduce:transition-none ${
+                          selected
+                            ? selectedOrigin
+                              ? 'bg-primary/15 text-foreground ring-2 ring-inset ring-primary/70'
+                              : 'bg-primary/10 text-foreground ring-2 ring-inset ring-primary/40'
+                            : changed
+                              ? 'bg-amber-100 text-amber-950 ring-1 ring-inset ring-amber-300 dark:bg-amber-950/45 dark:text-amber-100 dark:ring-amber-800'
+                              : 'text-foreground/80 hover:bg-muted/20'
+                        }`}
+                        title={title}
+                      >
+                        {formatCell(row[column])}
+                      </button>
                     </td>
                   );
                 })}
@@ -286,8 +513,8 @@ const DatasetComparePreview = memo(({ comparePreview }: { comparePreview?: Compa
   }
 
   return (
-    <div ref={rootRef} className="rounded-xl border shadow-sm overflow-hidden">
-      <div className="flex flex-col gap-3 border-b bg-muted/30 px-4 py-4 lg:flex-row lg:items-center lg:justify-between">
+    <div ref={rootRef} className="overflow-hidden rounded-xl border bg-background/40 shadow-sm">
+      <div className="flex flex-col gap-3 border-b bg-gradient-to-r from-primary/[0.07] via-muted/20 to-transparent px-4 py-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h3 className="flex items-center gap-2 text-base font-semibold">
             <ArrowRightLeft className="h-4 w-4 text-muted-foreground" />
@@ -310,7 +537,7 @@ const DatasetComparePreview = memo(({ comparePreview }: { comparePreview?: Compa
           </span>
         </div>
       </div>
-      <div className="grid grid-cols-1 gap-4 p-4 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 p-3 sm:p-4 xl:grid-cols-2">
         {renderTable('Original dataset', beforeRows, 'before')}
         {renderTable('Cleaned dataset', afterRows, 'after')}
       </div>
@@ -351,7 +578,7 @@ interface ReportChatPanelProps {
   runId: string;
 }
 
-const ReportChatPanel = memo(({ runId }: ReportChatPanelProps) => {
+export const ReportChatPanel = memo(({ runId }: ReportChatPanelProps) => {
   const [isOpen, setIsOpen] = useState(false);
   const [question, setQuestion] = useState('');
   const [messages, setMessages] = useState<any[]>([]);
@@ -360,7 +587,11 @@ const ReportChatPanel = memo(({ runId }: ReportChatPanelProps) => {
 
   useEffect(() => {
     if (!isOpen) return;
-    transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    transcriptEndRef.current?.scrollIntoView({
+      behavior: prefersReducedMotion ? 'auto' : 'smooth',
+      block: 'end',
+    });
   }, [isOpen, messages.length, isAsking]);
 
   useQuery({
@@ -408,7 +639,7 @@ const ReportChatPanel = memo(({ runId }: ReportChatPanelProps) => {
       <button
         type="button"
         onClick={() => setIsOpen(true)}
-        className="fixed bottom-6 right-6 z-50 inline-flex h-14 w-14 items-center justify-center rounded-full border bg-primary text-primary-foreground shadow-lg transition hover:bg-primary/90"
+        className="result-interactive fixed bottom-5 right-5 z-50 inline-flex h-14 w-14 items-center justify-center rounded-full border border-primary/25 bg-primary text-primary-foreground shadow-lg hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:bottom-6 sm:right-6"
         aria-label="Ask Report Agent"
         title="Ask Report Agent"
       >
@@ -418,21 +649,23 @@ const ReportChatPanel = memo(({ runId }: ReportChatPanelProps) => {
   }
 
   return (
-    <div className="fixed bottom-6 right-6 z-50 flex h-[min(72vh,680px)] w-[min(92vw,420px)] flex-col overflow-hidden rounded-xl border bg-card text-card-foreground shadow-2xl">
-      <div className="px-5 py-4 border-b bg-muted/30 flex items-center gap-2">
-        <MessageSquare className="w-4 h-4 text-muted-foreground" />
+    <div className="result-chat-enter fixed bottom-4 right-4 z-50 flex h-[min(78vh,680px)] w-[min(calc(100vw-2rem),420px)] flex-col overflow-hidden rounded-2xl border border-primary/15 bg-card text-card-foreground shadow-2xl sm:bottom-6 sm:right-6">
+      <div className="flex items-center gap-2 border-b bg-gradient-to-r from-primary/[0.08] via-muted/20 to-transparent px-5 py-3">
+        <span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary">
+          <MessageSquare className="h-4 w-4" aria-hidden="true" />
+        </span>
         <span className="text-sm font-semibold">Ask the Report Agent</span>
         <button
           type="button"
           onClick={() => setIsOpen(false)}
-          className="ml-auto inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground"
+          className="result-interactive ml-auto inline-flex h-11 w-11 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           aria-label="Close Report Agent"
         >
           <X className="h-4 w-4" />
         </button>
       </div>
       <div className="flex min-h-0 flex-1 flex-col">
-        <div className="flex-1 overflow-y-auto bg-muted/5 px-5 py-5">
+        <div className="custom-scrollbar flex-1 overflow-y-auto bg-muted/5 px-4 py-5 sm:px-5" aria-live="polite">
           <div className="mx-auto flex max-w-full flex-col gap-4">
             {messages.length === 0 && !isAsking && (
               <div className="rounded-lg border border-dashed bg-background px-4 py-6 text-sm text-muted-foreground">
@@ -442,7 +675,7 @@ const ReportChatPanel = memo(({ runId }: ReportChatPanelProps) => {
             {messages.map((message, index) => {
               const isUser = message.role === 'user';
               return (
-                <div key={message.id || index} className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
+                <div key={message.id || index} className={`result-panel-enter flex ${isUser ? 'justify-end' : 'justify-start'}`}>
                   <div
                     className={`max-w-[86%] rounded-xl border px-4 py-3 text-sm shadow-sm ${
                       isUser
@@ -493,7 +726,7 @@ const ReportChatPanel = memo(({ runId }: ReportChatPanelProps) => {
                     Report Agent
                   </div>
                   <div className="flex items-center gap-2 text-muted-foreground">
-                    <span className="inline-flex h-2 w-2 animate-pulse rounded-full bg-primary" />
+                    <span className="inline-flex h-2 w-2 animate-pulse rounded-full bg-primary motion-reduce:animate-none" />
                     <span>Checking report, planner, workers, validation, lineage, metrics, and recent chat...</span>
                   </div>
                 </div>
@@ -513,13 +746,14 @@ const ReportChatPanel = memo(({ runId }: ReportChatPanelProps) => {
                 }}
                 placeholder="Ask what changed, why it was approved, which worker ran, or what to transform next..."
                 disabled={isAsking}
-                className="flex-1 rounded-md border bg-background px-3 py-3 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+                aria-label="Question for the Report Agent"
+                className="min-h-11 flex-1 rounded-lg border bg-background px-3 py-3 text-sm outline-none transition-shadow duration-200 placeholder:text-muted-foreground/75 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 motion-reduce:transition-none"
               />
               <button
                 type="button"
                 disabled={isAsking || !question.trim()}
                 onClick={() => void handleAsk()}
-                className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground disabled:opacity-50"
+                className="result-interactive inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                 aria-label="Send message"
                 title="Send message"
               >
@@ -538,6 +772,7 @@ ReportChatPanel.displayName = 'ReportChatPanel';
 export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) => {
   const [showRawJson, setShowRawJson] = useState(false);
   const [showDiagram, setShowDiagram] = useState(true);
+  const [activeEvidenceTab, setActiveEvidenceTab] = useState<EvidenceTabId>('overview');
 
   const { data: report, isLoading, error } = useQuery({
     queryKey: ['pipeline-report', runId],
@@ -560,11 +795,43 @@ export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) =>
   const columnCount = useMemo(() => getColumnCount(report), [report]);
   const transformationLines = useMemo(() => buildTransformationLines(report), [report]);
   const evidenceContexts = useMemo(() => buildEvidenceContexts(report), [report]);
+  const executionTasks = useMemo<ExecutionTask[]>(
+    () => (
+      Array.isArray(report?.execution_plan_summary?.tasks)
+        ? report.execution_plan_summary.tasks as ExecutionTask[]
+        : []
+    ),
+    [report],
+  );
+  const workerEntries = useMemo<Array<[string, WorkerResult]>>(
+    () => Object.entries((report?.worker_results || {}) as Record<string, unknown>).map(
+      ([workerName, rawResult]) => [
+        workerName,
+        rawResult && typeof rawResult === 'object'
+          ? rawResult as WorkerResult
+          : { value: rawResult },
+      ],
+    ),
+    [report],
+  );
+  const lineageVersions = useMemo<LineageVersion[]>(
+    () => (
+      Array.isArray(report?.lineage?.versions)
+        ? report.lineage.versions as LineageVersion[]
+        : []
+    ),
+    [report],
+  );
 
   const validation = report?.validation as Record<string, any> | undefined;
   const hasValidation = validation && Object.keys(validation).length > 0;
   const validationPassed = hasValidation ? validation.passed === true : true;
   const validationIssues: any[] = Array.isArray(validation?.issues) ? validation.issues : [];
+  const validationItems: ValidationItem[] = Array.isArray(validation?.items)
+    ? validation.items as ValidationItem[]
+    : [];
+  const f1Metrics = report?.metrics?.f1_metrics as F1Metrics | undefined;
+  const tokenMetrics = (report?.metrics?.token_metrics || {}) as TokenMetrics;
 
   const handleDownload = (format: 'csv' | 'xlsx' | 'parquet') => {
     window.location.href = pipelineApi.getDownloadUrl(runId, format);
@@ -655,6 +922,19 @@ export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) =>
                 </div>
               </div>
 
+              <ReportEvidenceNavigation
+                activeTab={activeEvidenceTab}
+                contexts={evidenceContexts}
+                onTabChange={setActiveEvidenceTab}
+              />
+
+              {activeEvidenceTab === 'overview' && (
+                <section
+                  id="evidence-panel-overview"
+                  role="tabpanel"
+                  aria-labelledby="evidence-tab-overview"
+                  className="space-y-5"
+                >
               {typeof report?.issues_fixed === 'number' && (
                 <div className="rounded-lg border bg-muted/10 px-4 py-3 text-sm">
                   <span className="text-muted-foreground">Rows affected by deduplication (approx.): </span>
@@ -701,7 +981,7 @@ export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) =>
 
               <div>
                 <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">
-                  Report Agent evidence map
+                  Evidence coverage
                 </h3>
                 <div className="grid grid-cols-1 gap-2 text-sm md:grid-cols-2 xl:grid-cols-5">
                   {evidenceContexts.map((context) => (
@@ -735,7 +1015,16 @@ export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) =>
                   ))}
                 </ul>
               </div>
+                </section>
+              )}
 
+              {activeEvidenceTab === 'quality' && (
+                <section
+                  id="evidence-panel-quality"
+                  role="tabpanel"
+                  aria-labelledby="evidence-tab-quality"
+                  className="space-y-4"
+                >
               <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
                 <div className="xl:col-span-2 rounded-xl border bg-muted/10 p-4">
                   <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-2">
@@ -769,18 +1058,160 @@ export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) =>
                   </div>
                 </div>
               </div>
+                </section>
+              )}
 
-              {report?.lineage?.versions?.length > 0 && (
-                <div className="rounded-xl border shadow-sm overflow-hidden">
+              {activeEvidenceTab === 'decisions' && (
+                <section
+                  id="evidence-panel-decisions"
+                  role="tabpanel"
+                  aria-labelledby="evidence-tab-decisions"
+                  className="space-y-5"
+                >
+                  <div className="rounded-xl border bg-muted/10 p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                          Planner summary
+                        </h3>
+                        <p className="mt-2 text-sm leading-relaxed">
+                          {report?.execution_plan_summary?.plan_summary || 'No planner summary was recorded for this run.'}
+                        </p>
+                      </div>
+                      <div className="flex gap-2 text-xs">
+                        <span className="rounded-full border bg-background px-2.5 py-1">
+                          {report?.execution_plan_summary?.active_task_count
+                            ?? executionTasks.filter((task) => !task.skip).length} active
+                        </span>
+                        <span className="rounded-full border bg-background px-2.5 py-1">
+                          {report?.execution_plan_summary?.skipped_task_count
+                            ?? executionTasks.filter((task) => task.skip).length} skipped
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="overflow-hidden rounded-xl border">
+                    <div className="border-b bg-muted/30 px-4 py-3">
+                      <h3 className="text-sm font-semibold">Planning decisions</h3>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full min-w-[52rem] text-sm">
+                        <thead className="text-left text-xs uppercase tracking-wide text-muted-foreground">
+                          <tr>
+                            <th className="px-4 py-3 font-medium">Task</th>
+                            <th className="px-4 py-3 font-medium">Agent</th>
+                            <th className="px-4 py-3 font-medium">Columns</th>
+                            <th className="px-4 py-3 font-medium">Status</th>
+                            <th className="px-4 py-3 font-medium">Rationale</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y">
+                          {executionTasks.length > 0 ? executionTasks.map((task, index) => (
+                            <tr key={task.task_id || index}>
+                              <td className="px-4 py-3 font-medium">{task.task_id || `Task ${index + 1}`}</td>
+                              <td className="px-4 py-3 text-muted-foreground">{task.agent || '—'}</td>
+                              <td className="px-4 py-3 text-muted-foreground">
+                                {Array.isArray(task.columns) && task.columns.length > 0 ? task.columns.join(', ') : '—'}
+                              </td>
+                              <td className="px-4 py-3">
+                                <span className={task.skip ? 'text-amber-700 dark:text-amber-300' : 'text-emerald-700 dark:text-emerald-300'}>
+                                  {task.skip ? 'Skipped' : 'Scheduled'}
+                                </span>
+                              </td>
+                              <td className="max-w-md px-4 py-3 text-muted-foreground">
+                                {task.skip
+                                  ? task.skip_reason || task.rationale || 'No skip reason recorded'
+                                  : task.rationale || '—'}
+                              </td>
+                            </tr>
+                          )) : (
+                            <tr>
+                              <td colSpan={5} className="px-4 py-5 text-center text-muted-foreground">
+                                No execution-plan tasks were recorded.
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  <div className="overflow-hidden rounded-xl border">
+                    <div className="flex items-center justify-between gap-3 border-b bg-muted/30 px-4 py-3">
+                      <h3 className="text-sm font-semibold">Worker execution</h3>
+                      <span className="text-xs text-muted-foreground">{workerEntries.length} worker output(s)</span>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full min-w-[58rem] text-sm">
+                        <thead className="text-left text-xs uppercase tracking-wide text-muted-foreground">
+                          <tr>
+                            <th className="px-4 py-3 font-medium">Worker / task</th>
+                            <th className="px-4 py-3 font-medium">Status</th>
+                            <th className="px-4 py-3 text-right font-medium">Changed rows</th>
+                            <th className="px-4 py-3 font-medium">Changed columns</th>
+                            <th className="px-4 py-3 font-medium">Output</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y">
+                          {workerEntries.length > 0 ? workerEntries.map(([workerName, result]) => {
+                            const changedRows = getWorkerChangedRows(result);
+                            const changedColumns = getWorkerChangedColumns(result);
+                            const status = getWorkerStatus(result);
+                            return (
+                              <tr key={workerName}>
+                                <td className="px-4 py-3">
+                                  <div className="font-medium">{result.task_id || workerName}</div>
+                                  {result.agent_name && (
+                                    <div className="text-xs text-muted-foreground">{result.agent_name}</div>
+                                  )}
+                                </td>
+                                <td className="px-4 py-3 capitalize">{status}</td>
+                                <td className="px-4 py-3 text-right tabular-nums">
+                                  {changedRows === null ? '—' : changedRows.toLocaleString()}
+                                </td>
+                                <td className="max-w-xs px-4 py-3 text-muted-foreground">
+                                  {changedColumns.length > 0 ? changedColumns.join(', ') : '—'}
+                                </td>
+                                <td className="px-4 py-3">
+                                  <details>
+                                    <summary className="cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground">
+                                      View output
+                                    </summary>
+                                    <pre className="mt-2 max-h-56 max-w-xl overflow-auto whitespace-pre-wrap rounded-lg bg-slate-950 p-3 text-[11px] leading-relaxed text-slate-300">
+                                      {JSON.stringify(result, null, 2)}
+                                    </pre>
+                                  </details>
+                                </td>
+                              </tr>
+                            );
+                          }) : (
+                            <tr>
+                              <td colSpan={5} className="px-4 py-5 text-center text-muted-foreground">
+                                No worker outputs were recorded.
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </section>
+              )}
+
+              {activeEvidenceTab === 'lineage' && report?.lineage?.versions?.length > 0 && (
+                <section
+                  className="rounded-xl border shadow-sm overflow-hidden"
+                >
                   <div className="px-4 py-3 border-b bg-muted/30 flex items-center gap-2">
                     <GitBranch className="w-4 h-4 text-muted-foreground" />
                     <span className="text-sm font-semibold">Data lineage</span>
                     <span className="ml-auto text-xs text-muted-foreground">
-                      {report.lineage.version_count} approved version(s)
+                      {report.lineage.version_count} version(s)
                     </span>
                   </div>
                   <div className="divide-y">
-                    {report.lineage.versions.map((version: any) => (
+                    {lineageVersions.map((version) => (
                       <div key={version.version} className="px-4 py-3 text-sm">
                         <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
                           <div className="flex min-w-0 flex-1 items-center gap-2">
@@ -814,7 +1245,7 @@ export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) =>
                     onClick={() => setShowDiagram(!showDiagram)}
                     className="w-full border-t px-4 py-2 text-left text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/20"
                   >
-                    {showDiagram ? 'Hide' : 'Show'} Mermaid lineage diagram
+                    {showDiagram ? 'Hide' : 'Show'} Lineage Diagram
                   </button>
                   {showDiagram && (
                     <div className="m-4">
@@ -831,10 +1262,10 @@ export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) =>
                       )}
                     </div>
                   )}
-                </div>
+                </section>
               )}
 
-              {hasValidation && (
+              {activeEvidenceTab === 'quality' && hasValidation && (
                 <div
                   className={`rounded-2xl border-2 overflow-hidden ${
                     validationPassed ? 'border-emerald-200 dark:border-emerald-900' : 'border-amber-200 dark:border-amber-900'
@@ -861,6 +1292,83 @@ export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) =>
                     </span>
                   </div>
                   <div className="p-5 bg-card space-y-4">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                      <div className="rounded-lg border bg-muted/10 px-4 py-3">
+                        <div className="text-xs text-muted-foreground">Validator items</div>
+                        <div className="mt-1 font-semibold tabular-nums">{validationItems.length.toLocaleString()}</div>
+                      </div>
+                      <div className="rounded-lg border bg-muted/10 px-4 py-3">
+                        <div className="text-xs text-muted-foreground">Failed rules</div>
+                        <div className="mt-1 font-semibold tabular-nums">
+                          {validationItems
+                            .reduce((count, item) => count + (Array.isArray(item?.failed_rules) ? item.failed_rules.length : 0), 0)
+                            .toLocaleString()}
+                        </div>
+                      </div>
+                      <div className="rounded-lg border bg-muted/10 px-4 py-3">
+                        <div className="text-xs text-muted-foreground">Issue count</div>
+                        <div className="mt-1 font-semibold tabular-nums">
+                          {(validation?.issue_count ?? validationIssues.length).toLocaleString()}
+                        </div>
+                      </div>
+                    </div>
+
+                    {validationItems.length > 0 && (
+                      <div className="overflow-x-auto rounded-xl border">
+                        <table className="w-full min-w-[44rem] text-sm">
+                          <thead className="bg-muted/30 text-left text-xs uppercase tracking-wide text-muted-foreground">
+                            <tr>
+                              <th className="px-4 py-3 font-medium">Validator item</th>
+                              <th className="px-4 py-3 font-medium">Agent</th>
+                              <th className="px-4 py-3 font-medium">Status</th>
+                              <th className="px-4 py-3 font-medium">Failed rules</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y">
+                            {validationItems.map((item, index) => {
+                              const failedRules = Array.isArray(item.failed_rules) ? item.failed_rules : [];
+                              const passed = item.passed !== false;
+                              return (
+                                <tr key={item.task_id || `${item.agent || 'validator'}-${index}`}>
+                                  <td className="px-4 py-3 font-medium">{item.task_id || `Check ${index + 1}`}</td>
+                                  <td className="px-4 py-3 text-muted-foreground">{item.agent || 'validator'}</td>
+                                  <td className="px-4 py-3">
+                                    <span className={passed ? 'font-medium text-emerald-700 dark:text-emerald-300' : 'font-medium text-destructive'}>
+                                      {passed ? 'Pass' : 'Fail'}
+                                    </span>
+                                  </td>
+                                  <td className="px-4 py-3 text-muted-foreground">
+                                    {failedRules.length > 0 ? failedRules.join(', ') : 'None'}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                      {[
+                        ['Total tokens', tokenMetrics.total_tokens ?? report?.summary?.total_tokens_used],
+                        ['Prompt tokens', tokenMetrics.prompt_tokens],
+                        ['Completion tokens', tokenMetrics.completion_tokens],
+                      ].map(([label, value]) => (
+                        <div key={String(label)} className="rounded-lg border bg-muted/10 px-4 py-3">
+                          <div className="text-xs text-muted-foreground">{label}</div>
+                          <div className="mt-1 font-semibold tabular-nums">
+                            {typeof value === 'number' ? value.toLocaleString() : '—'}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {!f1Metrics && (
+                      <div className="rounded-xl border border-dashed bg-muted/10 p-4 text-sm text-muted-foreground">
+                        F1, precision, recall, and cell accuracy are available when a clean ground-truth dataset is supplied.
+                      </div>
+                    )}
+
                     {validation?.metrics && Object.keys(validation.metrics).length > 0 && (
                       <div className="space-y-6">
                         {Object.entries(validation.metrics).map(([k, v]) => {
@@ -982,12 +1490,27 @@ export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) =>
                 </div>
               )}
 
-              <DatasetComparePreview comparePreview={comparePreview} />
+              {activeEvidenceTab === 'lineage' && (
+                <section
+                  id="evidence-panel-lineage"
+                  role="tabpanel"
+                  aria-labelledby="evidence-tab-lineage"
+                >
+                  <DatasetComparePreview comparePreview={comparePreview} />
+                </section>
+              )}
 
               <ReportChatPanel
                 runId={runId}
               />
 
+              {activeEvidenceTab === 'exports' && (
+                <section
+                  id="evidence-panel-exports"
+                  role="tabpanel"
+                  aria-labelledby="evidence-tab-exports"
+                  className="space-y-5"
+                >
               {report?.next_actions?.length > 0 && (
                 <div className="rounded-xl border bg-muted/10 px-4 py-3">
                   <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">
@@ -998,6 +1521,42 @@ export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) =>
                       <li key={index}>{action}</li>
                     ))}
                   </ul>
+                </div>
+              )}
+
+              {report?.lineage?.versions?.length > 0 && (
+                <div className="overflow-hidden rounded-xl border">
+                  <div className="border-b bg-muted/30 px-4 py-3">
+                    <h3 className="text-sm font-semibold">Versioned dataset downloads</h3>
+                  </div>
+                  <div className="divide-y">
+                    {lineageVersions.map((version) => (
+                      <div key={version.version} className="flex flex-col gap-3 px-4 py-3 text-sm lg:flex-row lg:items-center">
+                        <div className="min-w-0 flex-1">
+                          <span className="font-semibold">v{version.version}</span>
+                          <span className="ml-2 text-muted-foreground">{version.agent_name || 'Unknown agent'}</span>
+                          {version.description && (
+                            <p className="mt-1 text-xs text-muted-foreground">{version.description}</p>
+                          )}
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {(['csv', 'xlsx', 'parquet'] as const).map((format) => (
+                            <button
+                              key={format}
+                              type="button"
+                              onClick={() => {
+                                window.location.href = pipelineApi.getVersionDownloadUrl(runId, version.version, format);
+                              }}
+                              className="inline-flex h-8 items-center rounded-md border bg-background px-2.5 text-xs font-medium uppercase text-muted-foreground hover:bg-muted/30 hover:text-foreground"
+                            >
+                              <Download className="mr-1 h-3 w-3" />
+                              {format}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
 
@@ -1019,14 +1578,23 @@ export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) =>
               </div>
 
               <div className="border-t pt-6">
+                <div className="mb-3">
+                  <h3 className="text-sm font-semibold">Report and cleaned dataset exports</h3>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Reports preserve the evidence trail; dataset exports contain the latest approved data.
+                  </p>
+                </div>
                 <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
-                  <button
-                    onClick={() => handleReportExport('json')}
-                    className="inline-flex h-11 items-center justify-center whitespace-nowrap rounded-md border border-input bg-background px-4 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground"
-                  >
-                    <FileText className="mr-2 h-4 w-4" />
-                    Report JSON
-                  </button>
+                  {(['json', 'md', 'html'] as const).map((format) => (
+                    <button
+                      key={format}
+                      onClick={() => handleReportExport(format)}
+                      className="inline-flex h-11 items-center justify-center whitespace-nowrap rounded-md border border-input bg-background px-4 text-sm font-medium uppercase transition-colors hover:bg-accent hover:text-accent-foreground"
+                    >
+                      <FileText className="mr-2 h-4 w-4" />
+                      Report {format}
+                    </button>
+                  ))}
                   {([
                     ['csv', 'CSV'],
                     ['xlsx', 'XLSX'],
@@ -1050,6 +1618,8 @@ export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) =>
                   </button>
                 </div>
               </div>
+                </section>
+              )}
             </div>
           </div>
           </>

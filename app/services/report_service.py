@@ -2,26 +2,27 @@
 
 from __future__ import annotations
 
-import html
 import ast
+import html
 import json
+import math
 import re
 from datetime import datetime, timezone
 from typing import Any
 
+import numpy as np
 import pandas as pd
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import StructuredTool
 from sqlalchemy import text
 
-from app.core.database import engine, SessionLocal
+from app.core.database import SessionLocal, engine
 from app.core.llm_factory import create_llm
 from app.graphs.utils import _load_dataframe
 from app.models.lineage import ReportChatMessage
 from app.services.dataframe_order import restore_original_column_order
 from app.services.lineage_service import LineageService
 from app.services.lineage_utils import resolve_lineage_session_id
-
 
 _DIAGRAM_STYLE_LINES = [
     "    classDef source fill:#DBEAFE,stroke:#2563EB,color:#1E3A8A,stroke-width:2px",
@@ -414,15 +415,41 @@ def _normalize_cell(value: Any) -> str:
     return text_value
 
 
-def _display_cell(value: Any) -> Any:
+def _json_safe_value(value: Any) -> Any:
+    """Convert dataframe values into native JSON-compatible Python values."""
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return {str(key): _json_safe_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe_value(item) for item in value]
+    if isinstance(value, np.ndarray):
+        return [_json_safe_value(item) for item in value.tolist()]
+
     try:
         if pd.isna(value):
             return None
     except (TypeError, ValueError):
         pass
+
+    if isinstance(value, np.generic):
+        return _json_safe_value(value.item())
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
     if hasattr(value, "isoformat"):
         return value.isoformat()
+    if isinstance(value, (str, int, float, bool)):
+        return value
+
+    try:
+        json.dumps(value)
+    except (TypeError, ValueError):
+        return str(value)
     return value
+
+
+def _display_cell(value: Any) -> Any:
+    return _json_safe_value(value)
 
 
 def _contains_column_reference(value: Any, column_name: str) -> bool:
