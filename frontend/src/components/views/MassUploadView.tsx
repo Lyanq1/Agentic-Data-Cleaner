@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useMutation } from "@tanstack/react-query";
 import { pipelineApi } from "../../api/services";
 import {
   Upload,
@@ -198,6 +199,55 @@ export const MassUploadView: React.FC = () => {
     );
   };
 
+  const updateClarificationAnswersMutation = useMutation({
+    mutationFn: ({
+      runId,
+      answers,
+    }: {
+      runId: string;
+      answers: Record<string, string | null>;
+    }) => pipelineApi.updateClarificationAnswers(runId, answers),
+    scope: { id: "mass-input-validation-answers" },
+    onSuccess: (response, variables) => {
+      setQueue((prev) =>
+        prev.map((item) => {
+          if (
+            item.runId !== variables.runId ||
+            item.checkpoint?.checkpoint_type !==
+              "input_validation_clarification"
+          ) {
+            return item;
+          }
+
+          return {
+            ...item,
+            checkpoint: {
+              ...item.checkpoint,
+              payload: {
+                ...response.input_validation_result,
+                semantic_profile:
+                  item.checkpoint.payload?.semantic_profile,
+              },
+            },
+          };
+        }),
+      );
+    },
+    onError: (error) => {
+      console.error("Failed to persist mass-upload clarification answer:", error);
+    },
+  });
+
+  const handleClarificationAnswerChange = (key: string, answer: string) => {
+    setMcqAnswers((prev) => ({ ...prev, [key]: answer }));
+    if (!activeItem?.runId) return;
+
+    updateClarificationAnswersMutation.mutate({
+      runId: activeItem.runId,
+      answers: { [key]: answer },
+    });
+  };
+
   // Remove a row
   const removeRow = (id: string) => {
     const item = queue.find((q) => q.id === id);
@@ -349,9 +399,17 @@ export const MassUploadView: React.FC = () => {
               delete pollIntervalsRef.current[itemId];
             }
 
+            const checkpointWithSemanticProfile = {
+              ...checkpoint,
+              payload: {
+                ...checkpoint.payload,
+                semantic_profile: state.semantic_profile,
+              },
+            };
+
             updateItem(itemId, {
               status: "needs_clarification",
-              checkpoint,
+              checkpoint: checkpointWithSemanticProfile,
             });
 
             // Only select this item if the user is not currently inspecting another item that needs clarification
@@ -1041,7 +1099,7 @@ export const MassUploadView: React.FC = () => {
                                         const key = `${cat}.${qKey}`;
                                         const selectedVal = mcqAnswers[key] || "";
                                         const isStrategy = q && typeof q === "object" && "options" in q;
-                                        let optionsToRender = q.options || [];
+                                        let optionsToRender = [...(q.options || [])];
 
                                         if (cat === "null" && qKey.startsWith("Q2_strategy_column_")) {
                                           const colName = qKey.substring("Q2_strategy_column_".length);
@@ -1103,7 +1161,7 @@ export const MassUploadView: React.FC = () => {
                                                           name={key}
                                                           value={optionLabel}
                                                           checked={isSelected}
-                                                          onChange={() => setMcqAnswers((prev) => ({ ...prev, [key]: optionLabel }))}
+                                                          onChange={() => handleClarificationAnswerChange(key, optionLabel)}
                                                           className="text-primary mt-0.5 shrink-0"
                                                         />
                                                         <span className="leading-snug">{optionLabel}</span>
@@ -1147,7 +1205,7 @@ export const MassUploadView: React.FC = () => {
                                                       name={key}
                                                       value={opt}
                                                       checked={selectedVal === opt}
-                                                      onChange={() => setMcqAnswers((prev) => ({ ...prev, [key]: opt }))}
+                                                      onChange={() => handleClarificationAnswerChange(key, opt)}
                                                       className="text-primary"
                                                     />
                                                     {opt}

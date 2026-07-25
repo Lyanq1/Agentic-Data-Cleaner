@@ -11,8 +11,9 @@ export const InputValidationClarificationContent: React.FC<{
     fb?: string,
     disambiguationAnswers?: Record<string, string | string[]>,
   ) => void;
+  onAnswerChange: (answers: Record<string, string | null>) => void;
   isPending: boolean;
-}> = ({ payload, isAwaiting, onDecision, isPending }) => {
+}> = ({ payload, isAwaiting, onDecision, onAnswerChange, isPending }) => {
   const clarifications = payload.clarifications || {};
   const categories = ["typecast", "null", "duplicate"] as const;
 
@@ -134,17 +135,20 @@ export const InputValidationClarificationContent: React.FC<{
   }, [payload, clarifications, categories]);
 
   const handleSelectAnswer = (key: string, val: string) => {
-    setAnswers((prev) => {
-      const nextAnswers = { ...prev, [key]: val };
-      if (key.startsWith("null.Q1_allow_missing_column_")) {
-        const colName = key.substring("null.Q1_allow_missing_column_".length);
-        const q2Key = `null.Q2_strategy_column_${colName}`;
-        if (val === "No" && prev[q2Key] === "keep_null") {
-          delete nextAnswers[q2Key];
-        }
+    const nextAnswers = { ...answers, [key]: val };
+    const answerUpdates: Record<string, string | null> = { [key]: val };
+
+    if (key.startsWith("null.Q1_allow_missing_column_")) {
+      const colName = key.substring("null.Q1_allow_missing_column_".length);
+      const q2Key = `null.Q2_strategy_column_${colName}`;
+      if (val === "No" && nextAnswers[q2Key] === "keep_null") {
+        delete nextAnswers[q2Key];
+        answerUpdates[q2Key] = null;
       }
-      return nextAnswers;
-    });
+    }
+
+    setAnswers(nextAnswers);
+    onAnswerChange(answerUpdates);
 
     if (val === "fill_value" && !fillValueSubOption[key]) {
       const parts = key.split(".");
@@ -293,7 +297,7 @@ export const InputValidationClarificationContent: React.FC<{
                     const key = `${cat}.${qKey}`;
                     const selectedVal = answers[key] || "";
                     const isStrategy = q && typeof q === "object" && "options" in q;
-                    let optionsToRender = q.options || [];
+                    let optionsToRender = [...(q.options || [])];
 
                     const colName = qKey.startsWith("Q2_strategy_column_")
                       ? qKey.substring("Q2_strategy_column_".length)
