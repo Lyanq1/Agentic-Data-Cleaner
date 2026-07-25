@@ -9,7 +9,13 @@ import {
   Search, 
   Filter,
   FileText,
-  Workflow
+  Workflow,
+  Terminal,
+  Copy,
+  Check,
+  ChevronDown,
+  ChevronUp,
+  ShieldCheck
 } from 'lucide-react';
 import { formatDisplayValue } from './pipelinepanel/utils';
 
@@ -21,8 +27,9 @@ export const SemanticProfilePanel: React.FC<SemanticProfilePanelProps> = ({ prof
   const semanticProfile = profileData?.semantic_profile;
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedGroup, setSelectedGroup] = useState<string>('All');
-  const [showThinking, setShowThinking] = useState(false);
+  const [showThinking, setShowThinking] = useState(true); // Default open CoT logs for credibility
   const [expandedColumn, setExpandedColumn] = useState<string | null>(null);
+  const [copiedThinking, setCopiedThinking] = useState(false);
 
   // Extract logical groups from semantic profile columns
   const logicalGroups = useMemo(() => {
@@ -43,11 +50,19 @@ export const SemanticProfilePanel: React.FC<SemanticProfilePanelProps> = ({ prof
     return ['All', ...Object.keys(logicalGroups)];
   }, [logicalGroups]);
 
-  // Filter columns based on search term and selected logical group
+  // Total error columns count
+  const errorCountTotal = useMemo(() => {
+    if (!semanticProfile?.columns) return 0;
+    return Object.values(semanticProfile.columns).filter((detail: any) => 
+      detail.is_error || (detail.error_types && detail.error_types.length > 0)
+    ).length;
+  }, [semanticProfile]);
+
+  // Filter columns based on search term and selected logical group, and PRIORITIZE ERRORS FIRST
   const filteredColumns = useMemo(() => {
     if (!semanticProfile?.columns) return [];
     
-    return Object.entries(semanticProfile.columns).filter(([colName, detail]: [string, any]) => {
+    const entries = Object.entries(semanticProfile.columns).filter(([colName, detail]: [string, any]) => {
       const matchesSearch = 
         colName.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (detail.description || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -59,6 +74,16 @@ export const SemanticProfilePanel: React.FC<SemanticProfilePanelProps> = ({ prof
         (detail.logical_group || 'Uncategorized') === selectedGroup;
         
       return matchesSearch && matchesGroup;
+    });
+
+    // REQUIREMENT 2: Priorities columns with errors at the TOP by default!
+    return entries.sort((a, b) => {
+      const aError = (a[1]?.is_error || (a[1]?.error_types && a[1].error_types.length > 0)) ? 1 : 0;
+      const bError = (b[1]?.is_error || (b[1]?.error_types && b[1].error_types.length > 0)) ? 1 : 0;
+      if (aError !== bError) {
+        return bError - aError; // Errors come first
+      }
+      return 0;
     });
   }, [semanticProfile, searchTerm, selectedGroup]);
 
@@ -93,95 +118,83 @@ export const SemanticProfilePanel: React.FC<SemanticProfilePanelProps> = ({ prof
           </div>
         )}
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
-          {/* Logical Groups Summary */}
-          <div className="space-y-2">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-              <Layers className="h-3.5 w-3.5 text-slate-400" />
-              <span>Logical Groups ({Object.keys(logicalGroups).length})</span>
+        {/* Chain of Thought Reasoning (directly below Business Purpose & Summary, matching UI style) */}
+        {semanticProfile.thinking && (
+          <div className="space-y-1 bg-white/60 backdrop-blur-sm rounded-lg p-4 border border-slate-100/50">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+              Chain of Thought Reasoning
             </h3>
-            <div className="border border-slate-100 rounded-lg overflow-hidden bg-white/70">
-              <table className="w-full text-xs border-collapse">
-                <thead>
-                  <tr className="bg-slate-50/60 border-b border-slate-100">
-                    <th className="text-left p-2 font-bold text-slate-500 w-[150px]">Group</th>
-                    <th className="text-left p-2 font-bold text-slate-500">Columns</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {Object.entries(logicalGroups).map(([groupName, cols], i) => (
-                    <tr key={i} className="hover:bg-slate-50/30">
-                      <td className="p-2 align-top font-semibold text-slate-700">{formatDisplayValue(groupName)}</td>
-                      <td className="p-2 align-top">
-                        <div className="flex flex-wrap gap-1">
-                          {cols.map((colName, idx) => (
-                            <span key={idx} className="font-mono text-[9px] bg-slate-100 text-slate-600 px-1 py-0.5 rounded border border-slate-200/40">
-                              {colName}
-                            </span>
-                          ))}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="text-sm text-slate-700 leading-relaxed font-sans space-y-1.5 pt-0.5">
+              {semanticProfile.thinking.split('\n').map((line: string, i: number) => {
+                const lineStr = line.trim();
+                if (!lineStr) return null;
+                return (
+                  <p key={i} className="leading-relaxed">
+                    {line}
+                  </p>
+                );
+              })}
             </div>
-          </div>
-
-          {/* Thinking Process / Chain of Thought */}
-          {semanticProfile.thinking && (
-            <div className="space-y-2 flex flex-col">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                <Brain className="h-3.5 w-3.5 text-slate-400" />
-                <span>AI Agent Thinking</span>
-              </h3>
-              <div className="flex-1 border border-slate-100 rounded-lg p-3 bg-slate-50/50 flex flex-col justify-between">
-                <p className="text-xs text-slate-600 italic">
-                  Review the semantic analysis reasoning process and rules formulated by the Profiler Agent.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setShowThinking(!showThinking)}
-                  className="mt-3 inline-flex items-center justify-center space-x-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 h-9 px-3 w-full transition-colors cursor-pointer"
-                >
-                  <Brain className="h-3.5 w-3.5 text-indigo-500" />
-                  <span>{showThinking ? 'Hide Agent Logics' : 'View Semantic Logics'}</span>
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Expanded Chain of Thought Log */}
-        {showThinking && semanticProfile.thinking && (
-          <div className="bg-slate-900 text-slate-100 rounded-xl p-5 font-mono text-xs leading-relaxed max-h-72 overflow-y-auto border border-slate-800 shadow-inner mt-4 animate-fade-in custom-scrollbar">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-2 mb-3">
-              <span className="text-indigo-400 font-bold uppercase tracking-wider text-[10px]">Chain of Thought Log</span>
-              <span className="text-[10px] text-slate-500 font-bold">ProfilerAgent v1.0</span>
-            </div>
-            {semanticProfile.thinking.split('\n').map((line: string, i: number) => (
-              <div key={i} className="min-h-[1.2rem] py-0.5">
-                {line}
-              </div>
-            ))}
           </div>
         )}
+
+        {/* Logical Groups Summary */}
+        <div className="space-y-2 pt-2">
+          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+            <Layers className="h-3.5 w-3.5 text-slate-400" />
+            <span>Logical Groups ({Object.keys(logicalGroups).length})</span>
+          </h3>
+          <div className="border border-slate-100 rounded-lg overflow-hidden bg-white/70">
+            <table className="w-full text-xs border-collapse">
+              <thead>
+                <tr className="bg-slate-50/60 border-b border-slate-100">
+                  <th className="text-left p-2 font-bold text-slate-500 w-[150px]">Group</th>
+                  <th className="text-left p-2 font-bold text-slate-500">Columns</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {Object.entries(logicalGroups).map(([groupName, cols], i) => (
+                  <tr key={i} className="hover:bg-slate-50/30">
+                    <td className="p-2 align-top font-semibold text-slate-700">{formatDisplayValue(groupName)}</td>
+                    <td className="p-2 align-top">
+                      <div className="flex flex-wrap gap-1">
+                        {cols.map((colName, idx) => (
+                          <span key={idx} className="font-mono text-[9px] bg-slate-100 text-slate-600 px-1 py-0.5 rounded border border-slate-200/40">
+                            {colName}
+                          </span>
+                        ))}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
 
       {/* Main Metadata List Section */}
       <div className="space-y-4">
         {/* Toolbar */}
         <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
-          {/* Search bar */}
-          <div className="relative w-full sm:w-72">
-            <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-            <input
-              type="text"
-              placeholder="Search column metadata..."
-              className="w-full pl-9 pr-4 py-2 text-xs border border-slate-200 rounded-lg placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
+          {/* Search bar & Error Priority Badge */}
+          <div className="flex items-center space-x-3 w-full sm:w-auto">
+            <div className="relative w-full sm:w-64">
+              <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Search column metadata..."
+                className="w-full pl-9 pr-4 py-2 text-xs border border-slate-200 rounded-lg placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+            </div>
+            {errorCountTotal > 0 && (
+              <span className="hidden md:inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-lg bg-red-50 text-red-700 border border-red-200 shrink-0">
+                <AlertTriangle className="h-3.5 w-3.5 text-red-600" />
+                <span>{errorCountTotal} Error Column{errorCountTotal === 1 ? '' : 's'} Sorted First</span>
+              </span>
+            )}
           </div>
 
           {/* Group filters */}
