@@ -199,9 +199,23 @@ export const StatisticalProfilePanel: React.FC<StatisticalProfilePanelProps> = (
     return groups;
   }, [semanticProfile]);
 
-  const columns = Array.isArray(profileData.columns) 
-    ? profileData.columns 
-    : Object.values(profileData.columns || {});
+  const columns = useMemo(() => {
+    const rawCols = Array.isArray(profileData.columns) 
+      ? profileData.columns 
+      : Object.values(profileData.columns || {});
+
+    return [...rawCols].sort((a: any, b: any) => {
+      const aStats = a.numeric_stats || a.categorical_stats || {};
+      const bStats = b.numeric_stats || b.categorical_stats || {};
+
+      const aMissing = aStats.missing_count ?? a.null_count ?? 0;
+      const bMissing = bStats.missing_count ?? b.null_count ?? 0;
+
+      if (aMissing > 0 && bMissing === 0) return -1;
+      if (bMissing > 0 && aMissing === 0) return 1;
+      return bMissing - aMissing;
+    });
+  }, [profileData.columns]);
 
   return (
     <div className="space-y-4 relative" id="statistical-profile-top">
@@ -416,6 +430,8 @@ export const StatisticalProfilePanel: React.FC<StatisticalProfilePanelProps> = (
         </div>
       )}
 
+      {/* Column Statistical Profiles — 2-Column Dashboard Layout */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
       {columns.map((col: any, index: number) => {
         const isNumeric = col.numeric_stats !== null;
         const stats = isNumeric ? col.numeric_stats : col.categorical_stats;
@@ -423,12 +439,20 @@ export const StatisticalProfilePanel: React.FC<StatisticalProfilePanelProps> = (
         return (
           <div 
             key={index} 
-            className="bg-card rounded-xl border border-slate-200 overflow-hidden shadow-sm hover:shadow-md transition-shadow"
+            className={`bg-card rounded-xl border transition-all overflow-hidden ${
+              stats.missing_count > 0 
+                ? 'border-red-200 shadow-sm bg-red-50/5' 
+                : 'border-slate-200 hover:shadow-md'
+            }`}
           >
             {/* Styled tab-like header matching the Car ID layout */}
-            <div className="bg-slate-50/50 border-b border-slate-200/80 px-5 py-2.5 flex items-center justify-between">
+            <div className={`border-b px-5 py-2.5 flex items-center justify-between ${
+              stats.missing_count > 0 ? 'bg-red-50/40 border-red-100' : 'bg-slate-50/50 border-slate-200/80'
+            }`}>
               <div className="flex items-center space-x-2.5">
-                <div className="bg-blue-50 text-blue-600 p-1.5 rounded">
+                <div className={`p-1.5 rounded ${
+                  stats.missing_count > 0 ? 'bg-red-100 text-red-600' : 'bg-blue-50 text-blue-600'
+                }`}>
                   {isNumeric ? (
                     <Binary className="h-4 w-4" />
                   ) : (
@@ -439,9 +463,17 @@ export const StatisticalProfilePanel: React.FC<StatisticalProfilePanelProps> = (
                   {formatDisplayValue(col.column_name)}
                 </h3>
               </div>
-              <span className="text-[10px] font-bold text-slate-500 uppercase bg-slate-100/70 border border-slate-200/50 px-2 py-0.5 rounded-full select-none">
-                {formatDisplayValue(col.dtype)}
-              </span>
+              <div className="flex items-center space-x-2">
+                {stats.missing_count > 0 && (
+                  <span className="text-[10px] font-bold text-red-700 bg-red-100/80 border border-red-200 px-2 py-0.5 rounded-full select-none flex items-center gap-1">
+                    <AlertTriangle className="h-3 w-3 text-red-600" />
+                    <span>{stats.missing_count.toLocaleString()} missing ({Math.round(stats.missing_pct * 100)}%)</span>
+                  </span>
+                )}
+                <span className="text-[10px] font-bold text-slate-500 uppercase bg-slate-100/70 border border-slate-200/50 px-2 py-0.5 rounded-full select-none">
+                  {formatDisplayValue(col.dtype)}
+                </span>
+              </div>
             </div>
 
             {/* Content Section */}
@@ -456,7 +488,7 @@ export const StatisticalProfilePanel: React.FC<StatisticalProfilePanelProps> = (
                 </div>
                 <div className="flex justify-between items-baseline text-xs">
                   <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Missing:</span>
-                  <span className="text-slate-600 font-bold">
+                  <span className={stats.missing_count > 0 ? "text-red-600 font-bold bg-red-50/80 px-1.5 py-0.5 rounded border border-red-200/60" : "text-slate-500 font-bold"}>
                     {stats.missing_count > 0 
                       ? `${stats.missing_count.toLocaleString()} (${Math.round(stats.missing_pct * 100)}%)` 
                       : '---'}
@@ -742,6 +774,7 @@ export const StatisticalProfilePanel: React.FC<StatisticalProfilePanelProps> = (
           </div>
         );
       })}
+      </div>
     </div>
   );
 };
