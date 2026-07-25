@@ -134,7 +134,6 @@ export function tryFormatToISO(input: string, expectedType: string): string {
   let valPart = input.trim();
   
   const prefixes = [
-    "custom strategy:", 
     "fill_value:", 
     "fill_value", 
     "fill", 

@@ -215,6 +215,37 @@ const CompletedPipelineReviewPanel: React.FC<{
 
 /* ── Main View ──────────────────────────────────────────────────────────── */
 
+const applyClarificationAnswers = (
+  validationResult: any,
+  updates: Record<string, string | null>,
+) => {
+  if (!validationResult?.clarifications) return validationResult;
+
+  let clarifications = { ...validationResult.clarifications };
+  for (const [key, answer] of Object.entries(updates)) {
+    const [category, questionKey] = key.split(".");
+    const question = clarifications?.[category]?.[questionKey];
+    if (!category || !questionKey || !question) continue;
+
+    clarifications = {
+      ...clarifications,
+      [category]: {
+        ...clarifications[category],
+        [questionKey]: {
+          ...question,
+          answer,
+          ...(answer !== null ? { error: null } : {}),
+        },
+      },
+    };
+  }
+
+  return {
+    ...validationResult,
+    clarifications,
+  };
+};
+
 export const PipelineView: React.FC<PipelineViewProps> = ({
   runId,
   onComplete,
@@ -401,6 +432,87 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
       state?.status !== "completed" &&
       state?.status !== "failed" &&
       state?.awaiting_hitl === true,
+  });
+
+  const updateClarificationAnswersMutation = useMutation({
+    mutationFn: (answers: Record<string, string | null>) =>
+      pipelineApi.updateClarificationAnswers(runId, answers),
+    scope: { id: `input-validation-answers-${runId}` },
+    onMutate: async (updates) => {
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: ["pipeline-state", runId] }),
+        queryClient.cancelQueries({ queryKey: ["hitl-checkpoint", runId] }),
+      ]);
+
+      const previousState = queryClient.getQueryData(["pipeline-state", runId]);
+      const previousCheckpoint = queryClient.getQueryData([
+        "hitl-checkpoint",
+        runId,
+      ]);
+
+      queryClient.setQueryData(["pipeline-state", runId], (current: any) =>
+        current
+          ? {
+              ...current,
+              input_validation_result: applyClarificationAnswers(
+                current.input_validation_result,
+                updates,
+              ),
+            }
+          : current,
+      );
+      queryClient.setQueryData(["hitl-checkpoint", runId], (current: any) =>
+        current
+          ? {
+              ...current,
+              payload: applyClarificationAnswers(current.payload, updates),
+            }
+          : current,
+      );
+
+      return { previousState, previousCheckpoint };
+    },
+    onSuccess: (response) => {
+      queryClient.setQueryData(["pipeline-state", runId], (current: any) =>
+        current
+          ? {
+              ...current,
+              input_validation_result: response.input_validation_result,
+            }
+          : current,
+      );
+      queryClient.setQueryData(["hitl-checkpoint", runId], (current: any) =>
+        current
+          ? {
+              ...current,
+              payload: response.input_validation_result,
+              message_to_user:
+                response.input_validation_result?.reasoning ??
+                current.message_to_user,
+            }
+          : current,
+      );
+    },
+    onError: (error, _updates, context) => {
+      if (context?.previousState !== undefined) {
+        queryClient.setQueryData(
+          ["pipeline-state", runId],
+          context.previousState,
+        );
+      }
+      if (context?.previousCheckpoint !== undefined) {
+        queryClient.setQueryData(
+          ["hitl-checkpoint", runId],
+          context.previousCheckpoint,
+        );
+      }
+      console.error("Failed to persist clarification answer:", error);
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["pipeline-state", runId],
+      });
+    },
   });
 
   useEffect(() => {
@@ -724,6 +836,9 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
                       feedback: fb,
                       disambiguation_answers,
                     })
+                  }
+                  onClarificationAnswerChange={(answers) =>
+                    updateClarificationAnswersMutation.mutate(answers)
                   }
                   isPending={
                     submitDecisionMutation.isPending || isTransitioning

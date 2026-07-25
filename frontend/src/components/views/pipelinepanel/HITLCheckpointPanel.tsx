@@ -19,6 +19,9 @@ export const HITLCheckpointPanel: React.FC<{
     fb?: string,
     disambiguationAnswers?: Record<string, string | string[]>,
   ) => void;
+  onClarificationAnswerChange: (
+    answers: Record<string, string | null>,
+  ) => void;
   isPending: boolean;
   isAwaiting: boolean;
 }> = ({
@@ -28,6 +31,7 @@ export const HITLCheckpointPanel: React.FC<{
   feedback,
   onFeedbackChange,
   onDecision,
+  onClarificationAnswerChange,
   isPending,
   isAwaiting,
 }) => {
@@ -307,9 +311,16 @@ export const HITLCheckpointPanel: React.FC<{
         {isInputValidationClarification && (
           <InputValidationClarificationContent
             key={checkpoint?.checkpoint_id}
-            payload={payload}
+            payload={{
+              ...payload,
+              semantic_profile:
+                payload.semantic_profile ?? pipelineState?.semantic_profile,
+              data_profile:
+                payload.data_profile ?? pipelineState?.data_profile,
+            }}
             isAwaiting={isAwaiting}
             onDecision={onDecision}
+            onAnswerChange={onClarificationAnswerChange}
             isPending={isPending}
           />
         )}
