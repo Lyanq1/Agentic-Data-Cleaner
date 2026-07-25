@@ -2146,7 +2146,7 @@ class ReportService:
                     "Your goal is to accurately answer user questions about the pipeline run, F1 evaluation metrics, "
                     "token costs, execution plan rationale, worker outputs, validation rules, and the raw/cleaned dataset itself.\n\n"
                     "Available tools:\n"
-                    "- `query_dataset_sql`: Run DuckDB SQL (SELECT) queries on dataset tables (`clean_data`, `raw_data`, `v1`, etc.). Use this whenever asked about data contents, row counts, null counts, distributions, top values, or data comparisons.\n"
+                    "- `query_dataset_sql`: Run DuckDB SQL (SELECT) queries on dataset tables (`clean_data`, `raw_data`, `v1`, etc.). Use this whenever asked about data contents, row counts, null counts, distributions, top values, or data comparisons. IMPORTANT: When filtering string values in SQL (e.g., searching for 'unknown', 'n/a', names, etc.), ALWAYS use case-insensitive matching like `LOWER(column) = LOWER('val')` or `column ILIKE 'val'` so capitalization differences (e.g. 'Unknown' vs 'unknown') do not miss matching rows.\n"
                     "- `get_evaluation_metrics`: Retrieve F1 score (TP, FP, FN, precision, recall, accuracy) and token consumption metrics.\n"
                     "- `get_pipeline_telemetry`: Retrieve execution plan task rationale, skipped tasks, worker outputs, and validation rule results.\n"
                     "- `get_lineage_diff`: Retrieve before/after column change stats and sample modifications.\n\n"
