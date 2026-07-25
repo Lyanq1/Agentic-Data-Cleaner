@@ -8,6 +8,7 @@ import {
   Download,
   FileJson,
   FileText,
+  Gauge,
   GitBranch,
   RotateCcw,
   ShieldCheck,
@@ -53,6 +54,10 @@ interface F1Metrics {
   error_correction_precision?: number;
   error_correction_recall?: number;
   cell_accuracy?: number;
+  total_cells_evaluated?: number;
+  tp?: number;
+  fp?: number;
+  fn?: number;
 }
 
 interface LineageVersion {
@@ -135,6 +140,195 @@ function formatScore(value: number | undefined): string {
 function download(url: string): void {
   window.location.assign(url);
 }
+
+function normalizeMetric(value: number | undefined): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  return Math.max(0, Math.min(1, value));
+}
+
+const BenchmarkMetricBar: React.FC<{
+  label: string;
+  description: string;
+  value?: number;
+}> = ({ label, description, value }) => {
+  const normalizedValue = normalizeMetric(value);
+  const barStyle = {
+    '--benchmark-bar-scale': normalizedValue ?? 0,
+  } as React.CSSProperties;
+
+  return (
+    <div
+      className="space-y-2"
+      role="img"
+      aria-label={`${label}: ${formatScore(value)}. ${description}`}
+    >
+      <div className="flex items-end justify-between gap-4">
+        <div>
+          <p className="text-sm font-medium">{label}</p>
+          <p className="text-xs text-muted-foreground">{description}</p>
+        </div>
+        <span className="shrink-0 text-sm font-semibold tabular-nums">
+          {formatScore(value)}
+        </span>
+      </div>
+      <div className="h-2 overflow-hidden rounded-full bg-muted">
+        <div
+          className="benchmark-metric-bar h-full w-full origin-left rounded-full bg-primary"
+          style={barStyle}
+        />
+      </div>
+    </div>
+  );
+};
+
+const BenchmarkMetricsVisualization: React.FC<{ metrics: F1Metrics }> = ({ metrics }) => {
+  const normalizedF1 = normalizeMetric(metrics.f1_score);
+  const gaugeValue = (normalizedF1 ?? 0) * 100;
+  const gaugeStyle = {
+    '--benchmark-gauge-value': gaugeValue,
+  } as React.CSSProperties;
+  const gaugeTicks = [0, 25, 50, 75, 100].map((value) => {
+    const angle = Math.PI - (value / 100) * Math.PI;
+    return {
+      value,
+      x: 90 + 70 * Math.cos(angle),
+      y: 92 - 70 * Math.sin(angle),
+    };
+  });
+  const evidenceItems = [
+    ['Evaluated cells', metrics.total_cells_evaluated],
+    ['True positives', metrics.tp],
+    ['False positives', metrics.fp],
+    ['False negatives', metrics.fn],
+  ] as const;
+
+  return (
+    <section
+      className="overflow-hidden rounded-xl border border-primary/15 bg-gradient-to-br from-primary/[0.06] via-background to-background"
+      aria-labelledby="benchmark-quality-title"
+    >
+      <div className="flex flex-col gap-3 border-b border-primary/10 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-start gap-3">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <Gauge className="h-4 w-4" aria-hidden="true" />
+          </span>
+          <div>
+            <h2 id="benchmark-quality-title" className="text-base font-semibold">
+              Benchmark quality
+            </h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Performance against the supplied clean ground-truth dataset.
+            </p>
+          </div>
+        </div>
+        <span className="w-fit rounded-full border border-primary/20 bg-background/80 px-2.5 py-1 text-xs font-medium text-primary">
+          Ground-truth evaluation
+        </span>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(15rem,0.8fr)_minmax(0,1.2fr)]">
+        <div className="flex flex-col items-center justify-center border-b p-5 lg:border-b-0 lg:border-r">
+          <div
+            className="w-full max-w-[16rem]"
+            role="img"
+            aria-label={`F1 score: ${formatScore(metrics.f1_score)}. Composite balance of precision and recall.`}
+          >
+            <svg
+              viewBox="0 0 180 112"
+              className="h-auto w-full overflow-visible"
+              aria-hidden="true"
+            >
+              <path
+                d="M 20 92 A 70 70 0 0 1 160 92"
+                pathLength="100"
+                fill="none"
+                className="stroke-muted"
+                strokeWidth="12"
+                strokeLinecap="round"
+              />
+              <path
+                d="M 20 92 A 70 70 0 0 1 160 92"
+                pathLength="100"
+                fill="none"
+                className="benchmark-gauge-progress stroke-primary"
+                strokeWidth="12"
+                strokeLinecap="round"
+                style={gaugeStyle}
+              />
+              {gaugeTicks.map((tick) => (
+                <circle
+                  key={tick.value}
+                  cx={tick.x}
+                  cy={tick.y}
+                  r="2.2"
+                  className="fill-background stroke-border"
+                  strokeWidth="1"
+                />
+              ))}
+              <text
+                x="90"
+                y="77"
+                textAnchor="middle"
+                className="fill-foreground text-[23px] font-semibold tabular-nums"
+              >
+                {formatScore(metrics.f1_score)}
+              </text>
+              <text
+                x="90"
+                y="91"
+                textAnchor="middle"
+                className="fill-muted-foreground text-[8px] font-semibold tracking-[0.18em]"
+              >
+                F1 SCORE
+              </text>
+              <text x="15" y="108" className="fill-muted-foreground text-[8px]">0</text>
+              <text x="154" y="108" className="fill-muted-foreground text-[8px]">100</text>
+            </svg>
+          </div>
+          <p className="mt-1 text-center text-xs text-muted-foreground">
+            Composite balance of precision and recall
+          </p>
+        </div>
+
+        <div className="space-y-5 p-5">
+          <BenchmarkMetricBar
+            label="Precision"
+            description="How often proposed fixes were correct"
+            value={metrics.error_correction_precision}
+          />
+          <BenchmarkMetricBar
+            label="Recall"
+            description="How many required fixes were recovered"
+            value={metrics.error_correction_recall}
+          />
+          <BenchmarkMetricBar
+            label="Cell accuracy"
+            description="Share of all evaluated cells that match"
+            value={metrics.cell_accuracy}
+          />
+        </div>
+      </div>
+
+      {evidenceItems.some(([, value]) => typeof value === 'number') && (
+        <dl className="grid grid-cols-2 border-t bg-background/45 sm:grid-cols-4">
+          {evidenceItems.map(([label, value], index) => (
+            <div
+              key={label}
+              className={`px-4 py-3 ${
+                index % 2 === 0 ? 'border-r' : ''
+              } sm:border-r sm:last:border-r-0`}
+            >
+              <dt className="text-[11px] text-muted-foreground">{label}</dt>
+              <dd className="mt-1 text-sm font-semibold tabular-nums">
+                {formatNumber(value)}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      )}
+    </section>
+  );
+};
 
 export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) => {
   const [activeTab, setActiveTab] = useState<ResultTab>('summary');
@@ -441,6 +635,8 @@ export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) =>
                 </section>
               </div>
 
+              {f1Metrics && <BenchmarkMetricsVisualization metrics={f1Metrics} />}
+
               <details className="group overflow-hidden rounded-xl border bg-background/50">
                 <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-3 px-4 text-sm font-medium transition-colors duration-200 hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring motion-reduce:transition-none">
                   Technical details
@@ -466,24 +662,6 @@ export const ResultView: React.FC<ResultViewProps> = ({ runId, onStartOver }) =>
                       </div>
                     ))}
                   </dl>
-
-                  {f1Metrics && (
-                    <dl className="grid grid-cols-2 gap-4 rounded-lg bg-muted/20 p-4 sm:grid-cols-4">
-                      {[
-                        ['F1', f1Metrics.f1_score],
-                        ['Precision', f1Metrics.error_correction_precision],
-                        ['Recall', f1Metrics.error_correction_recall],
-                        ['Cell accuracy', f1Metrics.cell_accuracy],
-                      ].map(([label, value]) => (
-                        <div key={String(label)}>
-                          <dt className="text-xs text-muted-foreground">{label}</dt>
-                          <dd className="mt-1 font-semibold tabular-nums">
-                            {typeof value === 'number' ? formatScore(value) : '—'}
-                          </dd>
-                        </div>
-                      ))}
-                    </dl>
-                  )}
 
                   <details className="group">
                     <summary className="inline-flex min-h-11 cursor-pointer list-none items-center text-sm font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">

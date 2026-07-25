@@ -202,6 +202,17 @@
     transform-origin: bottom right;
     animation: result-chat-enter 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
   }
+
+  .benchmark-gauge-progress {
+    stroke-dasharray: var(--benchmark-gauge-value) 100;
+    stroke-dashoffset: 0;
+    animation: benchmark-gauge-draw 760ms cubic-bezier(0.22, 1, 0.36, 1) 120ms both;
+  }
+
+  .benchmark-metric-bar {
+    transform: scaleX(var(--benchmark-bar-scale));
+    animation: benchmark-bar-grow 620ms cubic-bezier(0.22, 1, 0.36, 1) 180ms both;
+  }
 }
 
 @keyframes result-surface-enter {
@@ -263,6 +274,24 @@
   }
 }
 
+@keyframes benchmark-gauge-draw {
+  from {
+    stroke-dashoffset: 100;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes benchmark-bar-grow {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(var(--benchmark-bar-scale));
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .result-interactive,
   .result-interactive:hover,
@@ -277,5 +306,11 @@
     animation: none;
     transition: none;
     transform: none;
+  }
+
+  .benchmark-gauge-progress,
+  .benchmark-metric-bar {
+    animation: none;
+    transition: none;
   }
 }
