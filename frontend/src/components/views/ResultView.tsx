@@ -455,17 +455,11 @@ const ReportChatPanel = memo(({ runId }: ReportChatPanelProps) => {
                     </div>
                     {!isUser && (
                       <div className="mb-2 flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-primary">
-                          <Sparkles className="h-3 w-3" />
-                          Answer
-                        </div>
-                        <span className="rounded-full border bg-muted/40 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-                          {message.answer_mode === 'llm_synthesis'
-                            ? 'LLM synthesis'
-                            : message.answer_mode === 'scope_guard'
-                              ? 'Out of scope'
-                              : 'Backend evidence'}
-                        </span>
+                        {(message.answer_mode === 'llm_synthesis' || message.answer_mode === 'scope_guard') && (
+                          <span className="rounded-full border bg-muted/40 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                            {message.answer_mode === 'llm_synthesis' ? 'LLM synthesis' : 'Out of scope'}
+                          </span>
+                        )}
                       </div>
                     )}
                     <div className="prose prose-sm dark:prose-invert max-w-none text-sm leading-relaxed [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4 [&_p]:mb-2 [&_p:last-child]:mb-0 [&_strong]:font-semibold [&_li]:my-0.5">
