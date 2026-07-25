@@ -315,6 +315,8 @@ export const HITLCheckpointPanel: React.FC<{
               ...payload,
               semantic_profile:
                 payload.semantic_profile ?? pipelineState?.semantic_profile,
+              data_profile:
+                payload.data_profile ?? pipelineState?.data_profile,
             }}
             isAwaiting={isAwaiting}
             onDecision={onDecision}

@@ -16,6 +16,12 @@ import {
   Loader2
 } from "lucide-react";
 import { formatDisplayValue, getOptionConsequence, tryFormatToISO } from "./pipelinepanel/utils";
+import {
+  filterStrategiesForFinalDataType,
+  finalDataTypeToValidationType,
+  getFillValueOptionsForColumn,
+  resolveColumnFinalDataType,
+} from "./pipelinepanel/clarificationDtypes";
 
 interface QueueItem {
   id: string;
@@ -41,6 +47,8 @@ export const MassUploadView: React.FC = () => {
   // For managing answers to clarifications
   const [mcqAnswers, setMcqAnswers] = useState<Record<string, string>>({});
   const [customInputs, setCustomInputs] = useState<Record<string, string>>({});
+  const [fillValueSubOption, setFillValueSubOption] = useState<Record<string, string>>({});
+  const [fillValueCustom, setFillValueCustom] = useState<Record<string, string>>({});
   const [submittingAnswers, setSubmittingAnswers] = useState<boolean>(false);
 
   const pollIntervalsRef = useRef<Record<string, number>>({});
@@ -72,7 +80,7 @@ export const MassUploadView: React.FC = () => {
     return priorityItem || queue[0] || null;
   }, [queue, selectedInspectId]);
 
-  const getColumnExpectedTypeFromPayload = (payload: any, qKey: string, currentAnswers?: Record<string, string>): string => {
+  const getColumnFinalValidationTypeFromPayload = (payload: any, qKey: string, currentAnswers?: Record<string, string>): string => {
     const colName = qKey.startsWith("Q2_strategy_column_")
       ? qKey.substring("Q2_strategy_column_".length)
       : qKey.startsWith("Q1_allow_missing_column_")
@@ -81,27 +89,17 @@ export const MassUploadView: React.FC = () => {
           ? qKey.substring("Q1_cast_column_".length)
           : "";
     if (!colName) return "str";
-    const semProfile = payload?.semantic_profile || {};
-    const colDetail = semProfile.columns?.[colName];
-    const expectedType = colDetail?.expected_type || "str";
-
-    let castAnswer: string | undefined = currentAnswers?.[`typecast.Q1_cast_column_${colName}`];
-    if (!castAnswer && payload?.clarifications?.typecast?.[`Q1_cast_column_${colName}`]) {
-      const castQ = payload.clarifications.typecast[`Q1_cast_column_${colName}`];
-      castAnswer = castQ.answer || castQ.previous_answer || undefined;
-    }
-    
-    if (castAnswer === "No") {
-      return "str";
-    }
-
-    return expectedType;
+    return finalDataTypeToValidationType(
+      resolveColumnFinalDataType(payload, colName, currentAnswers ?? mcqAnswers),
+    );
   };
 
   useEffect(() => {
     if (!activeItem || !activeItem.checkpoint || activeItem.checkpoint.checkpoint_type !== "input_validation_clarification") {
       setMcqAnswers({});
       setCustomInputs({});
+      setFillValueSubOption({});
+      setFillValueCustom({});
       return;
     }
 
@@ -111,6 +109,8 @@ export const MassUploadView: React.FC = () => {
 
     const nextAnswers: Record<string, string> = {};
     const nextCustom: Record<string, string> = {};
+    const nextFillValueSubOption: Record<string, string> = {};
+    const nextFillValueCustom: Record<string, string> = {};
 
     categories.forEach((cat) => {
       const catData = clarifications[cat];
@@ -120,16 +120,50 @@ export const MassUploadView: React.FC = () => {
           if (q) {
             const ansVal = q.answer || q.previous_answer;
             if (ansVal) {
-              if (ansVal.startsWith("Custom strategy:")) {
-                nextAnswers[`${cat}.${qKey}`] = "Custom strategy (describe in your next prompt)";
-                const rawCustom = ansVal.substring("Custom strategy:".length).trim();
-                const expectedType = getColumnExpectedTypeFromPayload(payload, qKey, nextAnswers);
-                nextCustom[`${cat}.${qKey}`] = tryFormatToISO(rawCustom, expectedType);
+              if (ansVal === "fill_value") {
+                nextAnswers[`${cat}.${qKey}`] = "fill_value";
+                const colName = qKey.startsWith("Q2_strategy_column_")
+                  ? qKey.substring("Q2_strategy_column_".length)
+                  : "";
+                if (colName) {
+                  const subOptions = getFillValueOptionsForColumn(
+                    payload,
+                    colName,
+                    nextAnswers,
+                  );
+                  nextFillValueSubOption[`${cat}.${qKey}`] =
+                    subOptions[0]?.value ?? "custom";
+                }
               } else if (ansVal.startsWith("fill_value:")) {
                 nextAnswers[`${cat}.${qKey}`] = "fill_value";
                 const val = ansVal.substring("fill_value:".length).trim();
-                const expectedType = getColumnExpectedTypeFromPayload(payload, qKey, nextAnswers);
-                nextCustom[`${cat}.${qKey}`] = tryFormatToISO(val, expectedType);
+                const colName = qKey.startsWith("Q2_strategy_column_")
+                  ? qKey.substring("Q2_strategy_column_".length)
+                  : "";
+                if (colName) {
+                  const subOptions = getFillValueOptionsForColumn(
+                    payload,
+                    colName,
+                    nextAnswers,
+                  );
+                  const matching = subOptions.find(
+                    (option) => option.value === val,
+                  );
+                  if (matching && matching.value !== "custom") {
+                    nextFillValueSubOption[`${cat}.${qKey}`] = matching.value;
+                  } else {
+                    nextFillValueSubOption[`${cat}.${qKey}`] = "custom";
+                    const expectedType = getColumnFinalValidationTypeFromPayload(
+                      payload,
+                      qKey,
+                      nextAnswers,
+                    );
+                    nextFillValueCustom[`${cat}.${qKey}`] = tryFormatToISO(
+                      val,
+                      expectedType,
+                    );
+                  }
+                }
               } else {
                 nextAnswers[`${cat}.${qKey}`] = ansVal;
               }
@@ -140,7 +174,8 @@ export const MassUploadView: React.FC = () => {
     });
 
     setMcqAnswers(nextAnswers);
-    setCustomInputs(nextCustom);
+    setFillValueSubOption(nextFillValueSubOption);
+    setFillValueCustom(nextFillValueCustom);
   }, [activeItem?.id, activeItem?.checkpoint?.checkpoint_id]);
 
   // Add a new row to the queue
@@ -227,6 +262,8 @@ export const MassUploadView: React.FC = () => {
                 ...response.input_validation_result,
                 semantic_profile:
                   item.checkpoint.payload?.semantic_profile,
+                data_profile:
+                  item.checkpoint.payload?.data_profile,
               },
             },
           };
@@ -239,12 +276,89 @@ export const MassUploadView: React.FC = () => {
   });
 
   const handleClarificationAnswerChange = (key: string, answer: string) => {
-    setMcqAnswers((prev) => ({ ...prev, [key]: answer }));
+    const nextAnswers = { ...mcqAnswers, [key]: answer };
+    const answerUpdates: Record<string, string | null> = { [key]: answer };
+    const payload = activeItem?.checkpoint?.payload || {};
+
+    if (key.startsWith("null.Q1_allow_missing_column_")) {
+      const colName = key.substring("null.Q1_allow_missing_column_".length);
+      const nullAnswerKey = `null.Q2_strategy_column_${colName}`;
+      if (answer === "No" && nextAnswers[nullAnswerKey] === "keep_null") {
+        delete nextAnswers[nullAnswerKey];
+        answerUpdates[nullAnswerKey] = null;
+      }
+    }
+
+    if (key.startsWith("typecast.Q1_cast_column_")) {
+      const colName = key.substring("typecast.Q1_cast_column_".length);
+      const nullQuestionKey = `Q2_strategy_column_${colName}`;
+      const nullAnswerKey = `null.${nullQuestionKey}`;
+      const nullQuestion = payload.clarifications?.null?.[nullQuestionKey];
+      const compatibleOptions = filterStrategiesForFinalDataType(
+        [...(nullQuestion?.options || [])],
+        resolveColumnFinalDataType(payload, colName, nextAnswers),
+      ).map((option) => formatDisplayValue(option));
+
+      if (
+        nextAnswers[nullAnswerKey] &&
+        !compatibleOptions.includes(nextAnswers[nullAnswerKey])
+      ) {
+        delete nextAnswers[nullAnswerKey];
+        answerUpdates[nullAnswerKey] = null;
+      }
+
+      const selectedFillValue = fillValueSubOption[nullAnswerKey];
+      const fillOptions = getFillValueOptionsForColumn(
+        payload,
+        colName,
+        nextAnswers,
+      );
+      const nextFillValue =
+        selectedFillValue === "custom" ||
+        (selectedFillValue &&
+          fillOptions.some((option) => option.value === selectedFillValue))
+          ? selectedFillValue
+          : (fillOptions[0]?.value ?? "custom");
+      setFillValueSubOption((prev) => ({
+        ...prev,
+        [nullAnswerKey]: nextFillValue,
+      }));
+
+      if (
+        nextAnswers[nullAnswerKey] === "fill_value" &&
+        nextFillValue !== "custom"
+      ) {
+        answerUpdates[nullAnswerKey] = `fill_value: ${nextFillValue}`;
+      }
+    }
+
+    if (answer === "fill_value" && !fillValueSubOption[key]) {
+      const qKey = key.split(".")[1] || "";
+      const colName = qKey.startsWith("Q2_strategy_column_")
+        ? qKey.substring("Q2_strategy_column_".length)
+        : "";
+      if (colName) {
+        const fillOptions = getFillValueOptionsForColumn(
+          payload,
+          colName,
+          nextAnswers,
+        );
+        setFillValueSubOption((prev) => ({
+          ...prev,
+          [key]: fillOptions[0]?.value ?? "custom",
+        }));
+        if (fillOptions[0]?.value && fillOptions[0].value !== "custom") {
+          answerUpdates[key] = `fill_value: ${fillOptions[0].value}`;
+        }
+      }
+    }
+
+    setMcqAnswers(nextAnswers);
     if (!activeItem?.runId) return;
 
     updateClarificationAnswersMutation.mutate({
       runId: activeItem.runId,
-      answers: { [key]: answer },
+      answers: answerUpdates,
     });
   };
 
@@ -312,8 +426,29 @@ export const MassUploadView: React.FC = () => {
       if (type === "input_validation_clarification") {
         const finalAnswers = { ...mcqAnswers };
         Object.keys(finalAnswers).forEach((key) => {
-          if (finalAnswers[key].includes("Custom strategy") && customInputs[key]) {
-            finalAnswers[key] = `Custom strategy: ${customInputs[key].trim()}`;
+          const qKey = key.split(".")[1] || "";
+          const finalType = getColumnFinalValidationTypeFromPayload(
+            checkpoint.payload,
+            qKey,
+            finalAnswers,
+          );
+          if (finalAnswers[key] === "fill_value") {
+            const colName = qKey.startsWith("Q2_strategy_column_")
+              ? qKey.substring("Q2_strategy_column_".length)
+              : "";
+            const selectedConstant =
+              fillValueSubOption[key] ||
+              getFillValueOptionsForColumn(
+                checkpoint.payload,
+                colName,
+                finalAnswers,
+              )[0]?.value ||
+              "custom";
+            const fillValue =
+              selectedConstant === "custom"
+                ? tryFormatToISO(fillValueCustom[key] || "", finalType).trim()
+                : selectedConstant;
+            finalAnswers[key] = `fill_value: ${fillValue}`;
           }
         });
 
@@ -328,7 +463,8 @@ export const MassUploadView: React.FC = () => {
       }
 
       setMcqAnswers({});
-      setCustomInputs({});
+      setFillValueSubOption({});
+      setFillValueCustom({});
       updateItem(activeItem.id, { status: "resuming", checkpoint: null });
       
       // Auto-select the next item in the queue that needs clarification
@@ -404,6 +540,7 @@ export const MassUploadView: React.FC = () => {
               payload: {
                 ...checkpoint.payload,
                 semantic_profile: state.semantic_profile,
+                data_profile: state.data_profile,
               },
             };
 
@@ -1100,10 +1237,15 @@ export const MassUploadView: React.FC = () => {
                                         const selectedVal = mcqAnswers[key] || "";
                                         const isStrategy = q && typeof q === "object" && "options" in q;
                                         let optionsToRender = [...(q.options || [])];
+                                        const colName = qKey.startsWith("Q2_strategy_column_")
+                                          ? qKey.substring("Q2_strategy_column_".length)
+                                          : qKey.startsWith("Q1_allow_missing_column_")
+                                            ? qKey.substring("Q1_allow_missing_column_".length)
+                                            : qKey.startsWith("Q1_cast_column_")
+                                              ? qKey.substring("Q1_cast_column_".length)
+                                              : "";
 
                                         if (cat === "null" && qKey.startsWith("Q2_strategy_column_")) {
-                                          const colName = qKey.substring("Q2_strategy_column_".length);
-                                          
                                           // 1. Filter out keep_null if allow_missing is answered "No"
                                           const q1Key = `null.Q1_allow_missing_column_${colName}`;
                                           const q1Answer = mcqAnswers[q1Key];
@@ -1111,32 +1253,16 @@ export const MassUploadView: React.FC = () => {
                                             optionsToRender = optionsToRender.filter((opt: any) => opt !== "keep_null");
                                           }
 
-                                          // 2. Filter or add options based on Type Cast decision
-                                          const castKey = `typecast.Q1_cast_column_${colName}`;
-                                          const castAnswer = mcqAnswers[castKey];
-                                          
-                                          const typecastData = clarifications.typecast || {};
-                                          const hasCastQuestion = `Q1_cast_column_${colName}` in typecastData;
-                                          
-                                          if (hasCastQuestion) {
-                                            let expectedType = "str";
-                                            const semProfile = payload.semantic_profile || {};
-                                            const colDetail = semProfile.columns?.[colName];
-                                            if (colDetail) {
-                                              expectedType = colDetail.expected_type || "str";
-                                            }
-
-                                            if (castAnswer === "Yes") {
-                                              if (expectedType === "int" || expectedType === "float") {
-                                                if (!optionsToRender.includes("fill_mean")) optionsToRender.unshift("fill_mean");
-                                                if (!optionsToRender.includes("fill_median")) optionsToRender.unshift("fill_median");
-                                              } else if (expectedType === "datetime" || expectedType === "date") {
-                                                if (!optionsToRender.includes("fill_median")) optionsToRender.unshift("fill_median");
-                                              }
-                                            } else {
-                                              optionsToRender = optionsToRender.filter((opt: any) => opt !== "fill_mean" && opt !== "fill_median");
-                                            }
-                                          }
+                                          // Keep the semantic options generated by the backend,
+                                          // then remove strategies incompatible with final dtype.
+                                          optionsToRender = filterStrategiesForFinalDataType(
+                                            optionsToRender,
+                                            resolveColumnFinalDataType(
+                                              payload,
+                                              colName,
+                                              mcqAnswers,
+                                            ),
+                                          );
                                         }
 
                                         return (
@@ -1172,20 +1298,90 @@ export const MassUploadView: React.FC = () => {
                                                             <span className="font-bold">Consequence: </span>
                                                             {formatDisplayValue(optConsequence)}
                                                           </div>
-                                                          {optionLabel.includes("Custom strategy") && (
+                                                        </div>
+                                                      )}
+                                                      {isSelected && optionLabel === "fill_value" && (
+                                                        <div className="ml-5 p-2 bg-indigo-50/50 border border-indigo-100/50 rounded text-[11px] leading-snug text-indigo-950 space-y-2">
+                                                          <p className="font-bold">
+                                                            Select or enter a fill value:
+                                                          </p>
+                                                          <div className="flex flex-wrap gap-1.5">
+                                                            {getFillValueOptionsForColumn(
+                                                              payload,
+                                                              colName,
+                                                              mcqAnswers,
+                                                            ).map((subOption) => (
+                                                              <label
+                                                                key={subOption.value}
+                                                                className={`cursor-pointer rounded-full border px-2 py-1 ${
+                                                                  fillValueSubOption[key] === subOption.value
+                                                                    ? "bg-indigo-600 border-indigo-600 text-white"
+                                                                    : "bg-white border-indigo-200 text-indigo-900"
+                                                                }`}
+                                                              >
+                                                                <input
+                                                                  type="radio"
+                                                                  name={`${key}_sub`}
+                                                                  value={subOption.value}
+                                                                  checked={fillValueSubOption[key] === subOption.value}
+                                                                  onChange={() => {
+                                                                    setFillValueSubOption((prev) => ({
+                                                                      ...prev,
+                                                                      [key]: subOption.value,
+                                                                    }));
+                                                                    if (activeItem.runId) {
+                                                                      updateClarificationAnswersMutation.mutate({
+                                                                        runId: activeItem.runId,
+                                                                        answers: {
+                                                                          [key]:
+                                                                            subOption.value === "custom"
+                                                                              ? "fill_value"
+                                                                              : `fill_value: ${subOption.value}`,
+                                                                        },
+                                                                      });
+                                                                    }
+                                                                  }}
+                                                                  className="sr-only"
+                                                                />
+                                                                {subOption.label}
+                                                              </label>
+                                                            ))}
+                                                          </div>
+                                                          {fillValueSubOption[key] === "custom" && (
                                                             <input
                                                               type="text"
-                                                              value={customInputs[key] || ""}
-                                                              onChange={(e) => setCustomInputs((prev) => ({ ...prev, [key]: e.target.value }))}
-                                                              onBlur={(e) => {
-                                                                const expectedType = getColumnExpectedTypeFromPayload(payload, qKey, mcqAnswers);
-                                                                const formatted = tryFormatToISO(e.target.value, expectedType);
-                                                                if (formatted !== e.target.value) {
-                                                                  setCustomInputs((prev) => ({ ...prev, [key]: formatted }));
+                                                              value={fillValueCustom[key] || ""}
+                                                              onChange={(event) =>
+                                                                setFillValueCustom((prev) => ({
+                                                                  ...prev,
+                                                                  [key]: event.target.value,
+                                                                }))
+                                                              }
+                                                              onBlur={(event) => {
+                                                                const finalType = getColumnFinalValidationTypeFromPayload(
+                                                                  payload,
+                                                                  qKey,
+                                                                  mcqAnswers,
+                                                                );
+                                                                const formatted = tryFormatToISO(
+                                                                  event.target.value,
+                                                                  finalType,
+                                                                );
+                                                                setFillValueCustom((prev) => ({
+                                                                  ...prev,
+                                                                  [key]: formatted,
+                                                                }));
+                                                                if (formatted.trim() && activeItem.runId) {
+                                                                  updateClarificationAnswersMutation.mutate({
+                                                                    runId: activeItem.runId,
+                                                                    answers: {
+                                                                      [key]: `fill_value: ${formatted.trim()}`,
+                                                                    },
+                                                                  });
                                                                 }
                                                               }}
-                                                              placeholder="Describe custom behavior..."
-                                                              className="w-full text-xs rounded border border-indigo-200 px-2 py-1 bg-white text-foreground focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                                              placeholder="Enter a custom constant..."
+                                                              className="w-full text-xs rounded border border-indigo-200 px-2 py-1 bg-white text-foreground"
                                                             />
                                                           )}
                                                         </div>

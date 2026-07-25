@@ -862,7 +862,7 @@ async def api_resolve_pipeline(
                                 while True:
                                     matched = False
                                     lower_ans = ans_stripped.lower()
-                                    for p in ["custom strategy:", "fill_value:", "fill_value ", "fill ", "impute "]:
+                                    for p in ["fill_value:", "fill_value ", "fill ", "impute "]:
                                         if lower_ans.startswith(p):
                                             idx = len(p)
                                             prefix += ans_stripped[:idx]

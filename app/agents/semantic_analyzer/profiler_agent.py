@@ -271,6 +271,35 @@ class SemanticProfilerAgent(BaseAgent):
                             expected_type = "str"
                     strategies = col.fill_strategies or map_fill_strategies(semantic_data_type)
                 
+            # Auto-correct numeric string columns misclassified as Structured text / Nominal
+            if (
+                expected_type == "str"
+                and semantic_data_type.strip().lower() in ("structured text", "nominal", "unknown")
+            ):
+                col_lower = col.column_name.lower()
+                is_identifier = (
+                    col_lower.endswith("_id")
+                    or col_lower == "id"
+                    or col_lower.endswith("_code")
+                    or col_lower.endswith("_key")
+                )
+                if not is_identifier and col.column_name in df.columns:
+                    try:
+                        valid_series = df[col.column_name].dropna().astype(str).str.strip()
+                        if not valid_series.empty:
+                            int_matches = valid_series.str.match(r"^\d+$").mean()
+                            float_matches = valid_series.str.match(r"^\d+\.\d+$").mean()
+                            if int_matches > 0.8:
+                                expected_type = "int"
+                                semantic_data_type = "Discrete"
+                                strategies = ["fill_median", "fill_mode"]
+                            elif (int_matches + float_matches) > 0.8:
+                                expected_type = "float"
+                                semantic_data_type = "Continuous"
+                                strategies = ["fill_mean", "fill_median"]
+                    except Exception as err:
+                        logger.warning("Failed to auto-correct numeric pattern for column %s: %s", col.column_name, err)
+
             columns_dict[col.column_name] = ColumnSemanticProfileDetail(
                 description=col.description,
                 logical_group=col.logical_group,
