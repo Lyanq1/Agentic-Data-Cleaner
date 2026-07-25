@@ -9,7 +9,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Header } from "./components/layout/Header";
 import { UploadView } from "./components/views/UploadView";
 import { PipelineView } from "./components/views/PipelineView";
-import { ResultView } from "./components/views/ResultView";
+import { ResultView } from "./components/views/ResultViewCompact";
 import type { AppStep } from "./lib/pipelineSession";
 import {
   applyPipelineRoute,

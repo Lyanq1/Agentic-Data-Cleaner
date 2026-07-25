@@ -66,7 +66,15 @@ function Do-WaitDb {
 }
 function Do-Run {
     Do-Venv
-    & "$VENV_BIN\uvicorn" app.main:app --reload --host 0.0.0.0 --port 8000
+    $uvicornArgs = @(
+        "app.main:app"
+        "--reload"
+        "--reload-dir", "app"
+        "--timeout-graceful-shutdown", "5"
+        "--host", "0.0.0.0"
+        "--port", "8000"
+    )
+    & "$VENV_BIN\uvicorn" @uvicornArgs
 }
 function Do-Test {
     Do-Venv
