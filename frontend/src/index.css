@@ -111,6 +111,16 @@
     font-feature-settings: "rlig" 1, "calt" 1;
   }
 
+  button,
+  button *,
+  [role="button"],
+  [role="button"] *,
+  input:is([type="button"], [type="submit"], [type="reset"]),
+  summary,
+  summary * {
+    @apply select-none;
+  }
+
   .hidden-scrollbar::-webkit-scrollbar {
     display: none;
   }
