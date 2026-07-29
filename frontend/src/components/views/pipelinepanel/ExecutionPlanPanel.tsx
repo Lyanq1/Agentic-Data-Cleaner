@@ -212,6 +212,12 @@ export const ExecutionPlanPanel: React.FC<{
       allow_pattern_mismatch: boolean;
       allow_dmv_sentinel: boolean;
     }>,
+    dedupReview?: {
+      key_columns?: string[];
+      identifier_columns?: string[];
+      ignored_columns?: string[];
+      keep_rule?: string;
+    }
   ) => void;
   isApproving: boolean;
   readOnly?: boolean;
@@ -226,6 +232,9 @@ export const ExecutionPlanPanel: React.FC<{
   const nullTask = taskList
     .map((item: any) => item.work_order || {})
     .find((task: any) => task.task_id === "null_handling");
+  const dedupTask = taskList
+    .map((item: any) => item.work_order || {})
+    .find((task: any) => task.task_id === "deduplication");
   const [nullStrategies, setNullStrategies] = React.useState<
     Record<string, {
       strategy: string;
@@ -234,6 +243,15 @@ export const ExecutionPlanPanel: React.FC<{
       allow_dmv_sentinel: boolean;
     }>
   >({});
+  
+  const [dedupKeyColumns, setDedupKeyColumns] = React.useState<string[]>([]);
+  const [dedupIdentifierColumns, setDedupIdentifierColumns] = React.useState<string[]>([]);
+  const [dedupIgnoredColumns, setDedupIgnoredColumns] = React.useState<string[]>([]);
+  const [dedupKeepRule, setDedupKeepRule] = React.useState<string>("keep_most_complete");
+
+  const availableColumns = pipelineState?.dataset_schema 
+    ? Object.keys(pipelineState.dataset_schema) 
+    : Object.keys(pipelineState?.data_profile?.columns || {});
 
   React.useEffect(() => {
     const initial = Object.fromEntries((nullConflictSection?.fields || []).map((field: any) => {
@@ -249,6 +267,14 @@ export const ExecutionPlanPanel: React.FC<{
       }];
     }));
     setNullStrategies(initial);
+
+    // Read initial deduplication values
+    if (dedupTask?.strategy) {
+      setDedupKeyColumns(dedupTask.strategy.primary_keys || []);
+      setDedupIdentifierColumns(dedupTask.strategy.identifier_columns || []);
+      setDedupIgnoredColumns(dedupTask.strategy.ignored_columns || []);
+      setDedupKeepRule(dedupTask.strategy.keep_rule || "keep_most_complete");
+    }
   }, [executionPlan.metadata?.plan_id]);
 
   const hasMissingFillValue = Object.values(nullStrategies).some(
@@ -383,6 +409,133 @@ export const ExecutionPlanPanel: React.FC<{
         </div>
 
         <WorkerValidatorFlow executionPlan={executionPlan} pipelineState={pipelineState} />
+
+        {!readOnly && dedupTask && (
+          <div className={`rounded-xl border p-4 shadow-sm transition-all duration-500 ${dedupTask.skip ? 'border-amber-300 bg-amber-50' : 'border-violet-300 bg-violet-50'}`}>
+            <h4 className={`text-sm font-semibold ${dedupTask.skip ? 'text-amber-900' : 'text-violet-900'}`}>
+              Deduplication strategy review
+            </h4>
+            <p className={`mt-1 text-xs ${dedupTask.skip ? 'text-amber-800' : 'text-violet-800'}`}>
+              The planner has identified the following columns for deduplication. You can tweak these choices before executing the plan.
+            </p>
+            {dedupTask.skip && (
+              <div className="mt-3 rounded-lg border-l-4 border-amber-500 bg-amber-100 p-3 shadow-inner flex items-start gap-2">
+                <span className="text-amber-600 text-sm mt-0.5 animate-bounce">⚠️</span>
+                <div className="text-xs text-amber-900 leading-relaxed font-medium">
+                  <strong>Notice:</strong> Deduplication is currently marked as SKIPPED because there are no duplicate rows or identifiers detected! These configurations are shown for your reference but won't be actively executed.
+                </div>
+              </div>
+            )}
+            <div className={`mt-3 space-y-4 ${dedupTask.skip ? 'opacity-75 grayscale-[20%]' : ''}`}>
+              
+              <div className="rounded-lg border bg-white p-3">
+                <span className="block text-xs font-semibold text-slate-800">Key Columns</span>
+                <span className="mt-1 block text-[11px] leading-relaxed text-slate-500">
+                  Columns that uniquely identify a record. Exact matches on these columns are considered duplicates.
+                </span>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {availableColumns.map((col) => (
+                    <label key={col} className="flex items-center gap-1 text-xs text-slate-700 bg-slate-50 border border-slate-200 px-2 py-1 rounded cursor-pointer hover:bg-slate-100">
+                      <input 
+                        type="checkbox" 
+                        checked={dedupKeyColumns.includes(col)}
+                        onChange={(e) => {
+                          if (e.target.checked) setDedupKeyColumns(prev => [...prev, col]);
+                          else setDedupKeyColumns(prev => prev.filter(c => c !== col));
+                        }}
+                      />
+                      <span>{col}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-lg border bg-white p-3">
+                <span className="block text-xs font-semibold text-slate-800">Identifier Columns</span>
+                <span className="mt-1 block text-[11px] leading-relaxed text-slate-500">
+                  Additional unique identifiers (e.g. emails, phone numbers) used for fuzzy block matching and cross-referencing.
+                </span>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {availableColumns.map((col) => (
+                    <label key={col} className="flex items-center gap-1 text-xs text-slate-700 bg-slate-50 border border-slate-200 px-2 py-1 rounded cursor-pointer hover:bg-slate-100">
+                      <input 
+                        type="checkbox" 
+                        checked={dedupIdentifierColumns.includes(col)}
+                        onChange={(e) => {
+                          if (e.target.checked) setDedupIdentifierColumns(prev => [...prev, col]);
+                          else setDedupIdentifierColumns(prev => prev.filter(c => c !== col));
+                        }}
+                      />
+                      <span>{col}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-lg border bg-white p-3">
+                <span className="block text-xs font-semibold text-slate-800">Ignored Columns</span>
+                <span className="mt-1 block text-[11px] leading-relaxed text-slate-500">
+                  Columns to ignore when comparing rows for exact equality (e.g. timestamps, auto-generated IDs).
+                </span>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {availableColumns.map((col) => (
+                    <label key={col} className="flex items-center gap-1 text-xs text-slate-700 bg-slate-50 border border-slate-200 px-2 py-1 rounded cursor-pointer hover:bg-slate-100">
+                      <input 
+                        type="checkbox" 
+                        checked={dedupIgnoredColumns.includes(col)}
+                        onChange={(e) => {
+                          if (e.target.checked) setDedupIgnoredColumns(prev => [...prev, col]);
+                          else setDedupIgnoredColumns(prev => prev.filter(c => c !== col));
+                        }}
+                      />
+                      <span>{col}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-lg border bg-white p-3">
+                <span className="block text-xs font-semibold text-slate-800">Survivor Keep Rule</span>
+                <span className="mt-1 block text-[11px] leading-relaxed text-slate-500">
+                  Rule to determine which data row survives when collapsing duplicates.
+                </span>
+                <div className="mt-2 flex gap-4">
+                  <label className="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer">
+                    <input 
+                      type="radio" 
+                      name="keepRule" 
+                      value="keep_most_complete" 
+                      checked={dedupKeepRule === "keep_most_complete"}
+                      onChange={(e) => setDedupKeepRule(e.target.value)}
+                    />
+                    Keep Most Complete
+                  </label>
+                  <label className="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer">
+                    <input 
+                      type="radio" 
+                      name="keepRule" 
+                      value="keep_first" 
+                      checked={dedupKeepRule === "keep_first"}
+                      onChange={(e) => setDedupKeepRule(e.target.value)}
+                    />
+                    Keep First
+                  </label>
+                  <label className="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer">
+                    <input 
+                      type="radio" 
+                      name="keepRule" 
+                      value="keep_last" 
+                      checked={dedupKeepRule === "keep_last"}
+                      onChange={(e) => setDedupKeepRule(e.target.value)}
+                    />
+                    Keep Last
+                  </label>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        )}
 
         {!readOnly && nullConflictSection?.fields?.length > 0 && (
           <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 shadow-sm">
@@ -729,11 +882,16 @@ export const ExecutionPlanPanel: React.FC<{
           ) : (
             <button
               type="button"
-              onClick={() =>
-                onApprove(
-                  nullConflictSection?.fields?.length > 0 ? nullStrategies : undefined,
-                )
-              }
+              onClick={() => {
+                const nullReview = nullConflictSection?.fields?.length > 0 ? nullStrategies : undefined;
+                const dedupReview = dedupTask ? {
+                  key_columns: dedupKeyColumns,
+                  identifier_columns: dedupIdentifierColumns,
+                  ignored_columns: dedupIgnoredColumns,
+                  keep_rule: dedupKeepRule,
+                } : undefined;
+                onApprove(nullReview, dedupReview);
+              }}
               disabled={isApproving || hasMissingFillValue || hasUnacknowledgedConflict}
               aria-busy={isApproving}
               className="inline-flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-semibold transition-all shadow-md hover:shadow-lg disabled:cursor-wait disabled:opacity-70 cursor-pointer"

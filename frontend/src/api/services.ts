@@ -322,6 +322,12 @@ export const pipelineApi = {
           allow_dmv_sentinel: boolean;
         }>;
       };
+      dedup_review?: {
+        key_columns?: string[];
+        identifier_columns?: string[];
+        ignored_columns?: string[];
+        keep_rule?: string;
+      };
     },
   ): Promise<{ message: string }> => {
     const response = await apiClient.post<{ message: string }>(
