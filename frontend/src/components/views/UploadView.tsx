@@ -324,6 +324,7 @@ export const UploadView: React.FC<UploadViewProps> = ({
                 )}
               </div>
 
+              {/* Commented out ground truth input and benchmark mode for UI selection
               <div className="space-y-2">
                 <label className="text-sm font-semibold text-slate-800">
                   Clean File / Ground Truth (Optional, for testing)
@@ -409,6 +410,7 @@ export const UploadView: React.FC<UploadViewProps> = ({
                   </div>
                 </div>
               )}
+              */}
 
               {!isBenchmarkMode && (
                 <div className="space-y-2">

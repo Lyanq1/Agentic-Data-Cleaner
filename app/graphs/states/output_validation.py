@@ -8,7 +8,7 @@ class ValidationCheck(BaseModel):
     column: str | None = None
     columns: Any | None = None
     expected: Any | None = None
-    threshold: float | None = None
+    threshold: Any = None
     severity: Literal["error", "warning"] = "error"
     params: dict[str, Any] = Field(default_factory=dict)
 
