@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from "react";
 import { StepFooter } from "./StepFooter";
 import { TextIcon } from "./TextIcon";
-import { formatDisplayValue, getOptionConsequence, tryFormatToISO } from "./utils";
+import { formatDisplayValue, getOptionConsequence, renderHighlightedText, tryFormatToISO } from "./utils";
 import {
   filterStrategiesForFinalDataType,
   finalDataTypeToValidationType,
@@ -27,6 +27,35 @@ export const InputValidationClarificationContent: React.FC<{
   const [fillValueSubOption, setFillValueSubOption] = useState<Record<string, string>>({});
   const [fillValueCustom, setFillValueCustom] = useState<Record<string, string>>({});
   const hasInitializedRef = React.useRef(false);
+
+  const allDatasetColumns = useMemo(() => {
+    const cols = new Set<string>();
+    if (payload?.data_profile?.columns) {
+      Object.keys(payload.data_profile.columns).forEach((c) => cols.add(c));
+    }
+    if (payload?.semantic_profile?.columns) {
+      Object.keys(payload.semantic_profile.columns).forEach((c) => cols.add(c));
+    }
+    if (payload?.dataset_schema) {
+      Object.keys(payload.dataset_schema).forEach((c) => cols.add(c));
+    }
+    categories.forEach((cat) => {
+      const catData = clarifications[cat];
+      if (catData) {
+        Object.keys(catData).forEach((qKey) => {
+          const colName = qKey.startsWith("Q2_strategy_column_")
+            ? qKey.substring("Q2_strategy_column_".length)
+            : qKey.startsWith("Q1_allow_missing_column_")
+              ? qKey.substring("Q1_allow_missing_column_".length)
+              : qKey.startsWith("Q1_cast_column_")
+                ? qKey.substring("Q1_cast_column_".length)
+                : "";
+          if (colName) cols.add(colName);
+        });
+      }
+    });
+    return Array.from(cols);
+  }, [payload, clarifications]);
 
   const getFillValueSubOptions = (
     colName: string,
@@ -257,7 +286,7 @@ export const InputValidationClarificationContent: React.FC<{
       {payload.reasoning && (
         <div className="rounded-xl border bg-muted/30 p-4 text-sm leading-relaxed text-muted-foreground">
           <strong className="text-foreground block mb-1">Reasoning:</strong>
-          {formatDisplayValue(payload.reasoning)}
+          {renderHighlightedText(formatDisplayValue(payload.reasoning), undefined, allDatasetColumns)}
         </div>
       )}
 
@@ -337,7 +366,7 @@ export const InputValidationClarificationContent: React.FC<{
                         className={`pt-4 ${qi === 0 ? "pt-0" : ""} text-left`}
                       >
                         <p className="text-sm font-medium text-foreground mb-3 leading-snug">
-                          {qi + 1}. {formatDisplayValue(q.question)}
+                          {qi + 1}. {renderHighlightedText(formatDisplayValue(q.question), colName, allDatasetColumns)}
                         </p>
 
                         {q.error && (
@@ -492,7 +521,7 @@ export const InputValidationClarificationContent: React.FC<{
                           <div className="space-y-3">
                             {q.insight && (
                               <div className="text-sm bg-muted/40 p-2.5 rounded border border-border/40 text-muted-foreground italic mb-2 leading-relaxed">
-                                💡 {formatDisplayValue(q.insight)}
+                                💡 {renderHighlightedText(formatDisplayValue(q.insight), colName, allDatasetColumns)}
                               </div>
                             )}
                             <div className="flex gap-4 pl-2">

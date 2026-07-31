@@ -1,6 +1,7 @@
-import pandas as pd
 from pathlib import Path
 from typing import Any
+
+import pandas as pd
 
 from app.tools.data.eda.utils import _detect_string_patterns
 from app.tools.data.quality_control.models import ColumnQuality, QualityReport
@@ -12,9 +13,14 @@ class QualityProfiler:
         self,
         null_threshold: float = 0.0,
         string_pattern_threshold: float = 0.7,
+        allowed_disguised_values: dict[str, list[Any]] | None = None,
     ) -> None:
         self.null_threshold = null_threshold
         self.string_pattern_threshold = string_pattern_threshold
+        self.allowed_disguised_values = {
+            column: {str(value).strip() for value in values}
+            for column, values in (allowed_disguised_values or {}).items()
+        }
 
     def check_file(self, file_path: str | Path) -> QualityReport:
         """Load a file (CSV, TSV, Parquet) and return a QualityReport."""
@@ -140,9 +146,13 @@ class QualityProfiler:
         )
         if not is_numeric:
             disguised_null_rules = ["n/a", "null", "unknown", "-", "none", "0", ""]
-            str_series = series.dropna().astype(str).str.strip().str.lower()
+            raw_str_series = series.dropna().astype(str).str.strip()
+            str_series = raw_str_series.str.lower()
+            allowed_mask = raw_str_series.isin(
+                self.allowed_disguised_values.get(str(col), set())
+            )
             for rule in disguised_null_rules:
-                count = int((str_series == rule).sum())
+                count = int(((str_series == rule) & ~allowed_mask).sum())
                 if count > 0:
                     detected_disguised_nulls[rule] = count
                     

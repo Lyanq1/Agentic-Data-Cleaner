@@ -1,7 +1,7 @@
 import React, { useMemo } from "react";
 import { StepFooter } from "./StepFooter";
 import { SpinnerIcon } from "./SpinnerIcon";
-import { formatDisplayValue } from "./utils";
+import { formatDisplayValue, renderHighlightedText } from "./utils";
 
 export const ResolvedValidationPlanPanel: React.FC<{
   validationResult: any;
@@ -13,6 +13,27 @@ export const ResolvedValidationPlanPanel: React.FC<{
   const reasoning = validationResult.reasoning || "";
   const actionPlan = validationResult.action_plan || {};
   const resolvedByUser = validationResult.resolved_by_user || [];
+
+  const allDatasetColumns = useMemo(() => {
+    const cols = new Set<string>();
+    const clarifications = validationResult?.clarifications || {};
+    ["typecast", "null", "duplicate"].forEach((cat) => {
+      const catData = clarifications[cat];
+      if (catData) {
+        Object.keys(catData).forEach((qKey) => {
+          const colName = qKey.startsWith("Q2_strategy_column_")
+            ? qKey.substring("Q2_strategy_column_".length)
+            : qKey.startsWith("Q1_allow_missing_column_")
+              ? qKey.substring("Q1_allow_missing_column_".length)
+              : qKey.startsWith("Q1_cast_column_")
+                ? qKey.substring("Q1_cast_column_".length)
+                : "";
+          if (colName) cols.add(colName);
+        });
+      }
+    });
+    return Array.from(cols);
+  }, [validationResult]);
 
   const submittedAnswers = useMemo(() => {
     const clarifications = validationResult.clarifications || {};
@@ -54,7 +75,7 @@ export const ResolvedValidationPlanPanel: React.FC<{
             <strong className="text-foreground block mb-1.5">
               Decision Reasoning:
             </strong>
-            {formatDisplayValue(reasoning)}
+            {renderHighlightedText(formatDisplayValue(reasoning), undefined, allDatasetColumns)}
           </div>
         )}
 
@@ -85,7 +106,7 @@ export const ResolvedValidationPlanPanel: React.FC<{
                       {title}
                     </h5>
                     <p className="text-xs text-muted-foreground leading-relaxed whitespace-pre-line">
-                      {formatDisplayValue(planText)}
+                      {renderHighlightedText(formatDisplayValue(planText), undefined, allDatasetColumns)}
                     </p>
                   </div>
                 </div>
@@ -125,7 +146,7 @@ export const ResolvedValidationPlanPanel: React.FC<{
                       {formatDisplayValue(item.label)}
                     </span>
                     <p className="text-xs text-foreground font-semibold leading-relaxed mb-1">
-                      {formatDisplayValue(item.question)}
+                      {renderHighlightedText(formatDisplayValue(item.question), undefined, allDatasetColumns)}
                     </p>
                     <p className="text-xs text-foreground font-medium bg-white/70 rounded px-2.5 py-1 border border-slate-100 mt-1 inline-block">
                       Selected Strategy: <strong className="text-violet-700">{formatDisplayValue(item.answer)}</strong>
@@ -135,26 +156,26 @@ export const ResolvedValidationPlanPanel: React.FC<{
               </div>
             </div>
           ) : (
-            <details className="mt-4 text-xs font-semibold">
-              <summary className="cursor-pointer text-muted-foreground hover:text-foreground font-medium select-none transition-colors">
-                View your submitted answers
-              </summary>
-              <div className="mt-2.5 rounded-xl border bg-muted/15 p-4 space-y-2.5 divide-y divide-border/90">
+            <div className="mt-4">
+              <h4 className="text-xs font-semibold text-emerald-800 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
+                <span>📋 Your Submitted Answers</span>
+              </h4>
+              <div className="rounded-xl border bg-white/80 border-emerald-100 p-4 space-y-3 divide-y divide-emerald-100/60 shadow-2xs">
                 {submittedAnswers.map((item) => (
-                  <div key={item.key} className="pt-2 first:pt-0">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/90 block mb-0.5">
+                  <div key={item.key} className="pt-2.5 first:pt-0">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700/80 block mb-0.5">
                       {formatDisplayValue(item.label)}
                     </span>
                     <p className="text-xs text-foreground font-semibold leading-relaxed mb-1">
-                      {formatDisplayValue(item.question)}
+                      {renderHighlightedText(formatDisplayValue(item.question), undefined, allDatasetColumns)}
                     </p>
-                    <p className="text-xs text-foreground font-medium">
-                      {formatDisplayValue(item.answer)}
+                    <p className="text-xs text-emerald-950 font-medium bg-emerald-50/60 rounded-md px-2.5 py-1 border border-emerald-200/60 mt-1 inline-block">
+                      Selected Strategy: <strong className="text-emerald-700">{formatDisplayValue(item.answer)}</strong>
                     </p>
                   </div>
                 ))}
               </div>
-            </details>
+            </div>
           )
         )}
 

@@ -6,9 +6,8 @@ from typing import Any
 
 import pandas as pd
 
-from app.graphs.states.profiles import SemanticProfile
 from app.graphs.states.planning import TaskDetail
-from app.graphs.states.output_validation import ValidationCheck
+from app.graphs.states.profiles import SemanticProfile
 
 
 class PandasValidationError(Exception):
@@ -25,13 +24,8 @@ class PandasValidationErrors(Exception):
         self.failure_cases = [{"check": err.check, "message": err.message} for err in errors]
 
 
-def _extract_null_strategy_per_column(task: TaskDetail) -> dict[str, str]:
-    """Extract the per-column null strategy mapping from the planner task.
-
-    Returns a dict of {col_name: strategy_string}, e.g. {"Address2": "drop_column"}.
-    Returns an empty dict if the task has no null strategy or is not a null_handling task.
-    """
-    if task.task_id != "null_handling" or not task.strategy:
+def _null_strategy_configs(task: TaskDetail | None) -> dict[str, Any]:
+    if not task or task.task_id != "null_handling" or not task.strategy:
         return {}
     strategy_raw = task.strategy
     if hasattr(strategy_raw, "model_dump"):
@@ -40,25 +34,40 @@ def _extract_null_strategy_per_column(task: TaskDetail) -> dict[str, str]:
         strategy_dict = strategy_raw
     else:
         return {}
-    per_column: dict[str, Any] = strategy_dict.get("per_column", {})
+    per_column = strategy_dict.get("per_column") or {}
+    return per_column if isinstance(per_column, dict) else {}
+
+
+def _extract_null_strategy_per_column(task: TaskDetail) -> dict[str, str]:
+    """Extract the per-column null strategy mapping from the planner task."""
     return {
         col: (cfg.get("strategy", "") if isinstance(cfg, dict) else "")
-        for col, cfg in per_column.items()
+        for col, cfg in _null_strategy_configs(task).items()
     }
 
 
 def _null_column_config(task: TaskDetail, column: str) -> dict[str, Any]:
-    if task.task_id != "null_handling" or not task.strategy:
-        return {}
-    strategy_raw = task.strategy
-    if hasattr(strategy_raw, "model_dump"):
-        strategy_dict = strategy_raw.model_dump()
-    elif isinstance(strategy_raw, dict):
-        strategy_dict = strategy_raw
-    else:
-        return {}
-    config = (strategy_dict.get("per_column") or {}).get(column) or {}
+    config = _null_strategy_configs(task).get(column) or {}
     return config if isinstance(config, dict) else {}
+
+
+def get_approved_dmv_sentinels(task: TaskDetail | None) -> dict[str, Any]:
+    """Return exact per-column DMV sentinels approved in the current plan."""
+    approved: dict[str, Any] = {}
+    for column, config in _null_strategy_configs(task).items():
+        if not isinstance(config, dict):
+            continue
+        override = (config.get("validation_overrides") or {}).get("potential_dmv", {})
+        value = override.get("acknowledged_value")
+        if (
+            config.get("strategy") == "fill_value"
+            and value is not None
+            and override.get("allow_fill_value_as_sentinel") is True
+            and override.get("acknowledged_by_user") is True
+            and value == config.get("fill_value")
+        ):
+            approved[column] = value
+    return approved
 
 
 def validate_dataframe(
@@ -75,6 +84,7 @@ def validate_dataframe(
 
     # Read the per-column null strategy from the planner so checks are strategy-aware.
     null_strategy_per_column = _extract_null_strategy_per_column(task)
+    approved_dmv_sentinels = get_approved_dmv_sentinels(task)
 
     # Check rule: duplicate_rows_eq_0 (from success metrics)
     if verification.success_metrics and verification.success_metrics.get("duplicate_rows") == 0:
@@ -156,17 +166,8 @@ def validate_dataframe(
             if semantic.potential_dmv:
                 # Check for values in potential_dmv
                 mask = dataframe[column_name].isin(semantic.potential_dmv)
-                col_cfg = _null_column_config(task, column_name)
-                dmv_override = (col_cfg.get("validation_overrides") or {}).get(
-                    "potential_dmv", {}
-                )
-                acknowledged_value = dmv_override.get("acknowledged_value")
-                if (
-                    dmv_override.get("allow_fill_value_as_sentinel") is True
-                    and dmv_override.get("acknowledged_by_user") is True
-                    and acknowledged_value == col_cfg.get("fill_value")
-                ):
-                    mask &= dataframe[column_name] != acknowledged_value
+                if column_name in approved_dmv_sentinels:
+                    mask &= dataframe[column_name] != approved_dmv_sentinels[column_name]
                 if mask.any():
                     errors.append(
                         PandasValidationError(

@@ -11,7 +11,10 @@ from app.core.llm_factory import create_llm
 from app.graphs.states.global_state import GlobalState
 from app.graphs.utils import _resolve_active_task
 from app.tools.data.quality_control.tool import perform_data_quality_check
-from app.tools.data.quality_control.validator import run_pandas_validation
+from app.tools.data.quality_control.validator import (
+    get_approved_dmv_sentinels,
+    run_pandas_validation,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +57,10 @@ class ValidatorAgent(BaseAgent):
             task=active_task,
             semantic_profile=state.get("semantic_profile")
         )
+        approved_dmv_sentinels = {
+            column: [str(value)]
+            for column, value in get_approved_dmv_sentinels(active_task).items()
+        }
 
         human_content = (
             f"--- USER PROMPT ---\n{user_prompt}\n\n"
@@ -81,8 +88,10 @@ class ValidatorAgent(BaseAgent):
                 for tool_call in ai_msg.tool_calls:
                     if tool_call["name"] == "perform_data_quality_check":
                         logger.info(f"ValidatorAgent: LLM called tool: {tool_call['name']}")
-                        # Execute the tool
-                        tool_result = perform_data_quality_check.invoke(tool_call["args"])
+                        # Only the server-side plan can grant DMV exemptions.
+                        tool_args = dict(tool_call["args"])
+                        tool_args["allowed_disguised_values"] = approved_dmv_sentinels
+                        tool_result = perform_data_quality_check.invoke(tool_args)
                         messages.append(ToolMessage(content=str(tool_result), tool_call_id=tool_call["id"]))
             else:
                 logger.warning("ValidatorAgent: LLM did not call the QC tool! Proceeding anyway...")

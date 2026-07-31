@@ -216,3 +216,71 @@ export function tryFormatToISO(input: string, expectedType: string): string {
   
   return input;
 }
+
+export function renderHighlightedText(
+  text: string,
+  specificColName?: string,
+  allColumns: string[] = []
+): React.ReactNode {
+  if (!text || typeof text !== "string") return text;
+
+  const candidateSet = new Set<string>();
+  if (specificColName && specificColName.trim()) {
+    candidateSet.add(specificColName.trim());
+  }
+  allColumns.forEach((col) => {
+    if (col && typeof col === "string" && col.trim().length > 1) {
+      candidateSet.add(col.trim());
+    }
+  });
+
+  if (candidateSet.size === 0) {
+    return text;
+  }
+
+  const sortedCandidates = Array.from(candidateSet).sort(
+    (a, b) => b.length - a.length
+  );
+
+  const escapedCandidates = sortedCandidates.map((c) =>
+    c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  );
+
+  const pattern = new RegExp(
+    `(\\b(?:${escapedCandidates.join("|")})\\b)`,
+    "gi"
+  );
+
+  const parts = text.split(pattern);
+
+  return React.createElement(
+    React.Fragment,
+    null,
+    parts.map((part, index) => {
+      const isMatch = sortedCandidates.some(
+        (c) => c.toLowerCase() === part.toLowerCase()
+      );
+      if (isMatch) {
+        return React.createElement(
+          "span",
+          {
+            key: index,
+            className:
+              "inline-flex items-baseline gap-1 mx-0.5 px-1.5 py-0.5 rounded font-mono font-bold text-[0.92em] bg-indigo-50/90 text-indigo-900 border border-indigo-200/80 shadow-2xs group relative cursor-help align-baseline",
+            title: "Dataset column",
+          },
+          React.createElement("span", null, part),
+          React.createElement(
+            "span",
+            {
+              className:
+                "text-[9px] font-sans font-extrabold uppercase tracking-wider text-indigo-700 bg-indigo-100/80 px-1 py-0.2 rounded border border-indigo-300/60 align-middle",
+            },
+            "column"
+          )
+        );
+      }
+      return part;
+    })
+  );
+}
