@@ -1,0 +1,78 @@
+services:
+  # 1. Backend Web Service (FastAPI running in Docker)
+  - type: web
+    name: agentic-data-cleaner-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /api/v1/health
+    envVars:
+      # Database connection automatically set from Render Postgres
+      - key: POSTGRES_URL
+        fromDatabase:
+          name: agentic-postgres
+          property: connectionString
+
+      # Redis connection automatically set from Render Redis
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: agentic-redis
+          property: connectionString
+
+      # Server Settings
+      - key: API_HOST
+        value: "0.0.0.0"
+      - key: API_PORT
+        value: "8000"
+      - key: CORS_ORIGINS
+        value: '["*"]'
+
+      # Storage Paths
+      - key: UPLOAD_DIR
+        value: "/app/data/uploads"
+      - key: OUTPUT_DIR
+        value: "/app/data/outputs"
+
+      # LLM & Pipeline Settings
+      - key: DEFAULT_LLM_PROVIDER
+        value: "openai"
+      - key: DEFAULT_LLM_MODEL
+        value: "gpt-4o"
+      - key: MAX_CONCURRENT_PIPELINES
+        value: "10"
+      - key: WORKER_CONCURRENCY
+        value: "4"
+
+      # Secrets (Must be entered in Render Dashboard Environment UI)
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_BASE_URL
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: LANGCHAIN_TRACING_V2
+        value: "false"
+      - key: LANGCHAIN_API_KEY
+        sync: false
+      - key: LANGCHAIN_PROJECT
+        value: "agentic_data_cleaner"
+
+    # Disk persistence for uploaded & cleaned files
+    disk:
+      name: agentic-data-storage
+      mountPath: /app/data
+      sizeGB: 1
+
+  # 2. Redis Service
+  - type: redis
+    name: agentic-redis
+    plan: free
+    ipAllowList: []
+
+# 3. PostgreSQL Database Service
+databases:
+  - name: agentic-postgres
+    databaseName: agentic_data_cleaner_db
+    user: user
+    plan: free
