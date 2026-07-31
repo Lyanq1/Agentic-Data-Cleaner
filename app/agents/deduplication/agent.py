@@ -141,6 +141,35 @@ class DeduplicationAgent(BaseAgent):
             )
             notes.extend(fuzzy_candidates.notes)
 
+            dropped_fuzzy_indices = set()
+            for cand in fuzzy_candidates.candidates:
+                if cand.resolution != "supported": 
+                    continue
+                if cand.row_index_a in dropped_fuzzy_indices or cand.row_index_b in dropped_fuzzy_indices:
+                    continue
+                row_a = execution["deduped_df"].loc[cand.row_index_a]
+                row_b = execution["deduped_df"].loc[cand.row_index_b]
+                nulls_a = row_a.isna().sum()
+                nulls_b = row_b.isna().sum()
+                
+                if execution["keep_strategy"] == "keep_first":
+                    dropped_fuzzy_indices.add(max(cand.row_index_a, cand.row_index_b))
+                elif execution["keep_strategy"] == "keep_last":
+                    dropped_fuzzy_indices.add(min(cand.row_index_a, cand.row_index_b))
+                else: 
+                    if nulls_b > nulls_a:
+                        dropped_fuzzy_indices.add(cand.row_index_b)
+                    elif nulls_a > nulls_b:
+                        dropped_fuzzy_indices.add(cand.row_index_a)
+                    else:
+                        dropped_fuzzy_indices.add(max(cand.row_index_a, cand.row_index_b))
+            
+            if dropped_fuzzy_indices:
+                execution["deduped_df"] = execution["deduped_df"].drop(index=list(dropped_fuzzy_indices))
+                notes.append(f"Auto-merged {len(dropped_fuzzy_indices)} fuzzy duplicate rows.")
+                execution["after_row_count"] = len(execution["deduped_df"])
+                execution["dropped_row_count"] += len(dropped_fuzzy_indices)
+
         failed_rules = self._validate_output(
             execution["deduped_df"],
             execution["before_row_count"],
@@ -934,6 +963,13 @@ class DeduplicationAgent(BaseAgent):
             explicit_semantics=column_semantics,
             semantic_profile=dedup_input.semantic_profile,
         )
+        if (
+            dedup_input.planner_task 
+            and dedup_input.planner_task.strategy 
+            and column_name in (dedup_input.planner_task.strategy.identifier_columns or [])
+        ):
+            return True
+
         if descriptor_is_hard_identifier(descriptor):
             return True
         profile = dedup_input.semantic_profile.columns.get(column_name) if dedup_input.semantic_profile else None

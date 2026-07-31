@@ -327,6 +327,7 @@ export const pipelineApi = {
         identifier_columns?: string[];
         ignored_columns?: string[];
         keep_rule?: string;
+        fuzzy_enabled?: boolean;
       };
     },
   ): Promise<{ message: string }> => {

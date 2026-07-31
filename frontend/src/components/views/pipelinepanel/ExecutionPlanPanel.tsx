@@ -217,6 +217,7 @@ export const ExecutionPlanPanel: React.FC<{
       identifier_columns?: string[];
       ignored_columns?: string[];
       keep_rule?: string;
+      fuzzy_enabled?: boolean;
     }
   ) => void;
   isApproving: boolean;
@@ -248,6 +249,7 @@ export const ExecutionPlanPanel: React.FC<{
   const [dedupIdentifierColumns, setDedupIdentifierColumns] = React.useState<string[]>([]);
   const [dedupIgnoredColumns, setDedupIgnoredColumns] = React.useState<string[]>([]);
   const [dedupKeepRule, setDedupKeepRule] = React.useState<string>("keep_most_complete");
+  const [dedupFuzzyEnabled, setDedupFuzzyEnabled] = React.useState<boolean>(false);
 
   const availableColumns = pipelineState?.dataset_schema 
     ? Object.keys(pipelineState.dataset_schema) 
@@ -274,6 +276,7 @@ export const ExecutionPlanPanel: React.FC<{
       setDedupIdentifierColumns(dedupTask.strategy.identifier_columns || []);
       setDedupIgnoredColumns(dedupTask.strategy.ignored_columns || []);
       setDedupKeepRule(dedupTask.strategy.keep_rule || "keep_most_complete");
+      setDedupFuzzyEnabled(!!dedupTask.strategy.fuzzy_matching?.enabled);
     }
   }, [executionPlan.metadata?.plan_id]);
 
@@ -529,6 +532,23 @@ export const ExecutionPlanPanel: React.FC<{
                       onChange={(e) => setDedupKeepRule(e.target.value)}
                     />
                     Keep Last
+                  </label>
+                </div>
+              </div>
+
+              <div className="rounded-lg border bg-white p-3">
+                <span className="block text-xs font-semibold text-slate-800">Fuzzy Matching</span>
+                <span className="mt-1 block text-[11px] leading-relaxed text-slate-500">
+                  Enable fuzzy candidate generation for the active key columns to surface near-matches (e.g. typos).
+                </span>
+                <div className="mt-2 flex gap-4">
+                  <label className="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      checked={dedupFuzzyEnabled}
+                      onChange={(e) => setDedupFuzzyEnabled(e.target.checked)}
+                    />
+                    Enable Fuzzy Matching
                   </label>
                 </div>
               </div>
@@ -889,6 +909,7 @@ export const ExecutionPlanPanel: React.FC<{
                   identifier_columns: dedupIdentifierColumns,
                   ignored_columns: dedupIgnoredColumns,
                   keep_rule: dedupKeepRule,
+                  fuzzy_enabled: dedupFuzzyEnabled,
                 } : undefined;
                 onApprove(nullReview, dedupReview);
               }}
