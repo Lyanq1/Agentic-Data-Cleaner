@@ -26,7 +26,7 @@ If the user's instruction (or conversation history) has ALREADY clearly and expl
 For each active issue (that is not already explicitly resolved by the user's instruction), generate questions as follows:
 
 **NULL (if active and not explicitly resolved) — clarifications structured as follows:**
-  Q1_allow_missing_column_<column_name> (generate individually ONLY for columns where the nullable status is ambiguous, borderline, or not clearly determined by the semantic/statistical profile):
+  Q1_allow_missing_column_<column_name> (MUST generate individually for EVERY column where `null_count > 0` in the Statistical Profile; do not skip columns whose nullable status appears obvious from the semantic profile):
       - Ask the user directly whether this specific column should be allowed to contain null values.
       - Do NOT include an "options" field for this question, so the frontend automatically displays it as a Yes/No option.
       - The answer field will contain "Yes" or "No".

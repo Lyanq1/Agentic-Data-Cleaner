@@ -750,7 +750,9 @@ def _apply_null_review_override(
                         detail=f"Invalid expected string pattern for column '{column}': {exc}",
                     ) from exc
             potential_dmv = metadata.get("potential_dmv") or []
-            dmv_mismatch = selected_fill_value in potential_dmv
+            dmv_mismatch = str(selected_fill_value).strip().casefold() in {
+                str(value).strip().casefold() for value in potential_dmv
+            }
             if pattern_mismatch and not allow_pattern_mismatch:
                 raise HTTPException(
                     status_code=400,

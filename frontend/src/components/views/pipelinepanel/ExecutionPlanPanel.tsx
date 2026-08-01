@@ -258,12 +258,18 @@ export const ExecutionPlanPanel: React.FC<{
       const column = String(field.field_key).replace(/^strategy\./, "");
       const config = nullTask?.strategy?.per_column?.[column] || {};
       const overrides = config.validation_overrides || {};
+      const autoApprovePreset = ["n/a", "unknown"].includes(
+        String(config.fill_value ?? "").trim().toLowerCase(),
+      );
       return [column, {
         strategy: String(field.value),
         fill_value: config.fill_value ?? "",
         allow_pattern_mismatch:
-          overrides.expected_str_pattern?.acknowledged_by_user === true,
-        allow_dmv_sentinel: overrides.potential_dmv?.acknowledged_by_user === true,
+          overrides.expected_str_pattern?.acknowledged_by_user === true ||
+          (autoApprovePreset && field.metadata?.pattern_mismatch === true),
+        allow_dmv_sentinel:
+          overrides.potential_dmv?.acknowledged_by_user === true ||
+          (autoApprovePreset && field.metadata?.dmv_mismatch === true),
       }];
     }));
     setNullStrategies(initial);
@@ -298,7 +304,8 @@ export const ExecutionPlanPanel: React.FC<{
       }
     }
     const dmvMismatch = (field.metadata?.potential_dmv || []).some(
-      (candidate: unknown) => String(candidate) === String(selection.fill_value),
+      (candidate: unknown) =>
+        String(candidate).trim().toLowerCase() === value.toLowerCase(),
     );
     return { patternMismatch, dmvMismatch };
   };

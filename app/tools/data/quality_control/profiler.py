@@ -18,7 +18,7 @@ class QualityProfiler:
         self.null_threshold = null_threshold
         self.string_pattern_threshold = string_pattern_threshold
         self.allowed_disguised_values = {
-            column: {str(value).strip() for value in values}
+            column: {str(value).strip().casefold() for value in values}
             for column, values in (allowed_disguised_values or {}).items()
         }
 
@@ -147,8 +147,8 @@ class QualityProfiler:
         if not is_numeric:
             disguised_null_rules = ["n/a", "null", "unknown", "-", "none", "0", ""]
             raw_str_series = series.dropna().astype(str).str.strip()
-            str_series = raw_str_series.str.lower()
-            allowed_mask = raw_str_series.isin(
+            str_series = raw_str_series.str.casefold()
+            allowed_mask = str_series.isin(
                 self.allowed_disguised_values.get(str(col), set())
             )
             for rule in disguised_null_rules:

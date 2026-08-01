@@ -343,7 +343,13 @@ class PlannerAgent(BaseAgent):
                     pattern_mismatch = re.match(str(expected_pattern), str(fill_value).strip()) is None
                 except re.error:
                     pattern_mismatch = False
-            dmv_mismatch = current == "fill_value" and fill_value in potential_dmv
+            normalized_fill_value = str(fill_value).strip().casefold()
+            dmv_mismatch = (
+                current == "fill_value"
+                and fill_value is not None
+                and normalized_fill_value
+                in {str(value).strip().casefold() for value in potential_dmv}
+            )
             strategy_conflict = current not in compatible
             if not strategy_conflict and not pattern_mismatch and not dmv_mismatch:
                 continue

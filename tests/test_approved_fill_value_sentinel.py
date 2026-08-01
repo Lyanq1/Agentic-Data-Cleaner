@@ -131,3 +131,39 @@ def test_fill_value_requires_both_dmv_and_pattern_approvals() -> None:
     )
     assert remaining_dmv_report["passed"] is False
     assert remaining_dmv_report["columns"][0]["disguised_nulls"] == {"unknown": 1}
+
+
+def test_approved_sentinel_matches_case_insensitively() -> None:
+    dataframe = pd.DataFrame({"Sample": ["33 patients", "Unknown"]})
+    semantic_profile = SemanticProfile(
+        table_summary="Hospital measures",
+        columns={
+            "Sample": ColumnSemanticProfileDetail(
+                description="Number of patients in the measure sample",
+                logical_group="Measure",
+                allow_missing=False,
+                expected_type="str",
+                potential_dmv=["UNKNOWN"],
+                semantic_data_type="Structured text",
+                fill_strategies=["fill_value"],
+                is_error=True,
+            )
+        },
+    )
+    override = {
+        "potential_dmv": {
+            "allow_fill_value_as_sentinel": True,
+            "acknowledged_value": "unknown",
+            "acknowledged_by_user": True,
+        }
+    }
+    task = _task(override, fill_value="unknown")
+
+    validate_dataframe(dataframe, task, semantic_profile)
+    quality_report = json.loads(
+        perform_data_quality_check_df(
+            dataframe,
+            allowed_disguised_values={"Sample": ["unknown"]},
+        )
+    )
+    assert quality_report["passed"] is True

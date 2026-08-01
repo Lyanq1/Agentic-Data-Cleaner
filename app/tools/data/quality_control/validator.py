@@ -165,9 +165,18 @@ def validate_dataframe(
                 
             if semantic.potential_dmv:
                 # Check for values in potential_dmv
-                mask = dataframe[column_name].isin(semantic.potential_dmv)
+                normalized_values = (
+                    dataframe[column_name].astype("string").str.strip().str.casefold()
+                )
+                potential_dmv = {
+                    str(value).strip().casefold() for value in semantic.potential_dmv
+                }
+                mask = normalized_values.isin(potential_dmv)
                 if column_name in approved_dmv_sentinels:
-                    mask &= dataframe[column_name] != approved_dmv_sentinels[column_name]
+                    approved_value = (
+                        str(approved_dmv_sentinels[column_name]).strip().casefold()
+                    )
+                    mask &= normalized_values != approved_value
                 if mask.any():
                     errors.append(
                         PandasValidationError(
