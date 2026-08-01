@@ -207,6 +207,7 @@ def _resolve_candidate(
     row_a: pd.Series,
     row_b: pd.Series,
     evidence_specs: list[EvidenceSpec],
+    target_column: str,
 ) -> tuple[list[str], list[str], str]:
     matching_spec = next(
         (
@@ -222,7 +223,7 @@ def _resolve_candidate(
     support_matches: list[str] = []
     reject_conflicts: list[str] = []
     for column in matching_spec.support_columns:
-        if column not in row_a.index or column not in row_b.index:
+        if column == target_column or column not in row_a.index or column not in row_b.index:
             continue
         left = _normalize_for_transform(row_a[column], transform="exact_normalized")
         right = _normalize_for_transform(row_b[column], transform="exact_normalized")
@@ -230,16 +231,29 @@ def _resolve_candidate(
             support_matches.append(column)
 
     for column in matching_spec.reject_columns:
-        if column not in row_a.index or column not in row_b.index:
+        if column == target_column or column not in row_a.index or column not in row_b.index:
             continue
         left = _normalize_for_transform(row_a[column], transform="exact_normalized")
         right = _normalize_for_transform(row_b[column], transform="exact_normalized")
         if left and right and left != right:
+            # Tolerant typo-check: if they are strings and structurally similar, forgive the conflict
+            # BUT never forgive if it's an explicitly named ID column or very short
+            col_lower = column.lower()
+            if isinstance(left, str) and isinstance(right, str) and len(left) >= 6 and len(right) >= 6:
+                if "id" not in col_lower and "number" not in col_lower and "code" not in col_lower:
+                    # Use difflib for resilient character-level sequence matching, which survives
+                    # heavy synthetic corruption (like replacing all vowels with 'x') much better than n-grams
+                    import difflib
+                    sim = difflib.SequenceMatcher(None, left, right).ratio()
+                    if sim >= 0.78:
+                        continue  # Tolerate as a typo
             reject_conflicts.append(column)
 
     if reject_conflicts and matching_spec.hard_reject_on_conflict:
         return support_matches, reject_conflicts, "rejected"
     if len(support_matches) >= matching_spec.minimum_support_matches:
+        if reject_conflicts:
+            return support_matches, reject_conflicts, "review"
         return support_matches, reject_conflicts, "supported"
     return support_matches, reject_conflicts, "review"
 
@@ -276,10 +290,21 @@ def run_fuzzy_blocking(
     df: pd.DataFrame,
     *,
     plan: FuzzyExecutionPlan,
-    key_columns: list[str] | None = None,
+    key_columns: list[str] | None = None,  # noqa: ARG001 – kept for API compatibility; intentionally not used to exclude target columns
     config: FuzzyBlockingConfig | None = None,
 ) -> FuzzyCandidateSet:
-    """Generate fuzzy duplicate candidates from a validated execution plan."""
+    """Generate fuzzy duplicate candidates from a validated execution plan.
+
+    Design note on ``key_columns``:
+        This parameter is intentionally **not** used to skip target columns.
+        Previously, any column listed in ``key_columns`` was excluded from fuzzy
+        scanning on the assumption that exact-key dedup already handled it.
+        That assumption is wrong: rows with *typos* in a key column will survive
+        the exact-key phase (their keys differ slightly), so the fuzzy engine
+        must be allowed to scan those same columns to catch the near-matches.
+        The ``key_columns`` argument is preserved in the signature for backward
+        compatibility only.
+    """
 
     config = config or FuzzyBlockingConfig()
     if not plan.enabled or not plan.blocking_specs:
@@ -287,15 +312,17 @@ def run_fuzzy_blocking(
 
     candidates: list[FuzzyCandidate] = []
     oversized_buckets: list[str] = []
+    import sys
+    print("FUZZY_DEBUG: Inside run_fuzzy_blocking, plan.enabled =", plan.enabled, file=sys.stderr)
+
     notes: list[str] = list(plan.notes)
     supported_count = 0
     review_count = 0
     rejected_count = 0
-    excluded_targets = set(key_columns or [])
 
     for spec in plan.blocking_specs:
         for target_column in spec.target_columns:
-            if target_column not in df.columns or target_column in excluded_targets:
+            if target_column not in df.columns:
                 continue
             bucket_rows = _iter_bucket_rows(df, spec, target_column)
             for bucket_key, row_indices in bucket_rows.items():
@@ -348,6 +375,7 @@ def run_fuzzy_blocking(
                                 df.loc[left_idx],
                                 df.loc[right_idx],
                                 plan.evidence_specs,
+                                target_column=target_column,
                             )
                             if resolution == "supported":
                                 supported_count += 1

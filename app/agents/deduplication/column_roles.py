@@ -84,8 +84,6 @@ def descriptor_is_hard_identifier(descriptor: ColumnSemanticDescriptor | None) -
     return any(
         marker in evidence
         for marker in [
-            "phone",
-            "email",
             "registration identifier",
             "license identifier",
             "tax identifier",
