@@ -120,6 +120,19 @@ export const ERROR_TYPE_LABELS: Record<string, string> = {
   format: "Format issues",
 };
 
+export const VALIDATION_RULE_LABELS: Record<string, string> = {
+  dataframe_no_exact_duplicates: "No exact duplicate rows",
+  no_duplicate_rows: "No exact duplicate rows",
+  column_unique: "Must be unique",
+  is_unique: "Must be unique",
+  no_unresolved_duplicate_groups: "No unresolved duplicate groups",
+  null_rate_lt: "Null rate < threshold",
+  null_rate_lte: "Max null rate",
+  no_disguised_missing_values: "No disguised missing values",
+  expected_str_pattern: "Matches string pattern",
+  duplicate_rows_eq_0: "Duplicate rows must be 0",
+};
+
 export const SEVERITY_STYLES: Record<string, string> = {
   error: "bg-red-100 text-red-700 border-red-200",
   warning: "bg-amber-100 text-amber-700 border-amber-200",

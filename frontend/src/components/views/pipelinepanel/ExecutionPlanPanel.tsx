@@ -1,6 +1,6 @@
 import React from "react";
 import { SpinnerIcon } from "./SpinnerIcon";
-import { formatDisplayValue } from "./utils";
+import { formatDisplayValue, VALIDATION_RULE_LABELS } from "./utils";
 
 
 const WORKER_FLOW = [
@@ -686,19 +686,22 @@ export const ExecutionPlanPanel: React.FC<{
                         </div>
                       )}
 
-                      {task.verification?.pandera_checks?.length > 0 && (
+                      {task.verification?.checks?.length > 0 && (
                         <div>
                           <span className="font-semibold text-foreground block mb-1">
                             Validation rules:
                           </span>
                           <div className="flex flex-wrap gap-1.5">
-                            {task.verification.pandera_checks.map(
+                            {task.verification.checks.map(
                               (rule: any, ri: number) => {
+                                const rawType = typeof rule === "object" && rule !== null ? rule.type : rule;
+                                const displayType = VALIDATION_RULE_LABELS[rawType] || formatDisplayValue(rawType);
+                                
                                 const label = typeof rule === "object" && rule !== null
                                   ? (rule.column
-                                      ? `${formatDisplayValue(rule.column)} (${formatDisplayValue(rule.type)})`
-                                      : formatDisplayValue(rule.type, formatDisplayValue(rule)))
-                                  : String(rule);
+                                      ? `${formatDisplayValue(rule.column)} (${displayType})`
+                                      : displayType)
+                                  : displayType;
                                 return (
                                   <span
                                     key={ri}
