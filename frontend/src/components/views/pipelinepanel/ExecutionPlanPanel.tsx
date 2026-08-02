@@ -437,64 +437,107 @@ export const ExecutionPlanPanel: React.FC<{
                   Columns that uniquely identify a record. Exact matches on these columns are considered duplicates.
                 </span>
                 <div className="mt-2 flex flex-wrap gap-2">
-                  {availableColumns.map((col) => (
-                    <label key={col} className="flex items-center gap-1 text-xs text-slate-700 bg-slate-50 border border-slate-200 px-2 py-1 rounded cursor-pointer hover:bg-slate-100">
-                      <input 
-                        type="checkbox" 
-                        checked={dedupKeyColumns.includes(col)}
-                        onChange={(e) => {
-                          if (e.target.checked) setDedupKeyColumns(prev => [...prev, col]);
-                          else setDedupKeyColumns(prev => prev.filter(c => c !== col));
-                        }}
-                      />
-                      <span>{col}</span>
-                    </label>
-                  ))}
+                  {availableColumns.map((col) => {
+                    const isDisabled = dedupIgnoredColumns.includes(col);
+                    return (
+                      <label key={col} className={`flex items-center gap-1 text-xs border border-slate-200 px-2 py-1 rounded ${isDisabled ? 'opacity-50 cursor-not-allowed bg-slate-100 text-slate-500' : 'text-slate-700 bg-slate-50 cursor-pointer hover:bg-slate-100'}`}>
+                        <input 
+                          type="checkbox" 
+                          disabled={isDisabled}
+                          checked={dedupKeyColumns.includes(col)}
+                          onChange={(e) => {
+                            if (e.target.checked) setDedupKeyColumns(prev => [...prev, col]);
+                            else setDedupKeyColumns(prev => prev.filter(c => c !== col));
+                          }}
+                        />
+                        <span>{col}</span>
+                      </label>
+                    );
+                  })}
                 </div>
               </div>
 
-              <div className="rounded-lg border bg-white p-3">
-                <span className="block text-xs font-semibold text-slate-800">Identifier Columns</span>
-                <span className="mt-1 block text-[11px] leading-relaxed text-slate-500">
-                  Additional unique identifiers (e.g. emails, phone numbers) used for fuzzy block matching and cross-referencing.
-                </span>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {availableColumns.map((col) => (
-                    <label key={col} className="flex items-center gap-1 text-xs text-slate-700 bg-slate-50 border border-slate-200 px-2 py-1 rounded cursor-pointer hover:bg-slate-100">
-                      <input 
-                        type="checkbox" 
-                        checked={dedupIdentifierColumns.includes(col)}
-                        onChange={(e) => {
-                          if (e.target.checked) setDedupIdentifierColumns(prev => [...prev, col]);
-                          else setDedupIdentifierColumns(prev => prev.filter(c => c !== col));
-                        }}
-                      />
-                      <span>{col}</span>
-                    </label>
-                  ))}
+              <div className={`overflow-hidden rounded-lg border transition-all duration-300 ${dedupFuzzyEnabled ? 'border-violet-300 shadow-sm ring-1 ring-violet-50' : 'border-slate-200 bg-white'}`}>
+                <div className={`p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-colors hover:bg-slate-50 ${dedupFuzzyEnabled ? 'bg-violet-50/50 border-b border-violet-100' : ''}`}>
+                  <div>
+                    <span className="block text-xs font-semibold text-slate-800">Fuzzy Matching</span>
+                    <span className="mt-1 block text-[11px] leading-relaxed text-slate-500">
+                      Enable fuzzy candidate generation to surface near-matches (e.g. typos).
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={dedupFuzzyEnabled}
+                    className={`${
+                      dedupFuzzyEnabled ? 'bg-violet-600' : 'bg-slate-200'
+                    } relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-violet-600 focus:ring-offset-2`}
+                    onClick={() => setDedupFuzzyEnabled(!dedupFuzzyEnabled)}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={`${
+                        dedupFuzzyEnabled ? 'translate-x-4' : 'translate-x-0'
+                      } pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out`}
+                    />
+                  </button>
                 </div>
-              </div>
 
-              <div className="rounded-lg border bg-white p-3">
-                <span className="block text-xs font-semibold text-slate-800">Ignored Columns</span>
-                <span className="mt-1 block text-[11px] leading-relaxed text-slate-500">
-                  Columns to ignore when comparing rows for exact equality (e.g. timestamps, auto-generated IDs).
-                </span>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {availableColumns.map((col) => (
-                    <label key={col} className="flex items-center gap-1 text-xs text-slate-700 bg-slate-50 border border-slate-200 px-2 py-1 rounded cursor-pointer hover:bg-slate-100">
-                      <input 
-                        type="checkbox" 
-                        checked={dedupIgnoredColumns.includes(col)}
-                        onChange={(e) => {
-                          if (e.target.checked) setDedupIgnoredColumns(prev => [...prev, col]);
-                          else setDedupIgnoredColumns(prev => prev.filter(c => c !== col));
-                        }}
-                      />
-                      <span>{col}</span>
-                    </label>
-                  ))}
-                </div>
+                {dedupFuzzyEnabled && (
+                  <div className="bg-slate-50/50 p-4 space-y-4 animate-in fade-in slide-in-from-top-1 duration-300">
+                    <div className="rounded-md border border-slate-200/60 bg-white p-3 shadow-sm">
+                      <span className="block text-xs font-semibold text-slate-800">Identifier Columns</span>
+                      <span className="mt-1 block text-[11px] leading-relaxed text-slate-500">
+                        Additional unique identifiers (e.g. emails, phone numbers) used for fuzzy block matching and cross-referencing.
+                      </span>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {availableColumns.map((col) => {
+                          const isDisabled = dedupIgnoredColumns.includes(col);
+                          return (
+                            <label key={col} className={`flex items-center gap-1 text-xs border border-slate-200 px-2 py-1 rounded ${isDisabled ? 'opacity-50 cursor-not-allowed bg-slate-100 text-slate-500' : 'text-slate-700 bg-slate-50 cursor-pointer hover:bg-slate-100'}`}>
+                              <input 
+                                type="checkbox" 
+                                disabled={isDisabled}
+                                checked={dedupIdentifierColumns.includes(col)}
+                                onChange={(e) => {
+                                  if (e.target.checked) setDedupIdentifierColumns(prev => [...prev, col]);
+                                  else setDedupIdentifierColumns(prev => prev.filter(c => c !== col));
+                                }}
+                              />
+                              <span>{col}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div className="rounded-md border border-slate-200/60 bg-white p-3 shadow-sm">
+                      <span className="block text-xs font-semibold text-slate-800">Ignored Columns</span>
+                      <span className="mt-1 block text-[11px] leading-relaxed text-slate-500">
+                        Columns to ignore when comparing rows (e.g. timestamps, auto-generated IDs).
+                      </span>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {availableColumns.map((col) => {
+                          const isDisabled = dedupKeyColumns.includes(col) || dedupIdentifierColumns.includes(col);
+                          return (
+                            <label key={col} className={`flex items-center gap-1 text-xs border border-slate-200 px-2 py-1 rounded ${isDisabled ? 'opacity-50 cursor-not-allowed bg-slate-100 text-slate-500' : 'text-slate-700 bg-slate-50 cursor-pointer hover:bg-slate-100'}`}>
+                              <input 
+                                type="checkbox" 
+                                disabled={isDisabled}
+                                checked={dedupIgnoredColumns.includes(col)}
+                                onChange={(e) => {
+                                  if (e.target.checked) setDedupIgnoredColumns(prev => [...prev, col]);
+                                  else setDedupIgnoredColumns(prev => prev.filter(c => c !== col));
+                                }}
+                              />
+                              <span>{col}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="rounded-lg border bg-white p-3">
@@ -532,23 +575,6 @@ export const ExecutionPlanPanel: React.FC<{
                       onChange={(e) => setDedupKeepRule(e.target.value)}
                     />
                     Keep Last
-                  </label>
-                </div>
-              </div>
-
-              <div className="rounded-lg border bg-white p-3">
-                <span className="block text-xs font-semibold text-slate-800">Fuzzy Matching</span>
-                <span className="mt-1 block text-[11px] leading-relaxed text-slate-500">
-                  Enable fuzzy candidate generation for the active key columns to surface near-matches (e.g. typos).
-                </span>
-                <div className="mt-2 flex gap-4">
-                  <label className="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer">
-                    <input 
-                      type="checkbox" 
-                      checked={dedupFuzzyEnabled}
-                      onChange={(e) => setDedupFuzzyEnabled(e.target.checked)}
-                    />
-                    Enable Fuzzy Matching
                   </label>
                 </div>
               </div>

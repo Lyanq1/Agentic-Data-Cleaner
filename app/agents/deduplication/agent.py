@@ -319,10 +319,15 @@ class DeduplicationAgent(BaseAgent):
         strategy = self._to_dict(planner_task.strategy) or {}
         duplicate_types = strategy.get("duplicate_types") or []
         fuzzy_matching = strategy.get("fuzzy_matching") or {}
+        
+        fuzzy_enabled = fuzzy_matching.get("enabled")
+        if fuzzy_enabled is False:
+            return False
+            
         return (
             strategy.get("dedup_scope") == "entity_level"
             or "fuzzy_entity" in duplicate_types
-            or bool(fuzzy_matching)
+            or fuzzy_enabled is True
         )
 
     def _build_planner_owned_decision(

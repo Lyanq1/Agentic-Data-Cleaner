@@ -613,18 +613,19 @@ def _apply_dedup_review_override(
         if dedup_review.fuzzy_enabled is not None:
             strategy.setdefault("fuzzy_matching", {})
             strategy["fuzzy_matching"]["enabled"] = dedup_review.fuzzy_enabled
-            if dedup_review.fuzzy_enabled:
-                if "fuzzy_entity" not in strategy.setdefault("duplicate_types", []):
-                    strategy["duplicate_types"].append("fuzzy_entity")
-            else:
-                if "fuzzy_entity" in strategy.get("duplicate_types", []):
-                    strategy["duplicate_types"].remove("fuzzy_entity")
-
+            
         effective_keys = [
             column for column in strategy.get("primary_keys", []) if column not in set(strategy.get("ignored_columns", []))
         ]
         strategy["dedup_scope"] = "key_level" if effective_keys else "row_level"
-        strategy["duplicate_types"] = ["duplicate_key"] if effective_keys else ["exact_row"]
+        
+        base_types = ["duplicate_key"] if effective_keys else ["exact_row"]
+        if dedup_review.fuzzy_enabled is True:
+            base_types.append("fuzzy_entity")
+        elif dedup_review.fuzzy_enabled is None and "fuzzy_entity" in strategy.get("duplicate_types", []):
+            base_types.append("fuzzy_entity")
+        strategy["duplicate_types"] = base_types
+        
         strategy["exact_match"] = {"enabled": not bool(effective_keys)}
         strategy["key_based"] = {
             **(strategy.get("key_based") if isinstance(strategy.get("key_based"), dict) else {}),
