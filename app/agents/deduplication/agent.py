@@ -1416,16 +1416,26 @@ class DeduplicationAgent(BaseAgent):
         if not dedup_input.fuzzy_enabled:
             return None
 
+        strategy = {}
+        if dedup_input.planner_task and dedup_input.planner_task.strategy:
+            strategy = self._to_dict(dedup_input.planner_task.strategy) or {}
+        explicit_identifiers = set(self._dedupe_columns(strategy.get("identifier_columns") or []))
         ignored = set(ignore_columns or [])
         target_specs: list[BlockingSpec] = []
+        
         for column in df.columns:
             if column in ignored:
+                continue
+            if column in explicit_identifiers:
                 continue
             descriptor = infer_column_semantics(
                 column,
                 explicit_semantics=column_semantics,
                 semantic_profile=dedup_input.semantic_profile,
             )
+            if descriptor_is_hard_identifier(descriptor):
+                continue
+            
             family = resolve_name_family(descriptor)
             if family not in {"organization_name", "person_name", "address"}:
                 continue
