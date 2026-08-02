@@ -522,6 +522,7 @@ class ApproveDedupReview(BaseModel):
     identifier_columns: list[str] | None = None
     ignored_columns: list[str] | None = None
     keep_rule: str | None = None
+    fuzzy_enabled: bool | None = None
 
 
 class ApproveNullStrategySelection(BaseModel):
@@ -609,12 +610,22 @@ def _apply_dedup_review_override(
             strategy["ignored_columns"] = ignored_columns
         if keep_rule is not None:
             strategy["keep_rule"] = keep_rule
-
+        if dedup_review.fuzzy_enabled is not None:
+            strategy.setdefault("fuzzy_matching", {})
+            strategy["fuzzy_matching"]["enabled"] = dedup_review.fuzzy_enabled
+            
         effective_keys = [
             column for column in strategy.get("primary_keys", []) if column not in set(strategy.get("ignored_columns", []))
         ]
         strategy["dedup_scope"] = "key_level" if effective_keys else "row_level"
-        strategy["duplicate_types"] = ["duplicate_key"] if effective_keys else ["exact_row"]
+        
+        base_types = ["duplicate_key"] if effective_keys else ["exact_row"]
+        if dedup_review.fuzzy_enabled is True:
+            base_types.append("fuzzy_entity")
+        elif dedup_review.fuzzy_enabled is None and "fuzzy_entity" in strategy.get("duplicate_types", []):
+            base_types.append("fuzzy_entity")
+        strategy["duplicate_types"] = base_types
+        
         strategy["exact_match"] = {"enabled": not bool(effective_keys)}
         strategy["key_based"] = {
             **(strategy.get("key_based") if isinstance(strategy.get("key_based"), dict) else {}),
@@ -651,6 +662,8 @@ def _apply_dedup_review_override(
                     field.value = ignored_columns
                 elif field.field_key == "keep_rule" and keep_rule is not None:
                     field.value = keep_rule
+                elif field.field_key == "fuzzy_enabled" and dedup_review.fuzzy_enabled is not None:
+                    field.value = dedup_review.fuzzy_enabled
             break
         plan.review.warnings = [
             warning for warning in plan.review.warnings

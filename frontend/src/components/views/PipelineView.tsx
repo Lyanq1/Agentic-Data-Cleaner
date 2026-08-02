@@ -598,20 +598,28 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
   });
 
   const approvePlanMutation = useMutation({
-    mutationFn: (
+    mutationFn: (vars: {
       nullStrategies?: Record<string, {
         strategy: string;
         fill_value: unknown;
         allow_pattern_mismatch: boolean;
         allow_dmv_sentinel: boolean;
-      }>,
-    ) => {
+      }>;
+      dedupReview?: {
+        key_columns?: string[];
+        identifier_columns?: string[];
+        ignored_columns?: string[];
+        keep_rule?: string;
+      };
+    } = {}) => {
       setIsApprovingPlan(true);
+      const payload: Parameters<typeof pipelineApi.approvePlan>[1] = {};
+      if (vars.nullStrategies) payload.null_review = { strategies: vars.nullStrategies };
+      if (vars.dedupReview) payload.dedup_review = vars.dedupReview;
+
       return pipelineApi.approvePlan(
         runId,
-        nullStrategies
-          ? { null_review: { strategies: nullStrategies } }
-          : undefined,
+        Object.keys(payload).length > 0 ? payload : undefined
       );
     },
     onSuccess: async () => {
@@ -858,8 +866,8 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
                   executionPlan={state.execution_plan}
                   pipelineState={state}
                   runId={runId}
-                  onApprove={(nullStrategies) =>
-                    approvePlanMutation.mutate(nullStrategies)
+                  onApprove={(nullStrategies, dedupReview) =>
+                    approvePlanMutation.mutate({ nullStrategies, dedupReview })
                   }
                   isApproving={isApprovingPlan || approvePlanMutation.isPending}
                 />

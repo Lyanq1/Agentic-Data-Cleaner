@@ -130,6 +130,24 @@ class DeduplicationAgent(BaseAgent):
         elif used_planner_strategy:
             notes.append("Used the planner-approved dedup strategy as the primary execution input.")
 
+        # ── TRACE ─────────────────────────────────────────────────────────────
+        print("[DEDUP_TRACE] ── DECISION ──────────────────────────────────────────")
+        print(f"[DEDUP_TRACE] source       : {'reused_from_state' if reused_decision else 'planner_strategy' if used_planner_strategy else 'llm'}")
+        print(f"[DEDUP_TRACE] mode         : {validated_decision.mode}")
+        print(f"[DEDUP_TRACE] key_columns  : {validated_decision.key_columns}")
+        print(f"[DEDUP_TRACE] ignore_cols  : {validated_decision.ignore_columns}")
+        print(f"[DEDUP_TRACE] keep_rule    : {validated_decision.keep_rule}")
+        print(f"[DEDUP_TRACE] fuzzy_enabled: {dedup_input.fuzzy_enabled}")
+        _fplan = validated_decision.fuzzy_plan
+        print(f"[DEDUP_TRACE] fuzzy_plan   : {'ENABLED, specs=' + str(len(_fplan.blocking_specs)) if _fplan and _fplan.enabled else 'DISABLED or None'}")
+        if _fplan and _fplan.enabled:
+            for _s in _fplan.blocking_specs:
+                print(f"[DEDUP_TRACE]   blocking_spec: id={_s.spec_id}, cols={_s.target_columns}, threshold={_s.similarity_threshold}")
+            for _e in _fplan.evidence_specs:
+                print(f"[DEDUP_TRACE]   evidence_spec: support={_e.support_columns}, reject={_e.reject_columns}, hard_reject={_e.hard_reject_on_conflict}")
+        print(f"[DEDUP_TRACE] input rows   : {len(df)}")
+        # ──────────────────────────────────────────────────────────────────────
+
         execution = self._execute_validated_decision(df, validated_decision, dedup_input)
         notes.extend(execution["notes"])
         fuzzy_candidates = FuzzyCandidateSet()
@@ -140,6 +158,65 @@ class DeduplicationAgent(BaseAgent):
                 dedup_input,
             )
             notes.extend(fuzzy_candidates.notes)
+
+            # ── TRACE: STEP 3a – Fuzzy candidates ────────────────────────────
+            _by_res: dict[str, int] = {}
+            for _c in fuzzy_candidates.candidates:
+                _by_res[_c.resolution] = _by_res.get(_c.resolution, 0) + 1
+            print("[DEDUP_TRACE] ── STEP 3: fuzzy blocking ──────────────────────")
+            print(f"[DEDUP_TRACE]   total candidates: {len(fuzzy_candidates.candidates)}")
+            print(f"[DEDUP_TRACE]   by resolution   : {_by_res}")
+            if "ProviderNumber" in execution["deduped_df"].columns:
+                print(f"[DEDUP_TRACE]   10018 rows before fuzzy merge: {int((execution['deduped_df']['ProviderNumber'].astype(str) == '10018').sum())}")
+            # ──────────────────────────────────────────────────────────────────
+
+            dropped_fuzzy_indices = set()
+            for cand in fuzzy_candidates.candidates:
+                if cand.resolution != "supported":
+                    continue
+                if cand.row_index_a in dropped_fuzzy_indices or cand.row_index_b in dropped_fuzzy_indices:
+                    continue
+                row_a = execution["deduped_df"].loc[cand.row_index_a]
+                row_b = execution["deduped_df"].loc[cand.row_index_b]
+                nulls_a = row_a.isna().sum()
+                nulls_b = row_b.isna().sum()
+
+                if execution["keep_strategy"] == "keep_first":
+                    drop_idx = max(cand.row_index_a, cand.row_index_b)
+                elif execution["keep_strategy"] == "keep_last":
+                    drop_idx = min(cand.row_index_a, cand.row_index_b)
+                else:
+                    if nulls_b > nulls_a:
+                        drop_idx = cand.row_index_b
+                    elif nulls_a > nulls_b:
+                        drop_idx = cand.row_index_a
+                    else:
+                        drop_idx = max(cand.row_index_a, cand.row_index_b)
+
+                # Per-pair trace (only log if a watched provider is involved)
+                _pn_col = "ProviderNumber"
+                if _pn_col in execution["deduped_df"].columns:
+                    _pa = execution["deduped_df"].at[cand.row_index_a, _pn_col]
+                    _pb = execution["deduped_df"].at[cand.row_index_b, _pn_col]
+                    print(f"[DEDUP_TRACE]   drop pair ({cand.row_index_a}[{_pa}], {cand.row_index_b}[{_pb}]) score={cand.similarity_score:.2f} field={cand.field} → DROP idx={drop_idx}")
+
+                dropped_fuzzy_indices.add(drop_idx)
+
+            if dropped_fuzzy_indices:
+                execution["deduped_df"] = execution["deduped_df"].drop(index=list(dropped_fuzzy_indices))
+                notes.append(f"Auto-merged {len(dropped_fuzzy_indices)} fuzzy duplicate rows.")
+                execution["after_row_count"] = len(execution["deduped_df"])
+                execution["dropped_row_count"] += len(dropped_fuzzy_indices)
+
+            # ── TRACE: STEP 3b – After fuzzy merge ────────────────────────────
+            print("[DEDUP_TRACE] ── STEP 3 RESULT: after fuzzy merge ─────────────")
+            print(f"[DEDUP_TRACE]   dropped {len(dropped_fuzzy_indices)} rows, total now={len(execution['deduped_df'])}")
+            if "ProviderNumber" in execution["deduped_df"].columns:
+                _pn3 = execution["deduped_df"]["ProviderNumber"].astype(str)
+                print(f"[DEDUP_TRACE]   10018 rows after fuzzy merge: {int((_pn3 == '10018').sum())}")
+                _lost3 = set(execution["deduped_df"]["ProviderNumber"].dropna().unique())
+            # ──────────────────────────────────────────────────────────────────
+
 
         failed_rules = self._validate_output(
             execution["deduped_df"],
@@ -242,10 +319,15 @@ class DeduplicationAgent(BaseAgent):
         strategy = self._to_dict(planner_task.strategy) or {}
         duplicate_types = strategy.get("duplicate_types") or []
         fuzzy_matching = strategy.get("fuzzy_matching") or {}
+        
+        fuzzy_enabled = fuzzy_matching.get("enabled")
+        if fuzzy_enabled is False:
+            return False
+            
         return (
             strategy.get("dedup_scope") == "entity_level"
             or "fuzzy_entity" in duplicate_types
-            or bool(fuzzy_matching)
+            or fuzzy_enabled is True
         )
 
     def _build_planner_owned_decision(
@@ -667,6 +749,14 @@ class DeduplicationAgent(BaseAgent):
         deduped_df = full_row_result["deduped_df"]
         full_row_duplicate_count = int(full_row_result["full_row_duplicate_count"])
 
+        # ── TRACE: STEP 1 – Full-row dedup ────────────────────────────────────
+        print("[DEDUP_TRACE] ── STEP 1: full-row dedup ───────────────────────────")
+        print(f"[DEDUP_TRACE]   before={before_row_count}, removed={full_row_duplicate_count}, after={len(deduped_df)}")
+        if "ProviderNumber" in deduped_df.columns:
+            _pn = deduped_df["ProviderNumber"].astype(str)
+            print(f"[DEDUP_TRACE]   10018 rows after step 1: {int((_pn == '10018').sum())}")
+        # ──────────────────────────────────────────────────────────────────────
+
         applied_modes: list[str] = []
         notes: list[str] = [
             f"Decision source: {validated_decision.decision_source}.",
@@ -716,6 +806,23 @@ class DeduplicationAgent(BaseAgent):
                 ),
             )
             key_duplicate_count = key_execution.key_duplicate_count
+
+            # ── TRACE: STEP 2 – Exact-key dedup ───────────────────────────────
+            print("[DEDUP_TRACE] ── STEP 2: exact-key dedup ──────────────────────")
+            print(f"[DEDUP_TRACE]   key_cols={validated_decision.key_columns}")
+            print(f"[DEDUP_TRACE]   key_dupes_removed={key_duplicate_count}, after={len(key_execution.deduped_df)}")
+            if "ProviderNumber" in key_execution.deduped_df.columns:
+                _pn2 = key_execution.deduped_df["ProviderNumber"].astype(str)
+                print(f"[DEDUP_TRACE]   10018 rows after step 2: {int((_pn2 == '10018').sum())}")
+                # Show any provider that now has 0 rows (disappeared entirely)
+                if "ProviderNumber" in deduped_df.columns:
+                    _before_provs = set(deduped_df["ProviderNumber"].dropna().unique())
+                    _after_provs = set(key_execution.deduped_df["ProviderNumber"].dropna().unique())
+                    _lost = _before_provs - _after_provs
+                    if _lost:
+                        print(f"[DEDUP_TRACE]   WARN: providers entirely removed by key dedup: {sorted(_lost)}")
+            # ──────────────────────────────────────────────────────────────────
+
             if key_duplicate_count > 0:
                 deduped_df = key_execution.deduped_df
                 duplicate_group_count = key_execution.duplicate_group_count
@@ -822,7 +929,9 @@ class DeduplicationAgent(BaseAgent):
         dedup_input: DeduplicationAgentInput,
     ) -> FuzzyCandidateSet:
         if not validated_decision.fuzzy_plan or not validated_decision.fuzzy_plan.enabled:
+            print(f"FUZZY_DEBUG: Plan is disabled or None! Plan: {validated_decision.fuzzy_plan}")
             return FuzzyCandidateSet(notes=["Fuzzy planning was disabled for this dataset."])
+        print(f"FUZZY_DEBUG: Plan ENABLED, specs = {len(validated_decision.fuzzy_plan.blocking_specs)}")
         return run_fuzzy_blocking(
             df,
             plan=validated_decision.fuzzy_plan,
@@ -934,8 +1043,16 @@ class DeduplicationAgent(BaseAgent):
             explicit_semantics=column_semantics,
             semantic_profile=dedup_input.semantic_profile,
         )
+        if (
+            dedup_input.planner_task 
+            and dedup_input.planner_task.strategy 
+            and column_name in (dedup_input.planner_task.strategy.identifier_columns or [])
+        ):
+            return True
+
         if descriptor_is_hard_identifier(descriptor):
             return True
+            
         profile = dedup_input.semantic_profile.columns.get(column_name) if dedup_input.semantic_profile else None
         if profile:
             logical_group = profile.logical_group.casefold()
@@ -946,9 +1063,7 @@ class DeduplicationAgent(BaseAgent):
             semantic_evidence = " ".join([description, relationship_text, profile.expected_type_reason.casefold()])
             if "unique identifier" in semantic_evidence or "business identifier" in semantic_evidence:
                 return True
-        stat_column = self._get_statistical_column(dedup_input, column_name)
-        if stat_column and stat_column.unique_ratio >= 0.98 and stat_column.null_rate <= 0.05:
-            return not self._looks_like_technical_id(column_name, dedup_input)
+                
         return False
 
     def _looks_like_phone_identifier(
@@ -1301,16 +1416,26 @@ class DeduplicationAgent(BaseAgent):
         if not dedup_input.fuzzy_enabled:
             return None
 
+        strategy = {}
+        if dedup_input.planner_task and dedup_input.planner_task.strategy:
+            strategy = self._to_dict(dedup_input.planner_task.strategy) or {}
+        explicit_identifiers = set(self._dedupe_columns(strategy.get("identifier_columns") or []))
         ignored = set(ignore_columns or [])
         target_specs: list[BlockingSpec] = []
+        
         for column in df.columns:
             if column in ignored:
+                continue
+            if column in explicit_identifiers:
                 continue
             descriptor = infer_column_semantics(
                 column,
                 explicit_semantics=column_semantics,
                 semantic_profile=dedup_input.semantic_profile,
             )
+            if descriptor_is_hard_identifier(descriptor):
+                continue
+            
             family = resolve_name_family(descriptor)
             if family not in {"organization_name", "person_name", "address"}:
                 continue
@@ -1356,8 +1481,8 @@ class DeduplicationAgent(BaseAgent):
                 target_blocking_specs=[
                     spec.spec_id for spec in target_specs if self._resolve_internal_execution_family(spec.comparison_intent) == "organization_name"
                 ],
-                support_columns=support_columns[:3],
-                reject_columns=reject_columns[:2],
+                support_columns=support_columns,
+                reject_columns=reject_columns,
                 minimum_support_matches=1,
                 hard_reject_on_conflict=True,
             ),
@@ -1365,8 +1490,8 @@ class DeduplicationAgent(BaseAgent):
                 target_blocking_specs=[
                     spec.spec_id for spec in target_specs if self._resolve_internal_execution_family(spec.comparison_intent) == "person_name"
                 ],
-                support_columns=support_columns[:3],
-                reject_columns=reject_columns[:2],
+                support_columns=support_columns,
+                reject_columns=reject_columns,
                 minimum_support_matches=1,
                 hard_reject_on_conflict=True,
             ),
@@ -1374,17 +1499,17 @@ class DeduplicationAgent(BaseAgent):
                 target_blocking_specs=[
                     spec.spec_id for spec in target_specs if self._resolve_internal_execution_family(spec.comparison_intent) == "address"
                 ],
-                support_columns=support_columns[:3],
-                reject_columns=reject_columns[:2],
+                support_columns=support_columns,
+                reject_columns=reject_columns,
                 minimum_support_matches=1,
                 hard_reject_on_conflict=False,
             ),
             EvidenceSpec(
                 target_blocking_specs=[
-                    spec.spec_id for spec in target_specs if self._resolve_internal_execution_family(spec.comparison_intent) == "person_name"
+                    spec.spec_id for spec in target_specs if self._resolve_internal_execution_family(spec.comparison_intent) not in {"organization_name", "person_name", "address"}
                 ],
-                support_columns=support_columns[:3],
-                reject_columns=reject_columns[:2],
+                support_columns=support_columns,
+                reject_columns=reject_columns,
                 minimum_support_matches=1,
                 hard_reject_on_conflict=True,
             ),
