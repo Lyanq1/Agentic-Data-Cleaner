@@ -263,7 +263,7 @@ export const UploadView: React.FC<UploadViewProps> = ({
       <div className="space-y-6">
         {/* Upload form Panel */}
         {!profileData && (
-          <div className="rounded-xl border bg-card text-card-foreground shadow-sm max-w-2xl mx-auto w-full">
+          <div className="glass-panel text-card-foreground max-w-2xl mx-auto w-full">
             <form onSubmit={handleUpload} className="p-6 space-y-6">
               <div className="space-y-2">
                 <label className="text-sm font-semibold text-slate-800">
@@ -271,7 +271,7 @@ export const UploadView: React.FC<UploadViewProps> = ({
                 </label>
                 {!file ? (
                   <div 
-                    className="border-2 border-dashed border-slate-200 rounded-xl p-8 flex flex-col items-center justify-center text-center cursor-pointer hover:bg-slate-50/50 hover:border-primary/45 transition-all duration-300 group" 
+                    className="border-2 border-dashed border-primary/20 dark:border-white/20 rounded-xl p-8 flex flex-col items-center justify-center text-center cursor-pointer hover:bg-primary/5 hover:border-primary/50 transition-all duration-300 group" 
                     onClick={() => document.getElementById('file-upload')?.click()}
                     onDragOver={(e) => {
                       e.preventDefault();
@@ -305,7 +305,7 @@ export const UploadView: React.FC<UploadViewProps> = ({
                     />
                   </div>
                 ) : (
-                  <div className="relative p-4 rounded-xl border bg-slate-50/45 flex items-center space-x-3 border-slate-100">
+                  <div className="relative p-4 rounded-xl border border-primary/20 dark:border-white/10 bg-primary/5 flex items-center space-x-3">
                     <div className="bg-primary/10 p-2.5 rounded-lg">
                       <FileText className="h-5 w-5 text-primary" />
                     </div>
@@ -455,10 +455,10 @@ export const UploadView: React.FC<UploadViewProps> = ({
         {profileData && (
           <div className="space-y-6 animate-fade-in">
             {/* Navigation and Actions */}
-            <div className="flex flex-col md:flex-row items-start md:items-center justify-between bg-card p-4 rounded-xl border shadow-sm gap-4">
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between glass-panel p-4 gap-4">
               <div className="flex items-center space-x-4">
                 {/* Active Tab triggers */}
-                <div className="inline-flex rounded-lg border bg-muted p-1">
+                <div className="inline-flex rounded-lg border border-white/10 bg-black/5 dark:bg-white/5 p-1">
                   <button
                     onClick={() => setActiveTab('profile')}
                     className={`inline-flex items-center space-x-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition-all ${

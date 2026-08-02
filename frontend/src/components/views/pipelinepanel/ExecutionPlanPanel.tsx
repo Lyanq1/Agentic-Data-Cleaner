@@ -33,11 +33,11 @@ const VALIDATOR_META = {
 };
 
 const statusStyles: Record<string, string> = {
-  completed: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  running: "bg-blue-50 text-blue-700 border-blue-200",
-  pending: "bg-slate-50 text-slate-500 border-slate-200",
-  skipped: "bg-slate-100 text-slate-500 border-slate-200",
-  failed: "bg-rose-50 text-rose-700 border-rose-200",
+  completed: "status-ring-completed",
+  running: "status-ring-running",
+  pending: "status-ring-pending",
+  skipped: "status-ring-skipped",
+  failed: "status-ring-error",
 };
 
 type FlowStep = {
@@ -96,9 +96,13 @@ const buildExecutionFlow = (
       cardClass: meta.cardClass,
     });
 
-    const validatorStatus = task?.skip
-      ? "skipped"
-      : getValidatorStatus(meta.taskId, validationResults);
+    let validatorStatus = "pending";
+    if (task?.skip) {
+      validatorStatus = "skipped";
+    } else if (workerStatus === "completed") {
+      validatorStatus = getValidatorStatus(meta.taskId, validationResults);
+    }
+
     steps.push({
       id: `${meta.taskId}-validator`,
       kind: "Validator",
@@ -118,12 +122,12 @@ const buildExecutionFlow = (
     kindClass: "text-slate-700",
     label: "Report",
     description: "Summarize final lineage version and validation outcomes.",
-    statusLabel: reportReady ? "ready" : "pending",
+    statusLabel: reportReady ? "completed" : "pending",
     statusClass:
       reportReady
-        ? "bg-indigo-50 text-indigo-700 border-indigo-200"
+        ? "status-ring-completed"
         : statusStyles.pending,
-    cardClass: "bg-slate-50 border-slate-200",
+    cardClass: "",
   });
 
   return steps;
@@ -153,49 +157,94 @@ export const WorkerValidatorFlow: React.FC<{
   );
 
   return (
-    <div className="rounded-xl bg-white border p-5 shadow-sm">
+    <div className="rounded-xl glass-panel p-5">
       <div className="flex items-start justify-between gap-3 mb-4">
         <div>
           <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
             Worker / Validator Flow
           </h4>
-          <p className="text-xs text-slate-500 mt-1">
+          <p className="text-xs text-foreground/60 mt-1">
             Mirrors the backend graph: each worker writes a new data version, then Pandera validates before the next worker runs.
           </p>
         </div>
-        <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+        <span className="rounded-full border border-white/20 bg-background/50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
           Sequential
         </span>
       </div>
 
-      <div className="flex flex-wrap items-stretch gap-2">
-        {flowSteps.map((step, idx) => (
-          <React.Fragment key={`${step.id}-${idx}`}>
-            <div
-              className={`min-w-[150px] flex-1 rounded-xl border p-3 ${step.cardClass}`}
-            >
-              <div className="flex items-center justify-between gap-2">
-                <span className={`text-[10px] font-bold uppercase tracking-wider ${step.kindClass}`}>
-                  {step.kind}
-                </span>
-                <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase ${step.statusClass}`}>
-                  {step.statusLabel}
-                </span>
+      <div className="relative py-6 w-full">
+        <div 
+          className="grid w-full relative z-10 px-2 sm:px-4"
+          style={{ gridTemplateColumns: `repeat(${flowSteps.length}, minmax(0, 1fr))` }}
+        >
+          {flowSteps.map((step, idx) => {
+            const isCompleted = step.statusLabel === "completed";
+            const isRunning = step.statusLabel === "running";
+            const isFailed = step.statusLabel === "failed";
+            const isSkipped = step.statusLabel === "skipped";
+            
+            // Should the line going OUT of this node be highlighted?
+            // A skipped node's line should only highlight if the pipeline has physically moved past it.
+            const hasActiveNodeAfter = flowSteps.some(
+              (s, sIdx) => sIdx > idx && ["running", "completed", "failed"].includes(s.statusLabel)
+            );
+            const lineHighlight = isCompleted || (isSkipped && hasActiveNodeAfter);
+
+            return (
+              <div key={`${step.id}-${idx}`} className="flex flex-col items-center relative group w-full">
+                {/* Connecting Line to next node */}
+                {idx < flowSteps.length - 1 && (
+                  <div 
+                    className={`absolute top-4 left-[50%] w-full h-[2px] -z-10 transition-colors duration-500
+                      ${lineHighlight ? 'bg-primary dark:bg-primary/80' : 'bg-slate-200 dark:bg-white/10'}
+                    `} 
+                  />
+                )}
+
+                {/* Node Dot */}
+                <div className="flex items-center justify-center h-8 relative mb-3">
+                  {isCompleted || isSkipped ? (
+                    <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] text-white shadow-md z-10 transition-all duration-300
+                      ${isCompleted ? 'bg-primary shadow-primary/40' : 'bg-slate-300 dark:bg-slate-700 shadow-none opacity-80'}
+                    `}>
+                        {isCompleted ? '✓' : '—'}
+                    </div>
+                  ) : isFailed ? (
+                    <div className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] text-white bg-destructive shadow-md shadow-destructive/40 z-10">
+                        ✕
+                    </div>
+                  ) : isRunning ? (
+                    <div className="w-8 h-8 rounded-full border border-primary/30 bg-primary/10 flex items-center justify-center z-10 shadow-[0_0_15px_rgba(var(--color-primary),0.3)] backdrop-blur-sm relative">
+                      <div className="absolute inset-0 rounded-full animate-ping bg-primary/20" />
+                      <div className="w-5 h-5 rounded-full bg-background flex items-center justify-center border border-primary/50 text-xs text-primary font-bold shadow-inner">
+                          {idx + 1}
+                      </div>
+                    </div>
+                  ) : (
+                    /* Pending Node: No background circle, just the number resting on the line hole */
+                    <div className="w-6 h-6 bg-background rounded-full flex items-center justify-center text-xs font-semibold text-muted-foreground/40 z-10 border border-background">
+                      {idx + 1}
+                    </div>
+                  )}
+                </div>
+
+                {/* Text Container */}
+                <div className="text-center flex flex-col items-center max-w-[85px]">
+                  <span className={`text-[8px] sm:text-[9px] uppercase tracking-widest font-bold mb-0.5 transition-colors
+                    ${isRunning || isCompleted ? 'text-primary/70 dark:text-primary/90' : isFailed ? 'text-destructive/70' : 'text-muted-foreground/40'}
+                  `}>
+                    {step.kind}
+                  </span>
+                  <span className={`text-[10px] sm:text-[11px] font-medium leading-tight text-center px-1 transition-colors
+                    ${isRunning ? 'text-foreground font-bold' : isCompleted || isSkipped ? 'text-foreground/80' : isFailed ? 'text-destructive' : 'text-muted-foreground/50'}
+                  `}>
+                    {step.label}
+                  </span>
+                </div>
               </div>
-              <div className="mt-2 text-sm font-bold text-slate-800">
-                {step.label}
-              </div>
-              <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
-                {step.description}
-              </p>
-            </div>
-            {idx < flowSteps.length - 1 && (
-              <div className="hidden md:flex items-center justify-center text-slate-300 font-mono text-lg px-1">
-                -&gt;
-              </div>
-            )}
-          </React.Fragment>
-        ))}
+            );
+          })}
+        </div>
       </div>
     </div>
   );

@@ -1,7 +1,5 @@
 @import "tailwindcss";
-
 @plugin "tailwindcss-animate";
-
 @custom-variant dark (&:is(.dark *));
 
 @theme {
@@ -33,6 +31,7 @@
   --color-input: hsl(var(--input));
   --color-ring: hsl(var(--ring));
 
+  --radius-xl: calc(var(--radius) + 4px);
   --radius-lg: var(--radius);
   --radius-md: calc(var(--radius) - 2px);
   --radius-sm: calc(var(--radius) - 4px);
@@ -40,15 +39,17 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    /* Base Colors - "Frosted Pearl" for Light Mode */
+    --background: 220 33% 98%;      
+    --foreground: 222.2 47.4% 11.2%;
 
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+    --card: 220 33% 99%;
+    --card-foreground: 222.2 47.4% 11.2%;
 
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
+    --popover: 220 33% 99%;
+    --popover-foreground: 222.2 47.4% 11.2%;
 
+    /* Primary: Clean Azure / Indigo */
     --primary: 221.2 83.2% 53.3%;
     --primary-foreground: 210 40% 98%;
 
@@ -68,17 +69,18 @@
     --input: 214.3 31.8% 91.4%;
     --ring: 221.2 83.2% 53.3%;
 
-    --radius: 0.5rem;
+    --radius: 0.75rem; /* Smoother corners by default */
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
+    /* Base Colors - "Deep Ocean" for Dark Mode */
+    --background: 222 47% 7%;
     --foreground: 210 40% 98%;
 
-    --card: 222.2 84% 4.9%;
+    --card: 222 47% 9%;
     --card-foreground: 210 40% 98%;
 
-    --popover: 222.2 84% 4.9%;
+    --popover: 222 47% 9%;
     --popover-foreground: 210 40% 98%;
 
     --primary: 217.2 91.2% 59.8%;
@@ -106,15 +108,24 @@
   * {
     @apply border-border;
   }
+  
   body {
-    @apply bg-background text-foreground;
+    /* Dynamic ambient gradient glowing spheres to give glass something to blur */
+    background: 
+      radial-gradient(circle at 10% 30%, hsla(270, 70%, 60%, 0.35), transparent 40%),
+      radial-gradient(circle at 80% 20%, hsla(200, 80%, 50%, 0.35), transparent 40%),
+      radial-gradient(circle at 50% 80%, hsla(320, 70%, 60%, 0.3), transparent 40%),
+      hsl(var(--background));
+    background-size: 100vw 100vh;
+    background-attachment: fixed;
+    @apply text-foreground min-h-screen font-sans;
     font-feature-settings: "rlig" 1, "calt" 1;
   }
 
   button,
   button *,
-  [role="button"],
-  [role="button"] *,
+  [role="button"]:not(.not-select-none),
+  [role="button"]:not(.not-select-none) *,
   input:is([type="button"], [type="submit"], [type="reset"]),
   summary,
   summary * {
@@ -126,8 +137,8 @@
   }
 
   .hidden-scrollbar {
-    -ms-overflow-style: none;  /* IE and Edge */
-    scrollbar-width: none;  /* Firefox */
+    -ms-overflow-style: none;
+    scrollbar-width: none;
   }
 
   .custom-scrollbar::-webkit-scrollbar {
@@ -147,180 +158,51 @@
 }
 
 @layer utilities {
-  .result-page-surface {
-    background:
-      radial-gradient(circle at 12% -8%, hsl(var(--primary) / 0.09), transparent 28rem),
-      radial-gradient(circle at 92% 10%, hsl(var(--primary) / 0.05), transparent 24rem),
-      hsl(var(--background));
+  /* Core Glassmorphism Surface */
+  .glass-panel {
+    background: rgba(255, 255, 255, 0.4);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid rgba(255, 255, 255, 0.5);
+    box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.07);
+    @apply rounded-xl dark:bg-black/30 dark:border-white/10 relative;
+  }
+  
+  /* App Header Glass */
+  .glass-header {
+    @apply bg-white/70 dark:bg-black/40 backdrop-blur-md border-b border-white/20 dark:border-white/10 shadow-[0_1px_10px_0_rgba(0,0,0,0.02)];
   }
 
-  .result-interactive {
-    transition:
-      color 180ms ease,
-      background-color 180ms ease,
-      border-color 180ms ease,
-      box-shadow 180ms ease,
-      transform 180ms ease;
+  /* Status Colors for Nodes */
+  .status-ring-running {
+    @apply ring-2 ring-primary animate-pulse bg-primary/5 dark:bg-primary/10 border-primary/20;
+  }
+  .status-ring-completed {
+    @apply bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800/50;
+  }
+  .status-ring-skipped {
+    @apply bg-amber-50 text-amber-700 border-amber-300 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800/50;
+  }
+  .status-ring-error {
+    @apply bg-rose-50 text-rose-700 border-rose-300 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800/50;
   }
 
-  .result-interactive:hover {
-    transform: translateY(-1px);
+  .status-ring-pending {
+    @apply bg-muted/30 border-dashed text-muted-foreground;
   }
 
-  .result-interactive:active {
-    transform: translateY(0) scale(0.985);
-  }
-
-  .result-surface-enter {
-    animation: result-surface-enter 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
-  }
-
-  .result-panel-enter {
-    animation: result-panel-enter 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
-  }
-
-  .result-details-enter,
-  details[open] > .result-menu-enter {
-    animation: result-details-enter 200ms ease-out both;
-  }
-
-  .result-success-pop {
-    animation: result-success-pop 420ms cubic-bezier(0.22, 1, 0.36, 1) 80ms both;
-  }
-
-  .result-stagger > * {
-    animation: result-panel-enter 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
-  }
-
-  .result-stagger > :nth-child(1) {
-    animation-delay: 90ms;
-  }
-
-  .result-stagger > :nth-child(2) {
-    animation-delay: 130ms;
-  }
-
-  .result-stagger > :nth-child(3) {
-    animation-delay: 170ms;
-  }
-
-  .result-stagger > :nth-child(4) {
-    animation-delay: 210ms;
-  }
-
-  .result-chat-enter {
-    transform-origin: bottom right;
-    animation: result-chat-enter 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
-  }
-
-  .benchmark-gauge-progress {
-    stroke-dasharray: var(--benchmark-gauge-value) 100;
-    stroke-dashoffset: 0;
-    animation: benchmark-gauge-draw 760ms cubic-bezier(0.22, 1, 0.36, 1) 120ms both;
-  }
-
-  .benchmark-metric-bar {
-    transform: scaleX(var(--benchmark-bar-scale));
-    animation: benchmark-bar-grow 620ms cubic-bezier(0.22, 1, 0.36, 1) 180ms both;
-  }
+  /* Result classes inherited from old system to prevent breakage */
+  .result-interactive:hover { transform: translateY(-1px); }
+  .result-interactive:active { transform: translateY(0) scale(0.985); }
+  .result-surface-enter { animation: result-surface-enter 320ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+  .result-panel-enter { animation: result-panel-enter 240ms cubic-bezier(0.22, 1, 0.36, 1) both; }
 }
 
 @keyframes result-surface-enter {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
 }
-
 @keyframes result-panel-enter {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes result-details-enter {
-  from {
-    opacity: 0;
-    transform: translateY(-4px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes result-success-pop {
-  0% {
-    opacity: 0;
-    transform: scale(0.82);
-  }
-  65% {
-    opacity: 1;
-    transform: scale(1.06);
-  }
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-@keyframes result-chat-enter {
-  from {
-    opacity: 0;
-    transform: translateY(12px) scale(0.97);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-@keyframes benchmark-gauge-draw {
-  from {
-    stroke-dashoffset: 100;
-  }
-  to {
-    stroke-dashoffset: 0;
-  }
-}
-
-@keyframes benchmark-bar-grow {
-  from {
-    transform: scaleX(0);
-  }
-  to {
-    transform: scaleX(var(--benchmark-bar-scale));
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .result-interactive,
-  .result-interactive:hover,
-  .result-interactive:active,
-  .result-surface-enter,
-  .result-panel-enter,
-  .result-details-enter,
-  .result-success-pop,
-  .result-stagger > *,
-  .result-chat-enter,
-  details[open] > .result-menu-enter {
-    animation: none;
-    transition: none;
-    transform: none;
-  }
-
-  .benchmark-gauge-progress,
-  .benchmark-metric-bar {
-    animation: none;
-    transition: none;
-  }
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
 }

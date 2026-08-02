@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { 
   BookOpen, 
   Layers, 
@@ -15,7 +15,8 @@ import {
   Check,
   ChevronDown,
   ChevronUp,
-  ShieldCheck
+  ShieldCheck,
+  ArrowUp
 } from 'lucide-react';
 import { formatDisplayValue } from './pipelinepanel/utils';
 
@@ -29,7 +30,39 @@ export const SemanticProfilePanel: React.FC<SemanticProfilePanelProps> = ({ prof
   const [selectedGroup, setSelectedGroup] = useState<string>('All');
   const [showThinking, setShowThinking] = useState(true); // Default open CoT logs for credibility
   const [expandedColumn, setExpandedColumn] = useState<string | null>(null);
-  const [copiedThinking, setCopiedThinking] = useState(false);
+  const [showScrollTop, setShowScrollTop] = useState(false);
+
+  useEffect(() => {
+    const handleScroll = (e: any) => {
+      const target = e.target;
+      if (target && target.scrollTop !== undefined) {
+         if (target.scrollTop > 300) {
+           setShowScrollTop(true);
+         } else {
+           setShowScrollTop(false);
+         }
+      }
+    };
+    
+    window.addEventListener('scroll', handleScroll, true);
+    return () => window.removeEventListener('scroll', handleScroll, true);
+  }, []);
+
+  const scrollToTop = () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    const el = document.getElementById('semantic-profile-top');
+    if (el) {
+      let parent = el.parentElement;
+      while (parent) {
+        const style = window.getComputedStyle(parent);
+        if (style.overflowY === 'auto' || style.overflowY === 'scroll') {
+          parent.scrollTo({ top: 0, behavior: 'smooth' });
+          break;
+        }
+        parent = parent.parentElement;
+      }
+    }
+  };
 
   // Extract logical groups from semantic profile columns
   const logicalGroups = useMemo(() => {
@@ -98,7 +131,18 @@ export const SemanticProfilePanel: React.FC<SemanticProfilePanelProps> = ({ prof
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 relative" id="semantic-profile-top">
+      {/* Scroll to Top Widget */}
+      {showScrollTop && (
+        <button
+          onClick={scrollToTop}
+          className="fixed bottom-8 right-8 z-50 p-3 rounded-full bg-blue-600 text-white shadow-lg hover:bg-blue-700 transition-all duration-300 hover:scale-110 flex items-center justify-center group"
+          title="Scroll to top"
+        >
+          <ArrowUp className="w-5 h-5 group-hover:-translate-y-1 transition-transform" />
+        </button>
+      )}
+
       {/* Overview Card */}
       <div className="bg-gradient-to-br from-indigo-50/50 via-white to-sky-50/30 rounded-xl border border-slate-200 p-6 shadow-sm text-left space-y-4">
         <div className="flex items-center space-x-3 text-indigo-700">
