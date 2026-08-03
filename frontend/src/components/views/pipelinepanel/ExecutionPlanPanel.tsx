@@ -560,6 +560,7 @@ export const ExecutionPlanPanel: React.FC<{
                       </div>
                     </div>
 
+                    {/* 
                     <div className="rounded-md border border-slate-200/60 bg-white p-3 shadow-sm">
                       <span className="block text-xs font-semibold text-slate-800">Ignored Columns</span>
                       <span className="mt-1 block text-[11px] leading-relaxed text-slate-500">
@@ -585,6 +586,7 @@ export const ExecutionPlanPanel: React.FC<{
                         })}
                       </div>
                     </div>
+                    */}
                   </div>
                 )}
               </div>
